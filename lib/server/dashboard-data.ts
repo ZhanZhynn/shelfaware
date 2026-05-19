@@ -170,7 +170,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     selfInvoiceCount,
     orderRevenueSelfSum,
   ] = await Promise.all([
-    prisma.product.count({ where: whereUser }),
+    prisma.product.count({ where: mergeProductListWhere(whereUser) }),
     prisma.supplier.count({ where: whereSuppliers }),
     prisma.category.count({ where: whereUser }),
     prisma.order.count({ where: whereStoreOrders }),

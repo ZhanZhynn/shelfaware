@@ -181,7 +181,8 @@ export const cacheKeys = {
     all: "products:all",
     list: (filters?: Record<string, unknown>) => {
       const filterStr = filters ? JSON.stringify(filters) : "default";
-      return `products:list:${filterStr}`;
+      // v2: catalog filter includes legacy rows without deletedAt (see product-query.ts)
+      return `products:list:v2:${filterStr}`;
     },
     detail: (id: string) => `products:detail:${id}`,
     pattern: "products:*",
@@ -307,7 +308,9 @@ export const cacheKeys = {
    */
   dashboard: {
     overview: (userId?: string) =>
-      userId ? `dashboard:overview:${userId}` : "dashboard:overview",
+      userId
+        ? `dashboard:overview:v2:${userId}`
+        : "dashboard:overview:v2",
     pattern: "dashboard:*",
   },
 

@@ -65,7 +65,7 @@ export async function createOrder(data: CreateOrderInput, userId: string) {
       where: { id: item.productId },
     });
 
-    if (!product || product.deletedAt) {
+    if (!product || product.deletedAt != null) {
       throw new Error(`Product not found: ${item.productId}`);
     }
 

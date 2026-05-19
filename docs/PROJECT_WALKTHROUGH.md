@@ -46,7 +46,7 @@ flowchart LR
 | Delivered/cancelled only | 200 `{ mode: "soft" }` | Archived toast; hidden from lists |
 | Never ordered | 200 `{ mode: "hard" }` | Removed from DB |
 
-- Filter: `lib/products/product-query.ts` → `deletedAt: null` on catalog queries
+- Filter: `lib/products/product-query.ts` → `deletedAt` null OR unset (legacy MongoDB rows)
 - Tests: `npm run test` (delete-policy, prisma-errors, imagekit-errors)
 
 ## 5. Sentry monitoring (implemented)
@@ -100,7 +100,7 @@ Details: `docs/Redis_Sentry_PostHog_INTEGRATION_GUIDE.md`
 | TanStack CRUD | `invalidateAllRelatedQueries` in mutation hooks |
 | Python | N/A |
 
-**Uncommitted:** hydration fix + `lib/vercel/production-headers.ts` + `vercel.json` dedupe.
+**Commit next:** product catalog fix (`isSet: false` + cache `v2` keys) — fixes empty product tables on prod.
 
 **Gaps (OK):** export filters use `toLocaleDateString` (client export only); product QR/review id lookups; archived SKU unique; Sentry `setUserContext` optional.
 

@@ -161,9 +161,9 @@ export function useDeleteSupportTicket() {
       return response.data;
     },
     onSuccess: (_data, id) => {
-      queryClient.removeQueries({
-        queryKey: queryKeys.supportTickets.detail(id),
-      });
+      const detailKey = queryKeys.supportTickets.detail(id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
       toast({
         title: "Ticket deleted",

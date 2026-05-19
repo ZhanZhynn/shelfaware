@@ -111,7 +111,7 @@ export function useLogout() {
       await apiClient.auth.logout();
     },
     onSuccess: () => {
-      // Clear all queries on logout
+      // Full cache wipe on logout (stronger than invalidate — no stale user data)
       queryClient.clear();
       toast({
         title: "Success",

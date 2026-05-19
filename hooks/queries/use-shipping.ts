@@ -15,7 +15,7 @@ import type {
 } from "@/types";
 
 /**
- * Get shipping rates
+ * Get shipping rates (read-only Shippo quote — no DB/cache; no invalidate needed)
  */
 export function useGetShippingRates() {
   const { toast } = useToast();

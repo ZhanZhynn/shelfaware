@@ -131,10 +131,10 @@ export function useDeleteCategory() {
       return { id, name: categoryName };
     },
     onSuccess: (deletedData) => {
+      const detailKey = queryKeys.categories.detail(deletedData.id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
-      queryClient.removeQueries({
-        queryKey: queryKeys.categories.detail(deletedData.id),
-      });
       toast({
         title: "Success",
         description: `Category "${deletedData.name}" deleted successfully`,

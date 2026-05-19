@@ -131,10 +131,10 @@ export function useDeleteSupplier() {
       return { id, name: supplierName };
     },
     onSuccess: (deletedData) => {
+      const detailKey = queryKeys.suppliers.detail(deletedData.id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
-      queryClient.removeQueries({
-        queryKey: queryKeys.suppliers.detail(deletedData.id),
-      });
       toast({
         title: "Success",
         description: `Supplier "${deletedData.name}" deleted successfully`,

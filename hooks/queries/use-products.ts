@@ -39,8 +39,12 @@ export function useProduct(productId: string) {
       const response = await apiClient.products.getById(productId);
       return response.data;
     },
-    // Only fetch if productId is provided
     enabled: !!productId,
+    // Archived/removed products return 404 — do not retry (avoids console noise)
+    retry: (failureCount, error) => {
+      if (isAxiosError(error) && error.response?.status === 404) return false;
+      return failureCount < 2;
+    },
   });
 }
 
@@ -138,10 +142,11 @@ export function useDeleteProduct() {
       return { id, name: productName, mode };
     },
     onSuccess: (deletedData) => {
+      const detailKey = queryKeys.products.detail(deletedData.id);
+      // Cancel/remove before broad invalidation — archived/hard-deleted detail must not refetch (404)
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
-      queryClient.removeQueries({
-        queryKey: queryKeys.products.detail(deletedData.id),
-      });
       toast({
         title: "Success",
         description:

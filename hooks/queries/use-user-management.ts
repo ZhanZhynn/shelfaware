@@ -105,9 +105,9 @@ export function useDeleteUser() {
       return response.data;
     },
     onSuccess: (data: UserForAdmin) => {
-      queryClient.removeQueries({
-        queryKey: queryKeys.userManagement.detail(data.id),
-      });
+      const detailKey = queryKeys.userManagement.detail(data.id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
       toast({
         title: "User deleted",

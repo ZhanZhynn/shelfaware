@@ -1,6 +1,6 @@
 /**
  * Import History (Admin History) query hooks
- * TanStack Query hooks for import history data fetching
+ * Read-only; new rows arrive via product import — invalidateAllRelatedQueries uses history.all
  */
 
 import { useQuery } from "@tanstack/react-query";

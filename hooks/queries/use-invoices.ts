@@ -195,10 +195,9 @@ export function useDeleteInvoice() {
       await apiClient.invoices.delete(invoiceId);
     },
     onSuccess: (_, invoiceId) => {
-      // Remove the deleted invoice from the cache
-      queryClient.removeQueries({
-        queryKey: queryKeys.invoices.detail(invoiceId),
-      });
+      const detailKey = queryKeys.invoices.detail(invoiceId);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
 
       toast({

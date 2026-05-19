@@ -143,7 +143,9 @@ export function useDeleteOrder() {
       return response.data;
     },
     onSuccess: (data: Order) => {
-      queryClient.removeQueries({ queryKey: queryKeys.orders.detail(data.id) });
+      const detailKey = queryKeys.orders.detail(data.id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
 
       // Show success toast

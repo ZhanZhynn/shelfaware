@@ -124,10 +124,10 @@ export function useDeleteWarehouse() {
       return { id, name: warehouseName };
     },
     onSuccess: (deletedData) => {
+      const detailKey = queryKeys.warehouses.detail(deletedData.id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
-      queryClient.removeQueries({
-        queryKey: queryKeys.warehouses.detail(deletedData.id),
-      });
       toast({
         title: "Success",
         description: `Warehouse "${deletedData.name}" deleted successfully`,

@@ -245,8 +245,9 @@ export default function AddProductDialog({
                 <label className="text-sm font-medium text-white/80">
                   Category
                 </label>
+                {/* Always string value — avoids controlled/uncontrolled flip from `|| undefined` */}
                 <Select
-                  value={selectedCategory || undefined}
+                  value={selectedCategory}
                   onValueChange={(value) => setSelectedCategory(value)}
                 >
                   <SelectTrigger className="h-11 w-full border-rose-400/30 dark:border-white/20 bg-white/10 dark:bg-white/5 backdrop-blur-sm text-white placeholder:text-white/40 focus:border-rose-400 focus:ring-rose-500/50 shadow-[0_10px_30px_rgba(225,29,72,0.15)]">
@@ -275,7 +276,7 @@ export default function AddProductDialog({
                   Supplier
                 </label>
                 <Select
-                  value={selectedSupplier || undefined}
+                  value={selectedSupplier}
                   onValueChange={(value) => setSelectedSupplier(value)}
                 >
                   <SelectTrigger className="h-11 w-full border-rose-400/30 dark:border-white/20 bg-white/10 dark:bg-white/5 backdrop-blur-sm text-white placeholder:text-white/40 focus:border-rose-400 focus:ring-rose-500/50 shadow-[0_10px_30px_rgba(225,29,72,0.15)]">

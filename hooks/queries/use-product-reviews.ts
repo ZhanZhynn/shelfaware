@@ -140,9 +140,9 @@ export function useDeleteProductReview() {
       return response.data;
     },
     onSuccess: (_data, id) => {
-      queryClient.removeQueries({
-        queryKey: queryKeys.productReviews.detail(id),
-      });
+      const detailKey = queryKeys.productReviews.detail(id);
+      void queryClient.cancelQueries({ queryKey: detailKey });
+      queryClient.removeQueries({ queryKey: detailKey });
       invalidateAllRelatedQueries(queryClient);
       toast({
         title: "Review deleted",

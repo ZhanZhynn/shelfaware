@@ -106,6 +106,11 @@ export async function queueEmailNotification(
   }
 }
 
+export type SendEmailDirectlyOptions = {
+  /** When true (QStash webhook), rethrow so the route returns 500 and QStash can retry. */
+  propagateErrors?: boolean;
+};
+
 /**
  * Send email directly (fallback when QStash is not available)
  * Also used by webhook handler to process queued emails
@@ -113,15 +118,10 @@ export async function queueEmailNotification(
  * @param job - Email queue job payload
  * @returns Promise<void> - Resolves when email is sent
  */
-/**
- * Send email directly (internal function used by queue handler)
- * This function sends emails without going through the queue
- * Used by webhook handler to process queued emails
- *
- * @param job - Email queue job payload
- * @returns Promise<void> - Resolves when email is sent
- */
-export async function sendEmailDirectly(job: EmailQueueJob): Promise<void> {
+export async function sendEmailDirectly(
+  job: EmailQueueJob,
+  options?: SendEmailDirectlyOptions,
+): Promise<void> {
   // Check if Brevo is configured
   if (!isBrevoConfigured()) {
     logger.warn("Brevo email service is not configured, skipping email", {
@@ -293,13 +293,22 @@ export async function sendEmailDirectly(job: EmailQueueJob): Promise<void> {
         }
         break;
       }
-      default:
+      default: {
+        const message = `Unknown email queue job type: ${String(job.type)}`;
         logger.error("Unknown email queue job type", { type: job.type });
+        if (options?.propagateErrors) {
+          throw new Error(message);
+        }
+        break;
+      }
     }
   } catch (error) {
     logger.error("Failed to send email directly", {
       error: error instanceof Error ? error.message : "Unknown error",
       type: job.type,
     });
+    if (options?.propagateErrors) {
+      throw error;
+    }
   }
 }

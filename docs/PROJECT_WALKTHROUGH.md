@@ -80,8 +80,8 @@ flowchart LR
 | Service | Lib / entry                            | Env (optional)                  |
 | ------- | -------------------------------------- | ------------------------------- |
 | Redis   | `lib/cache/redis.ts`, `cache-utils.ts` | `UPSTASH_REDIS_*`               |
-| QStash  | `lib/queue/qstash.ts`                  | `QSTASH_*`                      |
-| Email   | `lib/email/`                           | `BREVO_*`                       |
+| QStash  | `lib/queue/qstash.ts`, `lib/queue/qstash-webhook.ts` | `QSTASH_*` (incl. signing keys) |
+| Email   | `lib/email/queue.ts` → webhook `app/api/email/queue/process/route.ts` | `BREVO_*`, `NEXT_PUBLIC_API_URL` |
 | Stripe  | `lib/stripe/`                          | `STRIPE_*`                      |
 | PostHog | Not implemented                        | See integration guide checklist |
 
@@ -99,15 +99,35 @@ Details: `docs/Redis_Sentry_PostHog_INTEGRATION_GUIDE.md`
 
 **Rules:** new mutation hook → `invalidateAllRelatedQueries` on success (or document exception). New API write → server cache invalidation. New delete hook → `cancelOrRemoveDetailQuery` + broad invalidation.
 
+**Exempt webhooks (no Redis/TanStack):** `app/api/email/queue/process/route.ts`, auth, AI insights, shipping rates, notifications POST — see `API_WRITE_EXEMPT` in invalidate-coverage test.
+
+## 7b. QStash email queue (2026-05-19)
+
+```mermaid
+flowchart LR
+  CRUD[Stock/order events] --> Queue[queueEmailNotification]
+  Queue --> QStash[QStash publishJSON]
+  QStash --> WH[POST /api/email/queue/process]
+  WH --> Verify[verifyQStashWebhook raw body]
+  Verify --> Parse[parseEmailQueueJob]
+  Parse --> Send[sendEmailDirectly propagateErrors]
+  Send --> Brevo[Brevo API]
+```
+
+- **Fix:** request body consumed once (`text()` → verify → `JSON.parse`); fixes Sentry `Body has already been read`
+- **Security:** `Receiver.verify` with `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY`
+- **Retries:** webhook 500 on send failure → QStash retries; direct fallback in `queueEmailNotification` still logs-only on error
+
 ## 8. Quality gates (audit 2026-05-19)
 
 | Check | Status |
 |-------|--------|
 | `npm run lint` | pass |
 | `npm run build` | pass |
-| `npm run test` | 206 passed |
-| `npm run test:invalidate` | ~191 passed |
+| `npm run test` | 217 passed |
+| `npm run test:invalidate` | 200 passed |
 | Product delete | soft/hard/409 + no post-delete GET 404 on detail |
+| QStash email webhook | single body read + Receiver + tests in `qstash-webhook.test.ts` |
 | Sentry | `/api/monitoring` tunnel |
 | Hydration | `ClientDateDisplay`, `format-stable.ts` |
 | Vercel headers | `lib/vercel/production-headers.ts` |
@@ -115,7 +135,7 @@ Details: `docs/Redis_Sentry_PostHog_INTEGRATION_GUIDE.md`
 
 **Gaps (OK):** Sentry user context optional; archived SKU unique; export-only `toLocaleDateString`.
 
-**Manual QA:** soft-delete from product detail (1 DELETE, no GET 404); cross-page list refresh without reload.
+**Manual QA:** soft-delete from product detail (1 DELETE, no GET 404); cross-page list refresh without reload; prod email queue after deploy (no Sentry body-read error).
 
 ## 9. When changing code
 

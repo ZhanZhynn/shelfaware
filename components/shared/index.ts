@@ -15,6 +15,11 @@ export type {
   UseDeferredRadixSelectOptions,
   UseDeferredRadixSelectResult,
 } from "@/hooks/use-deferred-radix-select";
+export { DeferredSelectGate } from "./DeferredSelectGate";
+export type {
+  DeferredSelectGateProps,
+  DeferredSelectGateRenderProps,
+} from "./DeferredSelectGate";
 export { NotificationBell } from "./NotificationBell";
 export { NotificationDropdown } from "./NotificationDropdown";
 export { HelpTooltip } from "./HelpTooltip";

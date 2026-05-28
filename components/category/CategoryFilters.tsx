@@ -12,6 +12,7 @@ import { FiFileText, FiGrid } from "react-icons/fi";
 import { IoClose } from "react-icons/io5";
 import { Search, Download, ChevronDown } from "lucide-react";
 import ExcelJS from "exceljs";
+import { DeferredSelectGate } from "@/components/shared";
 import { PaginationType } from "@/components/shared/PaginationSelector";
 import {
   Select,
@@ -253,25 +254,48 @@ export default function CategoryFilters({
 
         {/* Filters - Middle (Status Filter) */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          <Select
-            value={statusFilter}
-            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+          <DeferredSelectGate
+            placeholder={
+              <div
+                className="h-10 w-full sm:w-[180px] rounded-[28px] border border-sky-400/30 bg-gradient-to-r from-sky-500/25 via-sky-500/15 to-sky-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(2,132,199,0.2)] font-medium flex items-center justify-between px-3 py-2.5 text-sm"
+                aria-hidden
+              >
+                <span>
+                  {statusFilter === "all"
+                    ? "All Categories"
+                    : statusFilter === "active"
+                      ? "Active"
+                      : "Inactive"}
+                </span>
+                <ChevronDown className="h-4 w-4 opacity-70" />
+              </div>
+            }
           >
-            <SelectTrigger className="h-10 w-full sm:w-[180px] rounded-[28px] border border-sky-400/30 dark:border-sky-400/30 bg-gradient-to-r from-sky-500/25 via-sky-500/15 to-sky-500/10 dark:from-sky-500/25 dark:via-sky-500/15 dark:to-sky-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(2,132,199,0.2)] backdrop-blur-sm transition duration-200 hover:border-sky-300/40 hover:from-sky-500/35 hover:via-sky-500/25 hover:to-sky-500/15 dark:hover:border-sky-300/40 dark:hover:from-sky-500/35 dark:hover:via-sky-500/25 dark:hover:to-sky-500/15 font-medium">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent className="rounded-[28px] border border-sky-400/20 dark:border-white/10 bg-white/80 dark:bg-popover/50 backdrop-blur-sm shadow-[0_10px_30px_rgba(2,132,199,0.15)]">
-              <SelectItem value="all" className="text-gray-700 dark:text-white/80 focus:bg-sky-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white">
-                All Categories
-              </SelectItem>
-              <SelectItem value="active" className="text-gray-700 dark:text-white/80 focus:bg-sky-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white">
-                Active
-              </SelectItem>
-              <SelectItem value="inactive" className="text-gray-700 dark:text-white/80 focus:bg-sky-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white">
-                Inactive
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            {({ selectRemountKey }) => (
+              <Select
+                key={selectRemountKey}
+                value={statusFilter}
+                onValueChange={(value) =>
+                  setStatusFilter(value as StatusFilter)
+                }
+              >
+                <SelectTrigger className="h-10 w-full sm:w-[180px] rounded-[28px] border border-sky-400/30 dark:border-sky-400/30 bg-gradient-to-r from-sky-500/25 via-sky-500/15 to-sky-500/10 dark:from-sky-500/25 dark:via-sky-500/15 dark:to-sky-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(2,132,199,0.2)] backdrop-blur-sm transition duration-200 hover:border-sky-300/40 hover:from-sky-500/35 hover:via-sky-500/25 hover:to-sky-500/15 dark:hover:border-sky-300/40 dark:hover:from-sky-500/35 dark:hover:via-sky-500/25 dark:hover:to-sky-500/15 font-medium">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent className="rounded-[28px] border border-sky-400/20 dark:border-white/10 bg-white/80 dark:bg-popover/50 backdrop-blur-sm shadow-[0_10px_30px_rgba(2,132,199,0.15)]">
+                  <SelectItem value="all" className="text-gray-700 dark:text-white/80 focus:bg-sky-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white">
+                    All Categories
+                  </SelectItem>
+                  <SelectItem value="active" className="text-gray-700 dark:text-white/80 focus:bg-sky-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white">
+                    Active
+                  </SelectItem>
+                  <SelectItem value="inactive" className="text-gray-700 dark:text-white/80 focus:bg-sky-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white">
+                    Inactive
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </DeferredSelectGate>
         </div>
 
         {/* Export Dropdown - Right */}

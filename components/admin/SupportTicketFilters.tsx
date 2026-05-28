@@ -5,7 +5,8 @@
 
 "use client";
 
-import React, { useState, useLayoutEffect } from "react";
+import React from "react";
+import { DeferredSelectGate } from "@/components/shared";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search } from "lucide-react";
@@ -63,12 +64,6 @@ export default function SupportTicketFilters({
   viewFilter = "all",
   onViewFilterChange,
 }: SupportTicketFiltersProps) {
-  const [viewSelectMounted, setViewSelectMounted] = useState(false);
-  useLayoutEffect(() => {
-    const t = setTimeout(() => setViewSelectMounted(true), 0);
-    return () => clearTimeout(t);
-  }, []);
-
   const statusTriggerClass =
     "h-10 rounded-[28px] border border-rose-400/30 dark:border-rose-400/30 bg-gradient-to-r from-rose-500/25 via-rose-500/15 to-rose-500/10 dark:from-rose-500/25 dark:via-rose-500/15 dark:to-rose-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(225,29,72,0.2)] backdrop-blur-sm transition duration-200 hover:border-rose-300/40 hover:from-rose-500/35 hover:via-rose-500/25 hover:to-rose-500/15 dark:hover:border-rose-300/40 dark:hover:from-rose-500/35 dark:hover:via-rose-500/25 dark:hover:to-rose-500/15";
   const priorityTriggerClass =
@@ -95,34 +90,47 @@ export default function SupportTicketFilters({
           </Button>
         )}
       </div>
-      {onViewFilterChange &&
-        (!viewSelectMounted ? (
-          <div
-            className="h-10 w-[180px] rounded-[28px] border border-violet-400/30 dark:border-violet-400/30 bg-white/10 dark:bg-white/5 text-gray-900 dark:text-white flex items-center justify-between px-3 py-2"
-            aria-hidden
-          >
-            <span>{VIEW_OPTIONS.find((o) => o.value === viewFilter)?.label ?? "View"}</span>
-            <ChevronDown className="h-4 w-4 opacity-70" />
-          </div>
-        ) : (
-          <Select
-            value={viewFilter}
-            onValueChange={(v) => onViewFilterChange(v as SupportTicketViewFilter)}
-          >
-            <SelectTrigger
-              className="h-10 w-[180px] rounded-[28px] border border-violet-400/30 dark:border-violet-400/30 bg-white/10 dark:bg-white/5 text-gray-900 dark:text-white"
+      {onViewFilterChange && (
+        <DeferredSelectGate
+          placeholder={
+            <div
+              className="h-10 w-[180px] rounded-[28px] border border-violet-400/30 bg-white/10 dark:bg-white/5 text-gray-900 dark:text-white flex items-center justify-between px-3 py-2"
+              aria-hidden
             >
-              <SelectValue placeholder="View" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-violet-400/20">
-              {VIEW_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ))}
+              <span>
+                {VIEW_OPTIONS.find((o) => o.value === viewFilter)?.label ??
+                  "View"}
+              </span>
+              <ChevronDown className="h-4 w-4 opacity-70" />
+            </div>
+          }
+        >
+          {({ selectRemountKey }) => (
+            <Select
+              key={selectRemountKey}
+              value={viewFilter}
+              onValueChange={(v) =>
+                onViewFilterChange(v as SupportTicketViewFilter)
+              }
+            >
+              <SelectTrigger className="h-10 w-[180px] rounded-[28px] border border-violet-400/30 dark:border-violet-400/30 bg-white/10 dark:bg-white/5 text-gray-900 dark:text-white">
+                <SelectValue placeholder="View" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-violet-400/20">
+                {VIEW_OPTIONS.map((opt) => (
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    className="cursor-pointer"
+                  >
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </DeferredSelectGate>
+      )}
       <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
         <FilterDropdown
           selectedValues={selectedStatuses}

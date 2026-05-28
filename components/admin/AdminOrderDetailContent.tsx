@@ -41,6 +41,7 @@ import { useOrder, useUpdateOrder, useDeleteOrder } from "@/hooks/queries";
 import {
   ClientDateTime,
   ClientRelativeTime,
+  DeferredSelectGate,
   PageContentWrapper,
 } from "@/components/shared";
 import { useToast } from "@/hooks/use-toast";
@@ -461,22 +462,39 @@ export default function AdminOrderDetailContent({
               >
                 {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
               </Badge>
-              <Select
-                value={order.status}
-                onValueChange={(v) => handleStatusChange(v as OrderStatus)}
-                disabled={isUpdating}
+              <DeferredSelectGate
+                placeholder={
+                  <div
+                    className="w-[130px] h-8 text-xs border border-gray-300/30 dark:border-white/10 rounded-md flex items-center px-2 text-gray-700 dark:text-white/80"
+                    aria-hidden
+                  >
+                    {ORDER_STATUSES.find((o) => o.value === order.status)
+                      ?.label ?? order.status}
+                  </div>
+                }
               >
-                <SelectTrigger className="w-[130px] h-8 text-xs border-gray-300/30 dark:border-white/10">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ORDER_STATUSES.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {({ selectRemountKey }) => (
+                  <Select
+                    key={selectRemountKey}
+                    value={order.status}
+                    onValueChange={(v) =>
+                      handleStatusChange(v as OrderStatus)
+                    }
+                    disabled={isUpdating}
+                  >
+                    <SelectTrigger className="w-[130px] h-8 text-xs border-gray-300/30 dark:border-white/10">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ORDER_STATUSES.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </DeferredSelectGate>
             </div>
           </GlassCard>
           <GlassCard variant="emerald">
@@ -933,25 +951,41 @@ export default function AdminOrderDetailContent({
                       >
                         Carrier
                       </Label>
-                      <Select
-                        value={manualCarrier}
-                        onValueChange={setManualCarrier}
-                        disabled={isUpdating}
+                      <DeferredSelectGate
+                        placeholder={
+                          <div
+                            id="admin-carrier"
+                            className="h-10 rounded-xl border border-gray-300/30 dark:border-white/10 flex items-center px-3 text-sm text-gray-700 dark:text-white/80"
+                            aria-hidden
+                          >
+                            {CARRIERS.find((c) => c.value === manualCarrier)
+                              ?.label ?? manualCarrier}
+                          </div>
+                        }
                       >
-                        <SelectTrigger
-                          id="admin-carrier"
-                          className="rounded-xl border-gray-300/30 dark:border-white/10"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CARRIERS.map((c) => (
-                            <SelectItem key={c.value} value={c.value}>
-                              {c.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        {({ selectRemountKey }) => (
+                          <Select
+                            key={selectRemountKey}
+                            value={manualCarrier}
+                            onValueChange={setManualCarrier}
+                            disabled={isUpdating}
+                          >
+                            <SelectTrigger
+                              id="admin-carrier"
+                              className="rounded-xl border-gray-300/30 dark:border-white/10"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CARRIERS.map((c) => (
+                                <SelectItem key={c.value} value={c.value}>
+                                  {c.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </DeferredSelectGate>
                     </div>
                     <div className="flex items-end">
                       <Button

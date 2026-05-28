@@ -739,18 +739,33 @@ export default function BusinessInsightPage({
       });
       const data = await res.json();
       if (!res.ok) {
+        const errMsg =
+          typeof data?.error === "string" ? data.error : "Please try again.";
+        const code =
+          typeof data?.details?.code === "string"
+            ? data.details.code
+            : undefined;
+
         if (res.status === 503) {
           setAiInsightsUnavailable(true);
-          toast({
-            title: "AI insights not configured",
-            description:
-              "Set OPENROUTER_API_KEY in .env to enable AI-powered insights.",
-            variant: "destructive",
-          });
+          if (code === "OPENROUTER_BILLING") {
+            toast({
+              title: "AI credits exhausted",
+              description: errMsg,
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "AI insights not configured",
+              description:
+                "Set OPENROUTER_API_KEY in .env to enable AI-powered insights.",
+              variant: "destructive",
+            });
+          }
         } else {
           toast({
             title: "Failed to generate insights",
-            description: data?.error ?? "Please try again.",
+            description: errMsg,
             variant: "destructive",
           });
         }

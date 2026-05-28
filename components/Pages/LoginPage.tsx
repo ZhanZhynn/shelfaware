@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
+import { DeferredSelectGate } from "@/components/shared";
 import { useAuth } from "@/contexts";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
@@ -45,13 +46,8 @@ export default function LoginPage() {
   const [selectedRole, setSelectedRole] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [isNavigatingToHome, setIsNavigatingToHome] = useState(false);
-  const [selectMounted, setSelectMounted] = useState(false);
   const { login, isLoggedIn, user } = useAuth();
 
-  // useLayoutEffect runs before paint so the Select appears on first paint (no flash)
-  useLayoutEffect(() => {
-    setSelectMounted(true);
-  }, []);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -334,16 +330,19 @@ export default function LoginPage() {
                   <label className="text-sm font-medium text-gray-700 dark:text-white/80">
                     Test Accounts To Login With
                   </label>
-                  {!selectMounted ? (
-                    <div
-                      className="flex h-11 w-full items-center justify-between rounded-md border border-sky-400/30 dark:border-white/20 bg-white/10 dark:bg-white/5 px-3 py-2.5 text-sm text-gray-500 dark:text-white/40"
-                      aria-hidden
-                    >
-                      Select Role Based Test Account
-                    </div>
-                  ) : (
+                  <DeferredSelectGate
+                    placeholder={
+                      <div
+                        className="flex h-11 w-full items-center justify-between rounded-md border border-sky-400/30 dark:border-white/20 bg-white/10 dark:bg-white/5 px-3 py-2.5 text-sm text-gray-500 dark:text-white/40"
+                        aria-hidden
+                      >
+                        Select Role Based Test Account
+                      </div>
+                    }
+                  >
+                    {({ selectRemountKey }) => (
                     <Select
-                      key={`select-${selectedRole || "empty"}`}
+                      key={selectRemountKey}
                       value={selectedRole || undefined}
                       onValueChange={handleRoleSelect}
                     >
@@ -384,7 +383,8 @@ export default function LoginPage() {
                         )}
                       </SelectContent>
                     </Select>
-                  )}
+                    )}
+                  </DeferredSelectGate>
                 </div>
 
                 {/* Email Field */}

@@ -53,7 +53,11 @@ Provide brief, professional insights focusing on immediate actions.`;
       },
     );
 
-    return response?.choices?.[0]?.message?.content || "";
+    if (!response.ok) {
+      return "";
+    }
+
+    return response.data.choices?.[0]?.message?.content || "";
   } catch (error) {
     logger.error("Failed to generate AI insights:", error);
     return "";

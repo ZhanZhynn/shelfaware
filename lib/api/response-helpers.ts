@@ -26,18 +26,25 @@ export function successResponse<T>(
   );
 }
 
+export type ErrorResponseOptions = {
+  /** When false, 5xx responses are not sent to Sentry (expected ops failures) */
+  reportToSentry?: boolean;
+};
+
 /**
  * Error response helper
  */
 export function errorResponse(
   error: string,
   statusCode = 500,
-  details?: Record<string, unknown>
+  details?: Record<string, unknown>,
+  options?: ErrorResponseOptions,
 ): NextResponse<ApiError> {
+  const reportToSentry = options?.reportToSentry ?? true;
+
   logger.error("API Error:", { error, statusCode, details });
 
-  // Send server errors (500+) to Sentry if configured
-  if (statusCode >= 500) {
+  if (statusCode >= 500 && reportToSentry) {
     const errorObj = new Error(error);
     captureException(errorObj, {
       statusCode,
@@ -53,7 +60,26 @@ export function errorResponse(
       statusCode,
       details,
     },
-    { status: statusCode }
+    { status: statusCode },
+  );
+}
+
+/**
+ * Expected service unavailability (billing, missing config) — warn only, no Sentry.
+ */
+export function serviceUnavailableResponse(
+  error: string,
+  details?: Record<string, unknown>,
+): NextResponse<ApiError> {
+  logger.warn("Service unavailable:", { error, details });
+  return NextResponse.json(
+    {
+      success: false,
+      error,
+      statusCode: 503,
+      details,
+    },
+    { status: 503 },
   );
 }
 

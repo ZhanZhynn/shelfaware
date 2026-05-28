@@ -11,8 +11,102 @@ import {
   isGoogleOAuthConfigured,
 } from "@/lib/auth/oauth";
 import { logger } from "@/lib/logger";
+import { generateUniqueUsername } from "@/lib/auth/unique-username";
 import { prisma } from "@/prisma/client";
+import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import type { User } from "@prisma/client";
+
+type GoogleOAuthProfile = {
+  email: string;
+  name?: string | null;
+  googleId: string;
+  userImage: string | null;
+};
+
+/** Create OAuth user with unique username; recover from P2002 race / username collision */
+async function createGoogleOAuthUser(
+  profile: GoogleOAuthProfile,
+): Promise<User> {
+  const { email, name, googleId, userImage } = profile;
+  const randomPassword = Buffer.from(Math.random().toString(36)).toString(
+    "base64",
+  );
+  const hashedPassword = await bcrypt.hash(randomPassword, 10);
+  const username = await generateUniqueUsername(
+    email.split("@")[0] || name || "user",
+  );
+
+  const displayName = name?.trim() || email.split("@")[0] || "user";
+
+  const createData = {
+    email,
+    name: displayName,
+    password: hashedPassword,
+    googleId,
+    image: userImage,
+    role: "admin",
+    username,
+    createdAt: new Date(),
+  };
+
+  try {
+    return await prisma.user.create({ data: createData });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        return existing;
+      }
+      const retryUsername = await generateUniqueUsername(
+        `${username}${Date.now().toString(36).slice(-4)}`,
+      );
+      return await prisma.user.create({
+        data: { ...createData, username: retryUsername },
+      });
+    }
+    throw error;
+  }
+}
+
+/** Merge Google profile into an existing user when fields are missing */
+async function updateGoogleOAuthUser(
+  user: User,
+  profile: GoogleOAuthProfile,
+): Promise<User> {
+  const { googleId, userImage, name } = profile;
+  const updateData: {
+    googleId?: string;
+    image?: string | null;
+    name?: string;
+    role?: string;
+  } = {};
+
+  if (!user.googleId) {
+    updateData.googleId = googleId;
+  }
+  if (userImage && userImage !== user.image) {
+    updateData.image = userImage;
+  }
+  if (name && name !== user.name && !user.name) {
+    updateData.name = name;
+  }
+  if (!user.role || (typeof user.role === "string" && user.role.trim() === "")) {
+    updateData.role = "admin";
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return user;
+  }
+
+  return prisma.user.update({
+    where: { id: user.id },
+    data: updateData,
+  });
+}
 
 /**
  * GET /api/auth/oauth/google/callback
@@ -126,67 +220,20 @@ export async function GET(request: NextRequest) {
         where: { email },
       });
 
+      const profile: GoogleOAuthProfile = {
+        email,
+        name,
+        googleId,
+        userImage,
+      };
+
       if (!user) {
-        // Create new user with Google OAuth
-        // Generate a random password since OAuth users don't have passwords
-        const randomPassword = Buffer.from(Math.random().toString(36)).toString(
-          "base64"
-        );
-        const hashedPassword = await bcrypt.hash(randomPassword, 10);
-
-        // New Google users get admin role so they appear as product owners in client browse
-        user = await prisma.user.create({
-          data: {
-            email,
-            name: name || email.split("@")[0],
-            password: hashedPassword,
-            googleId,
-            image: userImage, // Map Google's 'picture' to our 'image' field
-            role: "admin",
-            createdAt: new Date(),
-          },
-        });
-
+        user = await createGoogleOAuthUser(profile);
         logger.info(`New user created via Google OAuth: ${email}`);
-
         const { invalidateAllServerCaches } = await import("@/lib/cache");
         await invalidateAllServerCaches().catch(() => {});
       } else {
-        // Update existing user with Google OAuth data if needed
-        const updateData: {
-          googleId?: string;
-          image?: string | null;
-          name?: string;
-          role?: string;
-        } = {};
-
-        // Update Google ID if not set
-        if (!user.googleId) {
-          updateData.googleId = googleId;
-        }
-
-        // Update image if provided from Google (always update if available)
-        if (userImage && userImage !== user.image) {
-          updateData.image = userImage;
-        }
-
-        // Update name if provided from Google and not already set
-        if (name && name !== user.name && !user.name) {
-          updateData.name = name;
-        }
-
-        // Fix: Google users created before role was added - set admin so they appear in product owners
-        if (!user.role || (typeof user.role === "string" && user.role.trim() === "")) {
-          updateData.role = "admin";
-        }
-
-        // Only update if there are changes
-        if (Object.keys(updateData).length > 0) {
-          user = await prisma.user.update({
-            where: { id: user.id },
-            data: updateData,
-          });
-        }
+        user = await updateGoogleOAuthUser(user, profile);
       }
 
       if (!user.id) {

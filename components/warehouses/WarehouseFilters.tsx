@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo, useCallback, useState, useLayoutEffect } from "react";
+import React, { useMemo, useCallback } from "react";
+import { DeferredSelectGate } from "@/components/shared";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,12 +51,6 @@ export default function WarehouseFilters({
   setPagination,
 }: WarehouseFiltersProps) {
   const { toast } = useToast();
-  const [selectMounted, setSelectMounted] = useState(false);
-
-  useLayoutEffect(() => {
-    const t = setTimeout(() => setSelectMounted(true), 0);
-    return () => clearTimeout(t);
-  }, []);
 
   /**
    * Filter warehouses based on current filters
@@ -238,55 +233,60 @@ export default function WarehouseFilters({
           )}
         </div>
 
-        {/* Status Filter - Middle (defer Select until mount to avoid Radix aria-controls hydration mismatch) */}
+        {/* Status filter — DeferredSelectGate avoids portal teardown on App Router navigation */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {!selectMounted ? (
-            <div
-              className="h-10 w-full sm:w-[180px] rounded-[28px] border border-cyan-400/30 dark:border-cyan-400/30 bg-gradient-to-r from-cyan-500/25 via-cyan-500/15 to-cyan-500/10 dark:from-cyan-500/25 dark:via-cyan-500/15 dark:to-cyan-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(6,182,212,0.2)] backdrop-blur-sm font-medium flex items-center justify-between px-3 py-2.5 text-sm"
-              aria-hidden
-            >
-              <span className="text-gray-700 dark:text-white/90">
-                {statusFilter === "all"
-                  ? "All Warehouses"
-                  : statusFilter === "active"
-                    ? "Active"
-                    : "Inactive"}
-              </span>
-              <ChevronDown className="h-4 w-4 opacity-70" />
-            </div>
-          ) : (
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => {
-                setStatusFilter(value as StatusFilter);
-                setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-              }}
-            >
-              <SelectTrigger className="h-10 w-full sm:w-[180px] rounded-[28px] border border-cyan-400/30 dark:border-cyan-400/30 bg-gradient-to-r from-cyan-500/25 via-cyan-500/15 to-cyan-500/10 dark:from-cyan-500/25 dark:via-cyan-500/15 dark:to-cyan-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(6,182,212,0.2)] backdrop-blur-sm transition duration-200 hover:border-cyan-300/40 hover:from-cyan-500/35 hover:via-cyan-500/25 hover:to-cyan-500/15 dark:hover:border-cyan-300/40 dark:hover:from-cyan-500/35 dark:hover:via-cyan-500/25 dark:hover:to-cyan-500/15 font-medium">
-                <SelectValue placeholder="All Warehouses" />
-              </SelectTrigger>
-              <SelectContent className="rounded-[28px] border border-cyan-400/20 dark:border-white/10 bg-white/80 dark:bg-popover/50 backdrop-blur-sm shadow-[0_10px_30px_rgba(6,182,212,0.15)]">
-                <SelectItem
-                  value="all"
-                  className="text-gray-700 dark:text-white/80 focus:bg-cyan-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
-                >
-                  All Warehouses
-                </SelectItem>
-                <SelectItem
-                  value="active"
-                  className="text-gray-700 dark:text-white/80 focus:bg-cyan-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
-                >
-                  Active
-                </SelectItem>
-                <SelectItem
-                  value="inactive"
-                  className="text-gray-700 dark:text-white/80 focus:bg-cyan-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
-                >
-                  Inactive
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          <DeferredSelectGate
+            placeholder={
+              <div
+                className="h-10 w-full sm:w-[180px] rounded-[28px] border border-cyan-400/30 bg-gradient-to-r from-cyan-500/25 via-cyan-500/15 to-cyan-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(6,182,212,0.2)] font-medium flex items-center justify-between px-3 py-2.5 text-sm"
+                aria-hidden
+              >
+                <span className="text-gray-700 dark:text-white/90">
+                  {statusFilter === "all"
+                    ? "All Warehouses"
+                    : statusFilter === "active"
+                      ? "Active"
+                      : "Inactive"}
+                </span>
+                <ChevronDown className="h-4 w-4 opacity-70" />
+              </div>
+            }
+          >
+            {({ selectRemountKey }) => (
+              <Select
+                key={selectRemountKey}
+                value={statusFilter}
+                onValueChange={(value) => {
+                  setStatusFilter(value as StatusFilter);
+                  setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+                }}
+              >
+                <SelectTrigger className="h-10 w-full sm:w-[180px] rounded-[28px] border border-cyan-400/30 dark:border-cyan-400/30 bg-gradient-to-r from-cyan-500/25 via-cyan-500/15 to-cyan-500/10 dark:from-cyan-500/25 dark:via-cyan-500/15 dark:to-cyan-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(6,182,212,0.2)] backdrop-blur-sm transition duration-200 hover:border-cyan-300/40 hover:from-cyan-500/35 hover:via-cyan-500/25 hover:to-cyan-500/15 dark:hover:border-cyan-300/40 dark:hover:from-cyan-500/35 dark:hover:via-cyan-500/25 dark:hover:to-cyan-500/15 font-medium">
+                  <SelectValue placeholder="All Warehouses" />
+                </SelectTrigger>
+                <SelectContent className="rounded-[28px] border border-cyan-400/20 dark:border-white/10 bg-white/80 dark:bg-popover/50 backdrop-blur-sm shadow-[0_10px_30px_rgba(6,182,212,0.15)]">
+                  <SelectItem
+                    value="all"
+                    className="text-gray-700 dark:text-white/80 focus:bg-cyan-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+                  >
+                    All Warehouses
+                  </SelectItem>
+                  <SelectItem
+                    value="active"
+                    className="text-gray-700 dark:text-white/80 focus:bg-cyan-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+                  >
+                    Active
+                  </SelectItem>
+                  <SelectItem
+                    value="inactive"
+                    className="text-gray-700 dark:text-white/80 focus:bg-cyan-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+                  >
+                    Inactive
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </DeferredSelectGate>
         </div>
 
         {/* Export Dropdown - Right */}

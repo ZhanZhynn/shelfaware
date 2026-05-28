@@ -12,6 +12,7 @@ import { FiFileText, FiGrid } from "react-icons/fi";
 import { IoClose } from "react-icons/io5";
 import { Search, Download, ChevronDown } from "lucide-react";
 import ExcelJS from "exceljs";
+import { DeferredSelectGate } from "@/components/shared";
 import { PaginationType } from "@/components/shared/PaginationSelector";
 import {
   Select,
@@ -256,34 +257,57 @@ export default function SupplierFilters({
 
         {/* Filters - Middle (Status Filter) */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          <Select
-            value={statusFilter}
-            onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+          <DeferredSelectGate
+            placeholder={
+              <div
+                className="h-10 w-full sm:w-[180px] rounded-[28px] border border-emerald-400/30 bg-gradient-to-r from-emerald-500/25 via-emerald-500/15 to-emerald-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(16,185,129,0.2)] font-medium flex items-center justify-between px-3 py-2.5 text-sm"
+                aria-hidden
+              >
+                <span>
+                  {statusFilter === "all"
+                    ? "All Suppliers"
+                    : statusFilter === "active"
+                      ? "Active"
+                      : "Inactive"}
+                </span>
+                <ChevronDown className="h-4 w-4 opacity-70" />
+              </div>
+            }
           >
-            <SelectTrigger className="h-10 w-full sm:w-[180px] rounded-[28px] border border-emerald-400/30 dark:border-emerald-400/30 bg-gradient-to-r from-emerald-500/25 via-emerald-500/15 to-emerald-500/10 dark:from-emerald-500/25 dark:via-emerald-500/15 dark:to-emerald-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(16,185,129,0.2)] backdrop-blur-sm transition duration-200 hover:border-emerald-300/40 hover:from-emerald-500/35 hover:via-emerald-500/25 hover:to-emerald-500/15 dark:hover:border-emerald-300/40 dark:hover:from-emerald-500/35 dark:hover:via-emerald-500/25 dark:hover:to-emerald-500/15 font-medium">
-              <SelectValue placeholder="All Suppliers" />
-            </SelectTrigger>
-            <SelectContent className="rounded-[28px] border border-emerald-400/20 dark:border-white/10 bg-white/80 dark:bg-popover/50 backdrop-blur-sm shadow-[0_10px_30px_rgba(16,185,129,0.15)]">
-              <SelectItem
-                value="all"
-                className="text-gray-700 dark:text-white/80 focus:bg-emerald-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+            {({ selectRemountKey }) => (
+              <Select
+                key={selectRemountKey}
+                value={statusFilter}
+                onValueChange={(value) =>
+                  setStatusFilter(value as StatusFilter)
+                }
               >
-                All Suppliers
-              </SelectItem>
-              <SelectItem
-                value="active"
-                className="text-gray-700 dark:text-white/80 focus:bg-emerald-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
-              >
-                Active
-              </SelectItem>
-              <SelectItem
-                value="inactive"
-                className="text-gray-700 dark:text-white/80 focus:bg-emerald-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
-              >
-                Inactive
-              </SelectItem>
-            </SelectContent>
-          </Select>
+                <SelectTrigger className="h-10 w-full sm:w-[180px] rounded-[28px] border border-emerald-400/30 dark:border-emerald-400/30 bg-gradient-to-r from-emerald-500/25 via-emerald-500/15 to-emerald-500/10 dark:from-emerald-500/25 dark:via-emerald-500/15 dark:to-emerald-500/10 text-gray-700 dark:text-white shadow-[0_10px_30px_rgba(16,185,129,0.2)] backdrop-blur-sm transition duration-200 hover:border-emerald-300/40 hover:from-emerald-500/35 hover:via-emerald-500/25 hover:to-emerald-500/15 dark:hover:border-emerald-300/40 dark:hover:from-emerald-500/35 dark:hover:via-emerald-500/25 dark:hover:to-emerald-500/15 font-medium">
+                  <SelectValue placeholder="All Suppliers" />
+                </SelectTrigger>
+                <SelectContent className="rounded-[28px] border border-emerald-400/20 dark:border-white/10 bg-white/80 dark:bg-popover/50 backdrop-blur-sm shadow-[0_10px_30px_rgba(16,185,129,0.15)]">
+                  <SelectItem
+                    value="all"
+                    className="text-gray-700 dark:text-white/80 focus:bg-emerald-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+                  >
+                    All Suppliers
+                  </SelectItem>
+                  <SelectItem
+                    value="active"
+                    className="text-gray-700 dark:text-white/80 focus:bg-emerald-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+                  >
+                    Active
+                  </SelectItem>
+                  <SelectItem
+                    value="inactive"
+                    className="text-gray-700 dark:text-white/80 focus:bg-emerald-100 dark:focus:bg-white/10 focus:text-gray-900 dark:focus:text-white"
+                  >
+                    Inactive
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </DeferredSelectGate>
         </div>
 
         {/* Export Dropdown - Right */}

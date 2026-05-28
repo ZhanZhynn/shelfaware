@@ -245,18 +245,16 @@ const CategoryList = React.memo(() => {
       {/* Filters and Actions - Always visible, only disabled during auth check */}
       <div className="pb-6 flex justify-center">
         <div className="w-full max-w-9xl">
-          {isMounted ? (
-            <CategoryFilters
-              allCategories={allCategories}
-              statusFilter={statusFilter}
-              setStatusFilter={setStatusFilter}
-              searchTerm={searchTerm}
-              setSearchTerm={setSearchTerm}
-              pagination={pagination}
-              setPagination={setPagination}
-              userId={user?.id || ""}
-            />
-          ) : null}
+          <CategoryFilters
+            allCategories={allCategories}
+            statusFilter={statusFilter}
+            setStatusFilter={setStatusFilter}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            pagination={pagination}
+            setPagination={setPagination}
+            userId={user?.id || ""}
+          />
         </div>
       </div>
 

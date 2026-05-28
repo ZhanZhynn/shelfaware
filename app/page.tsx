@@ -9,11 +9,14 @@ import {
 
 /**
  * Home route — server component.
- * If user is not logged in (no session cookie), redirect to login.
- * Otherwise fetch products, categories, and suppliers on the server and pass
- * them to HomePage so the client can hydrate React Query in one round-trip.
+ * No route-level Suspense: root layout uses force-dynamic so useSearchParams works
+ * without a fallback skeleton. SSR fetch here; client HomePage handles OAuth + RQ hydrate.
  */
-export default async function HomeRoute() {
+export default async function HomeRoute({
+  searchParams,
+}: {
+  searchParams: Promise<{ oauth_success?: string }>;
+}) {
   const user = await getSession();
   if (!user) {
     redirect("/login");
@@ -24,16 +27,22 @@ export default async function HomeRoute() {
   if (user.role === "supplier") {
     redirect("/supplier");
   }
+
+  const params = await searchParams;
+  const initialOAuthSuccess = params.oauth_success === "true";
+
   const [products, categories, suppliers] = await Promise.all([
     getProductsForUser(user.id),
     getCategoriesForUser(user.id),
     getSuppliersForUser(user.id),
   ]);
+
   return (
     <HomePage
       initialProducts={products}
       initialCategories={categories}
       initialSuppliers={suppliers}
+      initialOAuthSuccess={initialOAuthSuccess}
     />
   );
 }

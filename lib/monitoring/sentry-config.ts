@@ -102,6 +102,7 @@ export const SENTRY_IGNORE_ERRORS: Array<string | RegExp> = [
   "ResizeObserver loop limit exceeded",
   "ResizeObserver loop completed with undelivered notifications",
   "Non-Error promise rejection captured",
+  "AI service did not return insights",
 ];
 
 /** Base options reused by server and edge runtimes */

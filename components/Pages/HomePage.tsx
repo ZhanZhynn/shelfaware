@@ -2,7 +2,7 @@
 
 /**
  * Home (store overview) for admin: statistics cards and quick links to products, categories, suppliers.
- * Hydrates React Query from server-passed initial data; handles OAuth callback query params.
+ * Hydrates React Query from server-passed initial data; OAuth flag from SSR + URL cleanup client-side.
  */
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -28,16 +28,19 @@ export type HomePageProps = {
   initialProducts?: ProductForHome[];
   initialCategories?: CategoryForHome[];
   initialSuppliers?: SupplierForHome[];
+  /** From server searchParams — avoids relying on client-only OAuth detection on first paint */
+  initialOAuthSuccess?: boolean;
 };
 
 /**
- * Home page client component (uses useSearchParams for OAuth callback).
+ * Home page client component (initialOAuthSuccess from server; useSearchParams for URL fallback).
  * Accepts optional server-fetched data to hydrate React Query and avoid client round-trips.
  */
 export default function HomePage({
   initialProducts,
   initialCategories,
   initialSuppliers,
+  initialOAuthSuccess = false,
 }: HomePageProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -66,8 +69,8 @@ export default function HomePage({
 
   // Single consolidated useEffect for OAuth handling and redirect logic
   useEffect(() => {
-    const oauthSuccess = searchParams.get("oauth_success");
-    const isOAuthFlow = oauthSuccess === "true";
+    const isOAuthFlow =
+      initialOAuthSuccess || searchParams.get("oauth_success") === "true";
 
     // Handle OAuth flow
     if (isOAuthFlow && !oauthHandledRef.current) {
@@ -124,6 +127,7 @@ export default function HomePage({
       }
     }
   }, [
+    initialOAuthSuccess,
     searchParams,
     isLoggedIn,
     isCheckingAuth,

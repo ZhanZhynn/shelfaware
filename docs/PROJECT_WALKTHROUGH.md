@@ -1,6 +1,6 @@
 # PROJECT_WALKTHROUGH.md
 
-Agent-oriented map of **stock-inventory** (Stockly). Last updated: 2026-05-24.
+Agent-oriented map of **stock-inventory** (Stockly). Last updated: 2026-05-19.
 
 ## 1. What this app is
 
@@ -108,10 +108,33 @@ Details: `docs/Redis_Sentry_PostHog_INTEGRATION_GUIDE.md`
 | Piece | File |
 |-------|------|
 | Defer hook | `hooks/use-deferred-radix-select.ts` |
+| Reusable gate | `components/shared/DeferredSelectGate.tsx` (LoginPage, filter toolbars, admin order detail) |
 | Page-size UI | `components/shared/PaginationSelector.tsx`, `pagination-select-styles.ts` |
 | Consumers | All `*Table.tsx` footers (`variant` + `enabled={!isLoading}`) |
 
 Prevents `NotFoundError: removeChild` when App Router navigates between pages while a Radix `SelectPortal` is active (Sentry: `/orders` after `/products`). Rows-per-page change resets `pageIndex` to 0. Filter/search shrink uses `hooks/use-clamp-pagination-index.ts` to clamp `pageIndex` to the last valid page.
+
+## 7d. Sentry production fixes (2026-05-19)
+
+| Issue | Implementation |
+|-------|----------------|
+| OpenRouter 402 → Sentry 502 | `lib/ai/openrouter.ts` (`OpenRouterResult`); `serviceUnavailableResponse` in `lib/api/response-helpers.ts`; `app/api/ai/insights/route.ts` |
+| OAuth `User_username_key` | `lib/auth/unique-username.ts`; `createGoogleOAuthUser` + P2002 recovery in Google callback |
+| Hydration on `/` | Root `force-dynamic` + SSR props in `app/page.tsx` (no route Suspense); `CategoryList` always mounts `CategoryFilters` (`DeferredSelectGate`) |
+| Filter/login Selects | `DeferredSelectGate` on status/view Selects + `LoginPage` |
+
+Tests: `lib/ai/openrouter.test.ts`, `lib/auth/unique-username.test.ts`.
+
+## 7e. Home route SSR (no Suspense, 2026-05-19)
+
+| Piece | File / behavior |
+|-------|-----------------|
+| Server page | [`app/page.tsx`](app/page.tsx) — session, role redirects, `getProductsForUser` + categories + suppliers |
+| OAuth flag | `searchParams.oauth_success` → `initialOAuthSuccess` (same pattern as `ownerId` on products page) |
+| Client page | [`components/Pages/HomePage.tsx`](components/Pages/HomePage.tsx) — RQ hydrate, OAuth refresh, URL cleanup via `history.replaceState` |
+| No Suspense | Avoids 50vh pulse fallback; relies on layout `force-dynamic` |
+
+**Manual:** hard refresh `/` (instant store overview); Google OAuth lands on `/` with lists populated.
 
 ## 7c. QStash email queue (2026-05-19)
 
@@ -130,13 +153,13 @@ flowchart LR
 - **Security:** `Receiver.verify` with `QSTASH_CURRENT_SIGNING_KEY` / `QSTASH_NEXT_SIGNING_KEY`
 - **Retries:** webhook 500 on send failure → QStash retries; direct fallback in `queueEmailNotification` still logs-only on error
 
-## 8. Quality gates (audit 2026-05-24)
+## 8. Quality gates (audit 2026-05-19)
 
 | Check | Status |
 |-------|--------|
 | `npm run lint` | pass |
 | `npm run build` | pass |
-| `npm run test` | 220 passed |
+| `npm run test` | 224 passed |
 | `npm run test:invalidate` | 200 passed |
 | Radix table Select | `useDeferredRadixSelect` + `PaginationSelector` (11 tables) |
 | Pagination clamp + page-size reset | `useClampPaginationIndex` + `PaginationSelector` pageIndex 0 |
@@ -146,7 +169,7 @@ flowchart LR
 
 **Gaps (OK):** optional deferred-select unit test; i18n not implemented (README documents Translate caveat).
 
-**Manual QA:** soft-delete from product detail (1 DELETE, no GET 404); cross-page list refresh without reload; prod email queue after deploy (no Sentry body-read error); `/products` → `/orders` (no removeChild).
+**Manual QA:** `/` no Suspense skeleton; soft-delete from product detail (1 DELETE, no GET 404); cross-page list refresh without reload; prod email queue after deploy; `/products` → `/orders` (no removeChild); OAuth `/?oauth_success=true`.
 
 ## 9. When changing code
 

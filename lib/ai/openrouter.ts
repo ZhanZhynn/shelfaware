@@ -34,6 +34,21 @@ export interface OpenRouterChatResponse {
   };
 }
 
+export type OpenRouterFailureKind =
+  | "not_configured"
+  | "billing"
+  | "rate_limit"
+  | "upstream";
+
+export type OpenRouterResult =
+  | { ok: true; data: OpenRouterChatResponse }
+  | {
+      ok: false;
+      kind: OpenRouterFailureKind;
+      status?: number;
+      message?: string;
+    };
+
 /**
  * Check if OpenRouter is configured (API key set and non-empty)
  */
@@ -42,16 +57,26 @@ export function isOpenRouterConfigured(): boolean {
   return typeof key === "string" && key.trim().length > 0;
 }
 
+function mapHttpStatusToKind(status: number): OpenRouterFailureKind {
+  if (status === 402) {
+    return "billing";
+  }
+  if (status === 429) {
+    return "rate_limit";
+  }
+  return "upstream";
+}
+
 /**
  * Create a chat completion via OpenRouter (OpenAI-compatible API).
- * Uses OPENROUTER_API_KEY from env. Gracefully returns null if not configured or on error.
+ * Returns a typed result instead of throwing — callers map kind to HTTP status.
  */
 export async function createChatCompletion(
   messages: OpenRouterMessage[],
   options: OpenRouterChatOptions = {},
-): Promise<OpenRouterChatResponse | null> {
+): Promise<OpenRouterResult> {
   if (!isOpenRouterConfigured()) {
-    return null;
+    return { ok: false, kind: "not_configured" };
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY!;
@@ -77,14 +102,24 @@ export async function createChatCompletion(
 
     if (!response.ok) {
       const text = await response.text();
+      const kind = mapHttpStatusToKind(response.status);
       console.error("[OpenRouter] API error:", response.status, text);
-      return null;
+      return {
+        ok: false,
+        kind,
+        status: response.status,
+        message: text.slice(0, 500),
+      };
     }
 
     const data = (await response.json()) as OpenRouterChatResponse;
-    return data;
+    return { ok: true, data };
   } catch (error) {
     console.error("[OpenRouter] Request failed:", error);
-    return null;
+    return {
+      ok: false,
+      kind: "upstream",
+      message: error instanceof Error ? error.message : "Request failed",
+    };
   }
 }

@@ -39,6 +39,23 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // ChunkLoadError fires when a Vercel deploy invalidates a cached JS chunk that the
+    // user's stale tab still references. Silently reload once to pick up the new build.
+    // A sessionStorage guard prevents an infinite reload loop if the chunk is genuinely missing.
+    if (
+      error.name === "ChunkLoadError" ||
+      error.message?.includes("Failed to load chunk")
+    ) {
+      const key = "chunk_reload_attempted";
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1");
+        window.location.reload();
+        return;
+      }
+      // Already tried once — fall through to normal error handling below
+      sessionStorage.removeItem(key);
+    }
+
     logger.error("ErrorBoundary caught an error:", {
       error: error.message,
       stack: error.stack,

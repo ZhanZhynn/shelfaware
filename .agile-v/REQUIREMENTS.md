@@ -214,6 +214,48 @@ Canonical REQ source. All artifacts link via `REQ-XXXX`. Status: `done` | `verif
 
 ---
 
+## REQ-0014 — ChunkLoadError auto-reload in ErrorBoundary
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P1 |
+| **Risk** | R2 |
+| **Status** | done |
+
+**Intent:** After a Vercel deploy, users with stale tab/page receive `ChunkLoadError` when a lazy import tries to fetch a now-invalidated chunk hash. Currently `ErrorBoundary.componentDidCatch` logs and reports to Sentry and shows a crash UI. The correct fix is to silently auto-reload on `ChunkLoadError`, restoring the user to the fresh deploy without a Sentry event.
+
+**Acceptance criteria**
+
+- AC1: `ErrorBoundary.componentDidCatch` detects `ChunkLoadError` by name and triggers `window.location.reload()` — no Sentry capture, no crash UI shown
+- AC2: Non-`ChunkLoadError` errors continue to report to Sentry and show fallback UI unchanged
+- AC3: A `sessionStorage` guard prevents an infinite reload loop (reload once, then fall through to crash UI)
+- AC4: `ErrorBoundary.tsx` updated; `app/layout.tsx` unchanged
+
+**Artifacts:** `components/shared/ErrorBoundary.tsx`
+
+---
+
+## REQ-0015 — OrderDialog RHF validation logger level
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P1 |
+| **Risk** | R1 |
+| **Status** | done |
+
+**Intent:** `OrderDialog.tsx:949` calls `logger.error("Order form validation errors:", errors)` in the RHF `handleSubmit` invalid callback. This fires for pure client-side form validation failures (missing fields, wrong type) — it never reaches any API. `logger.error` routes through Sentry; `logger.warn` does not. Client-side form validation is expected UX feedback, not a production error.
+
+**Acceptance criteria**
+
+- AC1: `logger.error` at line ~949 changed to `logger.warn`
+- AC2: `console.error` at line ~945 changed to `console.warn` (debug noise reduction)
+- AC3: API-level errors at lines ~487 and ~628 (`logger.error("Order creation error:", ...)`, `logger.error("Order update error:", ...)`) remain as `logger.error` (those are genuine server failures)
+- AC4: No other logic changed in `OrderDialog.tsx`
+
+**Artifacts:** `components/orders/OrderDialog.tsx`
+
+---
+
 ## REQ-0013 — Remaining API Zod consistency
 
 | Field | Value |

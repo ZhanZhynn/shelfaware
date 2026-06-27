@@ -941,12 +941,12 @@ export default function OrderDialog({
               onSubmit={createFormMethods.handleSubmit(
                 handleCreateOrder,
                 (errors) => {
-                  // Log validation errors to console for debugging
-                  console.error(
+                  // Client-side RHF validation failure — expected UX path, not a server error
+                  console.warn(
                     "Form validation errors:",
                     JSON.stringify(errors, null, 2),
                   );
-                  logger.error("Order form validation errors:", errors);
+                  logger.warn("Order form validation errors:", errors);
 
                   // Helper function to extract error messages from nested objects
                   const extractErrorMessages = (

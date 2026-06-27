@@ -3,20 +3,21 @@
 | Field | Value |
 |-------|-------|
 | **Cycle** | C1 |
-| **Phase** | `phases/01-sentry-groq-select` |
-| **Infinity Loop stage** | Verify → Evolve (Human Gate 2 pending) |
-| **Last updated** | 2026-05-19 |
-| **Active REQ range** | REQ-0001 … REQ-0013 |
-| **Prod deploy target** | `9a2e37c` (REQ-0013); docs HEAD `c0e15b3` |
+| **Phase** | `phases/02-sentry-chunk-order-fix` |
+| **Infinity Loop stage** | Prove → Verify (REQ-0014/0015 code done, lint+test PASS, awaiting deploy) |
+| **Last updated** | 2026-06-27 |
+| **Active REQ range** | REQ-0001 … REQ-0015 |
+| **Prod deploy target** | pending push (REQ-0014/0015); baseline `9a2e37c` |
 | **Human Gate 1** | APPROVED (retroactive bootstrap) |
-| **Human Gate 2** | PENDING — Sentry 24h + manual nav smoke |
+| **Human Gate 2** | PENDING — Sentry 24h + manual nav smoke; new REQ-0014/0015 pending automated pass |
 | **Resume token** | — |
 
 ## Current focus
 
-1. **REQ-0009** — 24h Sentry regression after prod deploy (`docs/SENTRY_ERRORS.md`)
-2. **REQ-0001/0006** — manual removeChild nav smoke (optional)
-3. **C2** — new work only via new REQ-XXXX + Infinity Loop
+1. **REQ-0014** — ChunkLoadError auto-reload in `ErrorBoundary` (stale deploy chunk)
+2. **REQ-0015** — `OrderDialog` `logger.error` → `logger.warn` for RHF client-side validation callback
+3. **REQ-0009** — Sentry regression watch: hydration on `/admin/dashboard-overall-insights` MONITOR only
+4. **REQ-0001/0006** — manual removeChild nav smoke (optional)
 
 ## Session resume (every chat)
 

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import ShopeeStatsCards from "./ShopeeStatsCards";
 import ShopeeOrderStatusChart from "./ShopeeOrderStatusChart";
-import ShopeeTopProductsChart from "./ShopeeTopProductsChart";
+import ShopeeTopProductsTable from "./ShopeeTopProductsTable";
 import ShopeeRevenueTrendChart from "./ShopeeRevenueTrendChart";
 import ShopeeSlaAlertWidget from "./ShopeeSlaAlertWidget";
 
@@ -183,7 +183,7 @@ export default function ShopeeOverview() {
           <ShopeeRevenueTrendChart />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ShopeeOrderStatusChart data={stats.ordersByStatus} />
-            <ShopeeTopProductsChart data={stats.topProducts} />
+            <ShopeeTopProductsTable data={stats.topProducts} />
           </div>
         </>
       )}

@@ -382,6 +382,38 @@ async function fetchOrderDetails(
 }
 
 /**
+ * Batch-fetch escrow/income details for a list of order_sn values.
+ * Fee breakdown (commission, service fee, seller income) comes from the
+ * payment.getEscrowDetailBatch endpoint, NOT from getOrdersDetail.
+ */
+async function fetchEscrowDetails(
+  sdk: ReturnType<typeof getShopeeSDK>,
+  orderSns: string[],
+): Promise<Map<string, Record<string, unknown>>> {
+  const details = new Map<string, Record<string, unknown>>();
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < orderSns.length; i += BATCH_SIZE) {
+    const batch = orderSns.slice(i, i + BATCH_SIZE);
+    try {
+      const result = await sdk.payment.getEscrowDetailBatch({
+        order_sn_list: batch,
+      });
+      const resp = (result as unknown as { response?: { order_income_list?: Record<string, unknown>[] } }).response;
+      const orderIncomeList = resp?.order_income_list || [];
+      for (const item of orderIncomeList) {
+        const sn = String((item as Record<string, unknown>).order_sn || "");
+        if (sn) details.set(sn, item);
+      }
+    } catch (err) {
+      logger.warn(`[Shopee Sync] Failed to fetch escrow details for batch starting ${batch[0]}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return details;
+}
+
+/**
  * Sync orders from a Shopee shop.
  * Step 1: getOrderList → collect order_sn + status
  * Step 2: getOrdersDetail (batch 50) → get full details (items, buyer, address, etc.)
@@ -463,10 +495,15 @@ export async function syncShopeeOrders(
     const orderSnStrings = allOrderSns.map((o) => o.sn);
     const detailsMap = await fetchOrderDetails(sdk, orderSnStrings);
 
+    // Step 2.5: Fetch escrow/income details for fee breakdown
+    const escrowMap = await fetchEscrowDetails(sdk, orderSnStrings);
+
     // Step 3: Upsert each order with full details
     for (const { sn, status: listStatus } of allOrderSns) {
       try {
         const detail = detailsMap.get(sn);
+        const escrow = escrowMap.get(sn) as { order_income?: Record<string, unknown>; buyer_payment_info?: Record<string, unknown> } | undefined;
+        const orderIncome = escrow?.order_income || {};
 
         // Use detailed status if available, fallback to list status
         const orderStatus = String(
@@ -505,6 +542,13 @@ export async function syncShopeeOrders(
           shopeeUpdatedAt,
           lastSyncedAt: new Date(),
           updatedAt: new Date(),
+          // Fee fields from escrow API
+          commissionFee: Number(orderIncome.commission_fee || 0),
+          serviceFee: Number(orderIncome.service_fee || 0),
+          sellerTxnFee: Number(orderIncome.seller_transaction_fee || 0),
+          shippingFee: Number(orderIncome.actual_shipping_fee || orderIncome.final_shipping_fee || 0),
+          sellerIncome: Number(orderIncome.escrow_amount || 0),
+          buyerPaymentMethod: String((escrow?.buyer_payment_info as Record<string, unknown>)?.payment_method || detail?.payment_method || ""),
         };
 
         let orderRecord;

@@ -18,6 +18,7 @@ import ShopeeStatsCards from "./ShopeeStatsCards";
 import ShopeeOrderStatusChart from "./ShopeeOrderStatusChart";
 import ShopeeTopProductsChart from "./ShopeeTopProductsChart";
 import ShopeeRevenueTrendChart from "./ShopeeRevenueTrendChart";
+import ShopeeSlaAlertWidget from "./ShopeeSlaAlertWidget";
 
 export default function ShopeeOverview() {
   const mounted = useRef(false);
@@ -171,6 +172,9 @@ export default function ShopeeOverview() {
           </CardContent>
         </Card>
       )}
+
+      {/* SLA Alert Widget */}
+      {shops && shops.length > 0 && <ShopeeSlaAlertWidget />}
 
       {/* Stats and Charts */}
       {shops && shops.length > 0 && stats && (

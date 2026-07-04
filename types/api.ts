@@ -102,13 +102,45 @@ export interface ShopeeOrderData {
   paymentStatus: string | null;
   totalAmount: number;
   currency: string | null;
+  region: string | null;
   buyerUsername: string | null;
   shippingAddress: unknown;
   trackingNumber: string | null;
+  trackingCarrier: string | null;
   logisticsStatus: string | null;
   shopeeCreatedAt: string | null;
+  shopeeUpdatedAt: string | null;
+  paidAt: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  commissionFee: number;
+  serviceFee: number;
+  sellerTxnFee: number;
+  shippingFee: number;
+  sellerIncome: number;
+  buyerPaymentMethod: string | null;
+  // SLA fields
+  shipByDate: string | null;
+  packageNumber: string | null;
+  fulfillmentStatus: string | null;
+  daysToShip: number | null;
   createdAt: string;
   items: ShopeeOrderItemData[];
+}
+
+export interface ShopeeSlaAlert {
+  id: string;
+  orderId: string;
+  orderStatus: string;
+  shipByDate: string;
+  hoursRemaining: number;
+  urgency: "critical" | "high" | "medium";
+  buyerUsername: string | null;
+  totalAmount: number;
+  packageNumber: string | null;
+  fulfillmentStatus: string | null;
 }
 
 export interface ShopeeOrderItemData {

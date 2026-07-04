@@ -480,6 +480,11 @@ model ShopeeOrder {
   shippingFee       Float?    @default(0) // Actual shipping fee
   sellerIncome      Float?    @default(0) // Net seller income after all fees
   buyerPaymentMethod String?  // Payment method used by buyer
+  // SLA / shipping deadline tracking (from getPackageDetail)
+  shipByDate        DateTime? // Ship-by deadline (Unix seconds from Shopee)
+  packageNumber     String?   // Shopee package number for logistics
+  fulfillmentStatus String?   // Package fulfillment status (e.g., LOGISTICS_READY)
+  daysToShip        Int?      // Days allowed to ship from order creation
   shop              ShopeeShop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   items             ShopeeOrderItem[]
 
@@ -488,6 +493,7 @@ model ShopeeOrder {
   @@index([orderStatus])
   @@index([shopeeCreatedAt])
   @@index([createdAt])
+  @@index([shipByDate])
 }
 
 model ShopeeOrderItem {

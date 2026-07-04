@@ -375,6 +375,8 @@ export const cacheKeys = {
     profit: (shopId: string) => `shopee:profit:${shopId}`,
     syncLogs: (shopId: string) => `shopee:sync-logs:${shopId}`,
     importData: (shopId: string) => `shopee:import:${shopId}`,
+    nearSla: (shopId: string | null, hours: number) =>
+      `shopee:near-sla:${shopId || "all"}:${hours}`,
     pattern: "shopee:*",
   },
 } as const;

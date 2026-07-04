@@ -1961,6 +1961,44 @@ class ApiClient {
         statusText: response.statusText,
       };
     },
+
+    /**
+     * Get orders near their ship-by SLA deadline
+     */
+    getNearSlaOrders: async (
+      hours: number = 24,
+      shopId?: string,
+    ): Promise<
+      ApiResponse<{
+        total: number;
+        thresholdHours: number;
+        orders: {
+          id: string;
+          orderId: string;
+          orderStatus: string;
+          shipByDate: string | null;
+          hoursRemaining: number;
+          urgency: "critical" | "high" | "medium";
+          buyerUsername: string | null;
+          totalAmount: number;
+          packageNumber: string | null;
+          fulfillmentStatus: string | null;
+          daysToShip: number | null;
+        }[];
+      }>
+    > => {
+      const searchParams = new URLSearchParams();
+      searchParams.set("hours", String(hours));
+      if (shopId) searchParams.set("shopId", shopId);
+      const response = await this.client.get(
+        `${API_ENDPOINTS.shopee.nearSlaOrders}?${searchParams.toString()}`,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
   };
 }
 

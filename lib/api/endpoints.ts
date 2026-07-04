@@ -157,6 +157,8 @@ export const API_ENDPOINTS = {
     profit: "/shopee/stats/profit",
     webhook: "/shopee/webhook",
     import: "/shopee/import",
+    nearSlaOrders: "/shopee/orders/near-sla",
+    slaAlert: "/shopee/alerts/sla",
   },
 } as const;
 

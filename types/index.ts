@@ -247,6 +247,7 @@ export type {
   ShopeeOrderItemData,
   ShopeeSyncLogData,
   ShopeeStatsData,
+  ShopeeSlaAlert,
 } from "./api";
 
 // Re-export email types (InvoiceEmailData is in lib/email/types.ts, not types/)

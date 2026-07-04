@@ -98,10 +98,37 @@ async function fetchProductDetails(
 }
 
 /**
+ * Batch-fetch model list for products that have variants.
+ * Needed because price_info is NOT returned for items with models.
+ * getModelList accepts a single item_id per call.
+ */
+async function fetchModelList(
+  sdk: ReturnType<typeof getShopeeSDK>,
+  itemIds: number[],
+): Promise<Map<number, Record<string, unknown>>> {
+  const modelMap = new Map<number, Record<string, unknown>>();
+
+  for (const itemId of itemIds) {
+    try {
+      const result = await sdk.product.getModelList({ item_id: itemId });
+      const resp = (result as unknown as { response?: Record<string, unknown> }).response;
+      if (resp) {
+        modelMap.set(itemId, resp);
+      }
+    } catch (err) {
+      logger.warn(`[Shopee Sync] Failed to fetch model list for item ${itemId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return modelMap;
+}
+
+/**
  * Sync all products from a Shopee shop.
  * Step 1: getItemList → collect all item IDs
- * Step 2: getItemBaseInfo (batch 50) → get full details (name, price, images, etc.)
- * Step 3: upsert into ShopeeProduct
+ * Step 2: getItemBaseInfo (batch 50) → get full details (name, images, stock, etc.)
+ * Step 3: getModelList → get price for items with variants
+ * Step 4: upsert into ShopeeProduct
  */
 export async function syncShopeeProducts(
   shopId: number,
@@ -168,27 +195,66 @@ export async function syncShopeeProducts(
     // Step 2: Fetch full product details in batches of 50
     const detailsMap = await fetchProductDetails(sdk, allItemIds);
 
+    // Step 2.5: For items with models (variants), price_info is NOT returned.
+    // Fetch model list to get price from models.
+    const itemsWithModels = allItemIds.filter((id) => {
+      const detail = detailsMap.get(id);
+      return detail?.has_model === true;
+    });
+    const modelMap = itemsWithModels.length > 0
+      ? await fetchModelList(sdk, itemsWithModels)
+      : new Map<number, Record<string, unknown>>();
+
     // Step 3: Upsert each product with full details
     for (const itemId of allItemIds) {
       try {
         const detail = detailsMap.get(itemId);
 
         // Extract price from price_info array
+        // If item has models, price_info is empty — get price from first model
         let price = 0;
+        let originalPrice = 0;
         const priceInfo = detail?.price_info as Array<{ current_price?: number; original_price?: number }> | undefined;
         if (priceInfo && priceInfo.length > 0) {
           price = Number(priceInfo[0]?.current_price || priceInfo[0]?.original_price || 0);
+          originalPrice = Number(priceInfo[0]?.original_price || priceInfo[0]?.current_price || 0);
+        } else if (detail?.has_model) {
+          // Get price from model list
+          const modelResp = modelMap.get(itemId);
+          const models = (modelResp?.model || []) as Array<{
+            price_info?: Array<{ current_price?: number; original_price?: number }>;
+            stock_info_v2?: { summary_info?: { total_available_stock?: number } };
+          }>;
+          if (models && models.length > 0) {
+            // Use the first model's price as representative price
+            const firstModel = models[0];
+            const modelPriceInfo = firstModel?.price_info;
+            if (modelPriceInfo && modelPriceInfo.length > 0) {
+              price = Number(modelPriceInfo[0]?.current_price || modelPriceInfo[0]?.original_price || 0);
+              originalPrice = Number(modelPriceInfo[0]?.original_price || modelPriceInfo[0]?.current_price || 0);
+            }
+          }
         }
 
-        // Extract stock from stock_info or stock_info_v2
+        // Extract stock from stock_info_v2.summary_info.total_available_stock
+        // Also aggregate stock from models if present
         let totalStock = 0;
-        const stockInfoV2 = detail?.stock_info_v2 as { summary_info?: { total_stock?: number } } | undefined;
-        if (stockInfoV2?.summary_info?.total_stock != null) {
-          totalStock = Number(stockInfoV2.summary_info.total_stock);
-        } else {
-          const stockInfo = detail?.stock_info as Array<{ stock: number }> | undefined;
-          if (stockInfo && stockInfo.length > 0) {
-            totalStock = stockInfo.reduce((sum, s) => sum + Number(s.stock || 0), 0);
+        const stockInfoV2 = detail?.stock_info_v2 as { summary_info?: { total_available_stock?: number } } | undefined;
+        if (stockInfoV2?.summary_info?.total_available_stock != null) {
+          totalStock = Number(stockInfoV2.summary_info.total_available_stock);
+        }
+
+        // If item has models, also sum model stocks as fallback
+        if (totalStock === 0 && detail?.has_model) {
+          const modelResp = modelMap.get(itemId);
+          const models = (modelResp?.model || []) as Array<{
+            stock_info_v2?: { summary_info?: { total_available_stock?: number } };
+          }>;
+          if (models && models.length > 0) {
+            totalStock = models.reduce((sum, m) => {
+              const modelStock = m?.stock_info_v2?.summary_info?.total_available_stock;
+              return sum + Number(modelStock || 0);
+            }, 0);
           }
         }
 
@@ -212,6 +278,7 @@ export async function syncShopeeProducts(
           description: String(detail?.description || ""),
           categoryId: Number(detail?.category_id || 0),
           price,
+          originalPrice: originalPrice > 0 ? originalPrice : null,
           stock: totalStock,
           imageUrl,
           imageUrls: toInputJson(imageUrls),

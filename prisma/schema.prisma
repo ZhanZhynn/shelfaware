@@ -421,8 +421,9 @@ model ShopeeProduct {
   itemName       String    // Product name on Shopee
   description    String?   // Product description
   categoryId     Int?      // Shopee category ID
-  price          Float     // Base price (from price_info)
-  stock          Int       // Total stock (sum of all models)
+  price          Float     // Current/sale price (from price_info.current_price)
+  originalPrice  Float?    // Original/before-discount price (from price_info.original_price)
+  stock          Int       // Total stock (from stock_info_v2.summary_info.total_available_stock)
   imageUrl       String?   // Primary image URL
   imageUrls      Json?     // All image URLs (array)
   status         String    // Item status (NORMAL, DELETED, etc.)

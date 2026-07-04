@@ -25,6 +25,7 @@ interface ShopeeProductRow {
   shopeeItemId: number;
   itemName: string;
   price: number;
+  originalPrice: number | null;
   stock: number;
   status: string;
   imageUrl: string | null;
@@ -95,9 +96,20 @@ export default function ShopeeProducts() {
       {
         accessorKey: "price",
         header: "Price",
-        cell: ({ row }) => (
-          <span>${row.original.price.toFixed(2)}</span>
-        ),
+        cell: ({ row }) => {
+          const price = row.original.price;
+          const originalPrice = row.original.originalPrice;
+          return (
+            <div className="flex flex-col">
+              <span className="font-medium">${price.toFixed(2)}</span>
+              {originalPrice && originalPrice > price && (
+                <span className="text-xs text-muted-foreground line-through">
+                  ${originalPrice.toFixed(2)}
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         accessorKey: "stock",
@@ -132,7 +144,7 @@ export default function ShopeeProducts() {
     [],
   );
 
-  const tableData = useMemo(() => data?.products || [], [data]);
+  const tableData = useMemo(() => (data?.products || []) as ShopeeProductRow[], [data]);
 
   const table = useReactTable({
     data: tableData,

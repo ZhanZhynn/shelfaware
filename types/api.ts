@@ -83,6 +83,7 @@ export interface ShopeeProductData {
   description: string | null;
   categoryId: number | null;
   price: number;
+  originalPrice: number | null;
   stock: number;
   imageUrl: string | null;
   status: string;

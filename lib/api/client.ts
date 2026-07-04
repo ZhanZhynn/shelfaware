@@ -1773,6 +1773,162 @@ class ApiClient {
         statusText: response.statusText,
       };
     },
+
+    /**
+     * Get revenue trend data
+     */
+    getRevenueTrend: async (
+      granularity: "daily" | "weekly" | "monthly" = "daily",
+      shopId?: string,
+      dateFrom?: string,
+      dateTo?: string,
+    ): Promise<
+      ApiResponse<{ data: { period: string; revenue: number; orders: number }[]; granularity: string }>
+    > => {
+      const searchParams = new URLSearchParams();
+      searchParams.set("granularity", granularity);
+      if (shopId) searchParams.set("shopId", shopId);
+      if (dateFrom) searchParams.set("dateFrom", dateFrom);
+      if (dateTo) searchParams.set("dateTo", dateTo);
+      const url = `${API_ENDPOINTS.shopee.revenueTrend}?${searchParams.toString()}`;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
+     * Get buyer analytics
+     */
+    getBuyerAnalytics: async (
+      shopId?: string,
+    ): Promise<
+      ApiResponse<{
+        totalBuyers: number;
+        repeatBuyers: number;
+        repeatRate: number;
+        avgOrdersPerBuyer: number;
+        topBuyers: { username: string; totalSpent: number; orderCount: number }[];
+        geographicDistribution: { region: string; count: number }[];
+        spendingTiers: { tier: string; count: number }[];
+      }>
+    > => {
+      const url = shopId
+        ? `${API_ENDPOINTS.shopee.buyers}?shopId=${shopId}`
+        : API_ENDPOINTS.shopee.buyers;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
+     * Get product performance metrics
+     */
+    getProductPerformance: async (
+      shopId?: string,
+    ): Promise<
+      ApiResponse<{
+        products: {
+          id: string;
+          shopeeItemId: number;
+          itemName: string;
+          price: number;
+          stock: number;
+          imageUrl: string | null;
+          quantitySold30d: number;
+          revenue30d: number;
+          dailySalesRate: number;
+          daysUntilStockout: number | null;
+          stockTurnover: number | null;
+          isSlowMoving: boolean;
+          isOutOfStock: boolean;
+          isLowStock: boolean;
+          performanceRating: string;
+        }[];
+        summary: {
+          totalProducts: number;
+          lowStock: number;
+          outOfStock: number;
+          slowMoving: number;
+          excellentPerformers: number;
+          goodPerformers: number;
+        };
+      }>
+    > => {
+      const url = shopId
+        ? `${API_ENDPOINTS.shopee.productPerformance}?shopId=${shopId}`
+        : API_ENDPOINTS.shopee.productPerformance;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
+     * Get profit tracking data
+     */
+    getProfitData: async (
+      shopId?: string,
+    ): Promise<
+      ApiResponse<{
+        summary: {
+          totalRevenue: number;
+          totalCommission: number;
+          totalServiceFee: number;
+          totalSellerTxnFee: number;
+          totalShippingFee: number;
+          totalSellerIncome: number;
+          totalFees: number;
+          overallMargin: number;
+          totalOrders: number;
+          avgOrderValue: number;
+          avgFeePerOrder: number;
+        };
+        byProduct: {
+          productName: string;
+          revenue: number;
+          quantitySold: number;
+          orderCount: number;
+          estimatedFees: number;
+          estimatedProfit: number;
+          margin: number;
+        }[];
+        feeBreakdown: {
+          name: string;
+          amount: number;
+          percentage: number;
+        }[];
+      }>
+    > => {
+      const url = shopId
+        ? `${API_ENDPOINTS.shopee.profit}?shopId=${shopId}`
+        : API_ENDPOINTS.shopee.profit;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
+     * Test webhook endpoint
+     */
+    testWebhook: async (): Promise<ApiResponse<{ status: string; timestamp: string }>> => {
+      const response = await this.client.get(API_ENDPOINTS.shopee.webhook);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
   };
 }
 

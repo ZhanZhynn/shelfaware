@@ -470,6 +470,13 @@ model ShopeeOrder {
   deliveredAt       DateTime? // Delivery time
   completedAt       DateTime? // Completion time
   cancelledAt       DateTime? // Cancellation time
+  // Fee/commission tracking (from Shopee escrow detail)
+  commissionFee     Float?    @default(0) // Shopee platform commission
+  serviceFee        Float?    @default(0) // Shopee service fee
+  sellerTxnFee      Float?    @default(0) // Seller transaction fee
+  shippingFee       Float?    @default(0) // Actual shipping fee
+  sellerIncome      Float?    @default(0) // Net seller income after all fees
+  buyerPaymentMethod String?  // Payment method used by buyer
   shop              ShopeeShop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
   items             ShopeeOrderItem[]
 

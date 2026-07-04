@@ -17,6 +17,7 @@ import {
 import ShopeeStatsCards from "./ShopeeStatsCards";
 import ShopeeOrderStatusChart from "./ShopeeOrderStatusChart";
 import ShopeeTopProductsChart from "./ShopeeTopProductsChart";
+import ShopeeRevenueTrendChart from "./ShopeeRevenueTrendChart";
 
 export default function ShopeeOverview() {
   const mounted = useRef(false);
@@ -175,6 +176,7 @@ export default function ShopeeOverview() {
       {shops && shops.length > 0 && stats && (
         <>
           <ShopeeStatsCards stats={stats} />
+          <ShopeeRevenueTrendChart />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ShopeeOrderStatusChart data={stats.ordersByStatus} />
             <ShopeeTopProductsChart data={stats.topProducts} />

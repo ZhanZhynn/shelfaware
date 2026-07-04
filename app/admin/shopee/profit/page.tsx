@@ -1,10 +1,10 @@
 import { getSession } from "@/lib/auth-server";
 import { redirect } from "next/navigation";
-import ShopeeProducts from "@/components/shopee/ShopeeProducts";
+import ShopeeProfitContent from "./content";
 
-export default async function ShopeeProductsPage() {
+export default async function ShopeeProfitPage() {
   const user = await getSession();
   if (!user) redirect("/login");
 
-  return <ShopeeProducts />;
+  return <ShopeeProfitContent />;
 }

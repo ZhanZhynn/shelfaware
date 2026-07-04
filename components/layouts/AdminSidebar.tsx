@@ -20,6 +20,8 @@ import {
   FileText,
   UserCircle,
   ShoppingBag,
+  TrendingUp,
+  DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts";
@@ -142,6 +144,16 @@ const SHOPEE_ITEMS: NavItem[] = [
     href: "/admin/shopee/orders",
     label: "Shopee Orders",
     icon: ShoppingCart,
+  },
+  {
+    href: "/admin/shopee/analytics",
+    label: "Analytics",
+    icon: TrendingUp,
+  },
+  {
+    href: "/admin/shopee/profit",
+    label: "Profit Tracking",
+    icon: DollarSign,
   },
   {
     href: "/admin/shopee/sync-history",

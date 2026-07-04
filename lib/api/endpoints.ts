@@ -151,6 +151,11 @@ export const API_ENDPOINTS = {
     orders: "/shopee/orders",
     orderDetail: (id: string) => `/shopee/orders/${id}`,
     stats: "/shopee/stats",
+    revenueTrend: "/shopee/stats/revenue-trend",
+    buyers: "/shopee/stats/buyers",
+    productPerformance: "/shopee/stats/products",
+    profit: "/shopee/stats/profit",
+    webhook: "/shopee/webhook",
   },
 } as const;
 

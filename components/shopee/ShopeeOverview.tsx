@@ -19,11 +19,20 @@ import ShopeeOrderStatusChart from "./ShopeeOrderStatusChart";
 import ShopeeTopProductsTable from "./ShopeeTopProductsTable";
 import ShopeeRevenueTrendChart from "./ShopeeRevenueTrendChart";
 import ShopeeSlaAlertWidget from "./ShopeeSlaAlertWidget";
+import ShopeeDateRangeFilter from "./ShopeeDateRangeFilter";
 
 export default function ShopeeOverview() {
   const mounted = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const queryClient = useQueryClient();
+
+  // Default to current month
+  const now = new Date();
+  const defaultFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const defaultTo = now.toISOString().split("T")[0] || "";
+
+  const [dateFrom, setDateFrom] = useState<string | null>(defaultFrom);
+  const [dateTo, setDateTo] = useState<string | null>(defaultTo);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -41,9 +50,13 @@ export default function ShopeeOverview() {
   });
 
   const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["shopee", "stats"],
+    queryKey: ["shopee", "stats", dateFrom, dateTo],
     queryFn: async () => {
-      const response = await apiClient.shopee.getStats();
+      const response = await apiClient.shopee.getStats(
+        undefined,
+        dateFrom || undefined,
+        dateTo || undefined,
+      );
       return response.data;
     },
     enabled: !!shops && shops.length > 0,
@@ -176,15 +189,27 @@ export default function ShopeeOverview() {
       {/* SLA Alert Widget */}
       {shops && shops.length > 0 && <ShopeeSlaAlertWidget />}
 
-      {/* Stats and Charts */}
-      {shops && shops.length > 0 && stats && (
+      {/* Date Range Filter + Stats */}
+      {shops && shops.length > 0 && (
         <>
-          <ShopeeStatsCards stats={stats} />
-          <ShopeeRevenueTrendChart />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <ShopeeOrderStatusChart data={stats.ordersByStatus} />
-            <ShopeeTopProductsTable data={stats.topProducts} />
-          </div>
+          <ShopeeDateRangeFilter
+            onDateRangeChange={(from, to) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+            initialFrom={defaultFrom}
+            initialTo={defaultTo}
+          />
+          {stats && (
+            <>
+              <ShopeeStatsCards stats={stats} />
+              <ShopeeRevenueTrendChart />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <ShopeeOrderStatusChart data={stats.ordersByStatus} />
+                <ShopeeTopProductsTable data={stats.topProducts} />
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

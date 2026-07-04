@@ -1762,9 +1762,16 @@ class ApiClient {
      */
     getStats: async (
       shopId?: string,
+      dateFrom?: string,
+      dateTo?: string,
     ): Promise<ApiResponse<ShopeeStatsData>> => {
-      const url = shopId
-        ? `${API_ENDPOINTS.shopee.stats}?shopId=${shopId}`
+      const params = new URLSearchParams();
+      if (shopId) params.set("shopId", shopId);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      const qs = params.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.shopee.stats}?${qs}`
         : API_ENDPOINTS.shopee.stats;
       const response = await this.client.get<ShopeeStatsData>(url);
       return {

@@ -1,6 +1,7 @@
 /**
  * Shopee Stats — Aggregated Statistics
  * GET /api/shopee/stats
+ * Query params: shopId, dateFrom, dateTo (ISO date strings, e.g. 2026-06-01)
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,8 +24,27 @@ export async function GET(request: NextRequest) {
     const userId = session.id;
     const { searchParams } = new URL(request.url);
     const shopId = searchParams.get("shopId");
+    const dateFrom = searchParams.get("dateFrom");
+    const dateTo = searchParams.get("dateTo");
 
-    const cacheKey = cacheKeys.shopee.stats(shopId || "all");
+    // Build date filter for order queries
+    const dateFilter: Record<string, Date> = {};
+    if (dateFrom) {
+      dateFilter.gte = new Date(dateFrom);
+    }
+    if (dateTo) {
+      // Include the entire "to" day
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      dateFilter.lte = to;
+    }
+
+    const hasDateFilter = Object.keys(dateFilter).length > 0;
+    const dateRangeKey = hasDateFilter
+      ? `${dateFrom || ""}_${dateTo || ""}`
+      : undefined;
+
+    const cacheKey = cacheKeys.shopee.stats(shopId || "all", dateRangeKey);
     const cached = await getCache(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
@@ -49,8 +69,27 @@ export async function GET(request: NextRequest) {
         ordersByStatus: {} as Record<string, number>,
         topProducts: [] as { name: string; revenue: number; quantity: number }[],
         lastSyncedAt: null,
+        dateFrom: dateFrom || null,
+        dateTo: dateTo || null,
       };
       return NextResponse.json(emptyStats);
+    }
+
+    // Base order filter (shop + optional date range)
+    const orderWhere: Record<string, unknown> = { shopId: { in: shopIds } };
+    if (hasDateFilter) {
+      orderWhere.createdAt = dateFilter;
+    }
+
+    // For top products, we need to filter orders by date then join items
+    const orderItemWhere: Record<string, unknown> = {
+      order: { shopId: { in: shopIds } },
+    };
+    if (hasDateFilter) {
+      orderItemWhere.order = {
+        shopId: { in: shopIds },
+        createdAt: dateFilter,
+      };
     }
 
     // Aggregate in parallel
@@ -60,15 +99,15 @@ export async function GET(request: NextRequest) {
           where: { shopId: { in: shopIds } },
         }),
         prisma.shopeeOrder.count({
-          where: { shopId: { in: shopIds } },
+          where: orderWhere,
         }),
         prisma.shopeeOrder.groupBy({
           by: ["orderStatus"],
-          where: { shopId: { in: shopIds } },
+          where: orderWhere,
           _count: true,
         }),
         prisma.shopeeOrder.aggregate({
-          where: { shopId: { in: shopIds } },
+          where: orderWhere,
           _sum: { totalAmount: true },
           _avg: { totalAmount: true },
         }),
@@ -77,9 +116,7 @@ export async function GET(request: NextRequest) {
     // Get top products by revenue using DB aggregation (not in-memory)
     const topProductsRaw = await prisma.shopeeOrderItem.groupBy({
       by: ["productName"],
-      where: {
-        order: { shopId: { in: shopIds } },
-      },
+      where: orderItemWhere,
       _sum: { subtotal: true, quantity: true },
       orderBy: { _sum: { subtotal: "desc" } },
       take: 10,
@@ -111,6 +148,8 @@ export async function GET(request: NextRequest) {
       ordersByStatus: statusMap,
       topProducts,
       lastSyncedAt: lastShop?.lastSyncedAt || null,
+      dateFrom: dateFrom || null,
+      dateTo: dateTo || null,
     };
 
     await setCache(cacheKey, stats, 120);

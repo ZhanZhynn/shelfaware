@@ -368,7 +368,7 @@ export const cacheKeys = {
       return `shopee:orders:${shopId}:${filterStr}`;
     },
     orderDetail: (id: string) => `shopee:order:${id}`,
-    stats: (shopId: string) => `shopee:stats:${shopId}`,
+    stats: (shopId: string, dateRange?: string) => `shopee:stats:${shopId}:${dateRange || "all"}`,
     revenueTrend: (shopId: string, granularity: string) => `shopee:revenue-trend:${shopId}:${granularity}`,
     buyers: (shopId: string) => `shopee:buyers:${shopId}`,
     productPerformance: (shopId: string) => `shopee:product-performance:${shopId}`,

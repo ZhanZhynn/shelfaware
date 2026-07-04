@@ -162,9 +162,12 @@ export async function GET(request: NextRequest) {
         && ["****", "*"].includes(String(addr.state || ""));
 
       let region: string;
-      if (!isMasked && addr?.district) {
-        // Unmasked: use granular local fields
-        region = String(addr.district || addr.town || addr.city || addr.state || "Unknown");
+      if (!isMasked && addr?.state && String(addr.state).trim() && String(addr.state) !== "****") {
+        // Unmasked: use state (province) as the primary region
+        region = String(addr.state).trim();
+      } else if (!isMasked && addr?.city && String(addr.city).trim() && String(addr.city) !== "****") {
+        // State missing — fall back to city
+        region = String(addr.city).trim();
       } else if (order.region) {
         // Masked or missing: fall back to order-level region (country code)
         const code = order.region;

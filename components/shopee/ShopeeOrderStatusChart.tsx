@@ -15,6 +15,11 @@ const STATUS_COLORS: Record<string, string> = {
   COMPLETED: "#22c55e",
   CANCELLED: "#ef4444",
   INVOICE_PENDING: "#f97316",
+  PENDING: "#f59e0b",
+  CONFIRMED: "#3b82f6",
+  PROCESSING: "#8b5cf6",
+  DELIVERED: "#22c55e",
+  REFUNDED: "#ef4444",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -25,15 +30,42 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   INVOICE_PENDING: "Invoice Pending",
+  PENDING: "Unpaid",
+  CONFIRMED: "Ready to Ship",
+  PROCESSING: "Processed",
+  DELIVERED: "Completed",
+  REFUNDED: "Cancelled",
 };
 
+function normalizeStatus(raw: string): string {
+  const upper = raw.toUpperCase();
+  // Exact match first
+  if (STATUS_LABELS[upper]) return STATUS_LABELS[upper];
+  // Match common Shopee long-form descriptions
+  if (upper.includes("ORDER RECEIVED")) return "Order Received";
+  if (upper.includes("READY TO SHIP") || upper.includes("TO_SHIP")) return "Ready to Ship";
+  if (upper.includes("PROCESSED")) return "Processed";
+  if (upper.includes("SHIPPED")) return "Shipped";
+  if (upper.includes("COMPLETED")) return "Completed";
+  if (upper.includes("CANCELLED") || upper.includes("CANCELED")) return "Cancelled";
+  if (upper.includes("UNPAID")) return "Unpaid";
+  if (upper.includes("RETURN") || upper.includes("REFUND")) return "Return/Refund";
+  if (upper.includes("INVOICE")) return "Invoice Pending";
+  return raw;
+}
+
 export default function ShopeeOrderStatusChart({ data }: ShopeeOrderStatusChartProps) {
-  const chartData = Object.entries(data)
-    .map(([status, count]) => ({
-      name: STATUS_LABELS[status] || status,
-      value: count,
-      color: STATUS_COLORS[status] || "#6b7280",
-    }))
+  // Build chart data, merging statuses that normalize to the same label
+  const merged: Record<string, { value: number; color: string }> = {};
+  for (const [status, count] of Object.entries(data)) {
+    const name = normalizeStatus(status);
+    if (!merged[name]) {
+      merged[name] = { value: 0, color: STATUS_COLORS[status.toUpperCase()] || "#6b7280" };
+    }
+    merged[name].value += count;
+  }
+  const chartData = Object.entries(merged)
+    .map(([name, { value, color }]) => ({ name, value, color }))
     .filter((d) => d.value > 0);
 
   return (

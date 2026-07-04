@@ -114,17 +114,22 @@ export default function ShopeeProducts() {
       {
         accessorKey: "stock",
         header: "Stock",
-        cell: ({ row }) => (
-          <Badge variant={row.original.stock === 0 ? "destructive" : row.original.stock < 10 ? "secondary" : "default"}>
-            {row.original.stock}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const threshold = data?.lowStockThreshold ?? 10;
+          const variant =
+            row.original.stock === 0
+              ? ("destructive" as const)
+              : row.original.stock < threshold
+                ? ("warning" as const)
+                : ("success" as const);
+          return <Badge variant={variant}>{row.original.stock}</Badge>;
+        },
       },
       {
         accessorKey: "status",
         header: "Status",
         cell: ({ row }) => (
-          <Badge variant={row.original.status === "NORMAL" ? "default" : "secondary"}>
+          <Badge variant={row.original.status === "NORMAL" ? "success" : "destructive"}>
             {row.original.status}
           </Badge>
         ),

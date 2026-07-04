@@ -35,9 +35,11 @@ export async function GET(request: NextRequest) {
 
     const shops = await prisma.shopeeShop.findMany({
       where: shopWhere,
-      select: { id: true },
+      select: { id: true, lowStockThreshold: true },
     });
     const shopIds = shops.map((s) => s.id);
+    // Use the lowest threshold from selected shops (default 10)
+    const lowStockThreshold = Math.min(...shops.map((s) => s.lowStockThreshold), 10);
 
     if (shopIds.length === 0) {
       return NextResponse.json({ products: [], summary: { totalProducts: 0, lowStock: 0, outOfStock: 0, slowMoving: 0 } });
@@ -116,8 +118,8 @@ export async function GET(request: NextRequest) {
       // Out of stock
       const isOutOfStock = product.stock === 0;
 
-      // Low stock (< 5 units)
-      const isLowStock = product.stock > 0 && product.stock < 5;
+      // Low stock (per shop threshold)
+      const isLowStock = product.stock > 0 && product.stock < lowStockThreshold;
 
       // Performance rating
       let performanceRating: "excellent" | "good" | "average" | "slow" | "dead";
@@ -161,7 +163,7 @@ export async function GET(request: NextRequest) {
       goodPerformers: productPerformance.filter((p) => p.performanceRating === "good").length,
     };
 
-    const result = { products: productPerformance, summary };
+    const result = { products: productPerformance, summary, lowStockThreshold };
 
     await setCache(cacheKey, result, 300);
 

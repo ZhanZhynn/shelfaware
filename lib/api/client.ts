@@ -1682,7 +1682,7 @@ class ApiClient {
       limit?: number;
       search?: string;
     }): Promise<
-      ApiResponse<{ products: ShopeeProductData[]; total: number; page: number; limit: number }>
+      ApiResponse<{ products: ShopeeProductData[]; total: number; page: number; limit: number; lowStockThreshold: number }>
     > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
@@ -1858,6 +1858,7 @@ class ApiClient {
           excellentPerformers: number;
           goodPerformers: number;
         };
+        lowStockThreshold: number;
       }>
     > => {
       const url = shopId

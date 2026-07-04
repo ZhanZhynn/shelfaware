@@ -399,6 +399,7 @@ model ShopeeShop {
   refreshToken   String    // Shopee refresh token
   tokenExpiry    DateTime? // When access_token expires (computed from expire_in)
   lastSyncedAt   DateTime? // Last successful sync timestamp
+  lowStockThreshold Int @default(10) // Configurable per-shop low-stock threshold
   createdAt      DateTime  @default(now()) @db.Date
   updatedAt      DateTime? @db.Date
   createdBy      String    @db.ObjectId

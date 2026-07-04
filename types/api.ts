@@ -73,6 +73,7 @@ export interface ShopeeShopData {
   isCb: boolean | null;
   lastSyncedAt: string | null;
   createdAt: string;
+  lowStockThreshold: number;
 }
 
 export interface ShopeeProductData {

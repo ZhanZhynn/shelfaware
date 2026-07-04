@@ -36,10 +36,10 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   failed: <XCircle className="h-4 w-4 text-red-500" />,
 };
 
-const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive"> = {
+const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "success" | "warning"> = {
   running: "secondary",
-  completed: "default",
-  completed_with_errors: "secondary",
+  completed: "success",
+  completed_with_errors: "warning",
   failed: "destructive",
 };
 

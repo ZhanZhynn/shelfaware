@@ -40,14 +40,14 @@ interface ShopeeOrderRow {
   items: { productName: string; quantity: number }[];
 }
 
-const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  UNPAID: "secondary",
-  READY_TO_SHIP: "default",
-  PROCESSED: "default",
+const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "outline" | "success" | "warning"> = {
+  UNPAID: "warning",
+  READY_TO_SHIP: "warning",
+  PROCESSED: "warning",
   SHIPPED: "outline",
-  COMPLETED: "default",
+  COMPLETED: "success",
   CANCELLED: "destructive",
-  INVOICE_PENDING: "secondary",
+  INVOICE_PENDING: "warning",
 };
 
 const STATUS_LABELS: Record<string, string> = {

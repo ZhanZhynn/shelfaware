@@ -50,13 +50,17 @@ export async function GET(request: NextRequest) {
     }
 
     const where: Record<string, unknown> = { userId };
+    let lowStockThreshold = 10; // default
     // shopId from URL is the Shopee numeric ID — look up the ObjectId
     if (shopId) {
       const shop = await prisma.shopeeShop.findFirst({
         where: { shopId: Number(shopId), userId },
-        select: { id: true },
+        select: { id: true, lowStockThreshold: true },
       });
-      if (shop) where.shopId = shop.id;
+      if (shop) {
+        where.shopId = shop.id;
+        lowStockThreshold = shop.lowStockThreshold;
+      }
     }
     if (search) {
       where.OR = [
@@ -75,7 +79,7 @@ export async function GET(request: NextRequest) {
       prisma.shopeeProduct.count({ where }),
     ]);
 
-    const result = { products, total, page, limit };
+    const result = { products, total, page, limit, lowStockThreshold };
     await setCache(cacheKey, result, 120);
 
     return NextResponse.json(result);

@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
         isCb: true,
         lastSyncedAt: true,
         createdAt: true,
+        lowStockThreshold: true,
       },
       orderBy: { createdAt: "desc" },
     });

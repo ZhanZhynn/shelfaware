@@ -36,11 +36,11 @@ interface ProductPerformance {
   performanceRating: string;
 }
 
-const RATING_COLORS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  excellent: "default",
-  good: "default",
-  average: "secondary",
-  slow: "outline",
+const RATING_COLORS: Record<string, "default" | "secondary" | "destructive" | "outline" | "success" | "warning"> = {
+  excellent: "success",
+  good: "success",
+  average: "warning",
+  slow: "secondary",
   dead: "destructive",
 };
 
@@ -100,11 +100,16 @@ export default function ShopeeProductPerformance() {
       {
         accessorKey: "stock",
         header: "Stock",
-        cell: ({ row }) => (
-          <Badge variant={row.original.isOutOfStock ? "destructive" : row.original.isLowStock ? "secondary" : "default"}>
-            {row.original.stock}
-          </Badge>
-        ),
+        cell: ({ row }) => {
+          const threshold = data?.lowStockThreshold ?? 10;
+          const variant =
+            row.original.isOutOfStock
+              ? ("destructive" as const)
+              : row.original.stock < threshold
+                ? ("warning" as const)
+                : ("success" as const);
+          return <Badge variant={variant}>{row.original.stock}</Badge>;
+        },
       },
       {
         accessorKey: "quantitySold30d",

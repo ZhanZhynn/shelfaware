@@ -155,6 +155,7 @@ export const API_ENDPOINTS = {
     buyers: "/shopee/stats/buyers",
     productPerformance: "/shopee/stats/products",
     profit: "/shopee/stats/profit",
+    shippingDiscrepancy: "/shopee/stats/shipping-discrepancy",
     webhook: "/shopee/webhook",
     import: "/shopee/import",
     nearSlaOrders: "/shopee/orders/near-sla",

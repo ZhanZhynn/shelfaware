@@ -608,6 +608,7 @@ export async function syncShopeeOrders(
           serviceFee: Number(orderIncome.service_fee || 0),
           sellerTxnFee: Number(orderIncome.seller_transaction_fee || 0),
           shippingFee: Number(orderIncome.actual_shipping_fee || orderIncome.final_shipping_fee || 0),
+          estimatedShippingFee: Number(orderIncome.estimated_shipping_fee || 0),
           sellerIncome: Number(orderIncome.escrow_amount || 0),
           buyerPaymentMethod: String(buyerPaymentInfo.buyer_payment_method || detail?.payment_method || ""),
           // SLA fields from package detail

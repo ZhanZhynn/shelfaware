@@ -478,7 +478,8 @@ model ShopeeOrder {
   commissionFee     Float?    @default(0) // Shopee platform commission
   serviceFee        Float?    @default(0) // Shopee service fee
   sellerTxnFee      Float?    @default(0) // Seller transaction fee
-  shippingFee       Float?    @default(0) // Actual shipping fee
+  shippingFee       Float?    @default(0) // Actual shipping fee (from escrow)
+  estimatedShippingFee Float? @default(0) // Estimated shipping fee (from escrow) — compare with actual to find weight/dimension issues
   sellerIncome      Float?    @default(0) // Net seller income after all fees
   buyerPaymentMethod String?  // Payment method used by buyer
   // SLA / shipping deadline tracking (from getPackageDetail)

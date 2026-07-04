@@ -1927,6 +1927,46 @@ class ApiClient {
     },
 
     /**
+     * Get shipping fee discrepancy data
+     */
+    getShippingDiscrepancy: async (
+      shopId?: string,
+      threshold: number = 10,
+    ): Promise<
+      ApiResponse<{
+        summary: {
+          totalOrders: number;
+          ordersWithDiscrepancy: number;
+          totalEstimated: number;
+          totalActual: number;
+          totalDiscrepancy: number;
+          threshold: number;
+        };
+        products: {
+          productName: string;
+          orderCount: number;
+          totalEstimated: number;
+          totalActual: number;
+          avgDiscrepancy: number;
+          discrepancyPct: number;
+          totalRevenue: number;
+          totalQuantity: number;
+        }[];
+      }>
+    > => {
+      const params = new URLSearchParams();
+      if (shopId) params.set("shopId", shopId);
+      params.set("threshold", String(threshold));
+      const url = `${API_ENDPOINTS.shopee.shippingDiscrepancy}?${params.toString()}`;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
      * Test webhook endpoint
      */
     testWebhook: async (): Promise<ApiResponse<{ status: string; timestamp: string }>> => {

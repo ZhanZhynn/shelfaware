@@ -27,7 +27,12 @@ interface RevenueTrendData {
 
 type Granularity = "daily" | "weekly" | "monthly";
 
-export default function ShopeeRevenueTrendChart() {
+interface ShopeeRevenueTrendChartProps {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+}
+
+export default function ShopeeRevenueTrendChart({ dateFrom, dateTo }: ShopeeRevenueTrendChartProps) {
   const mounted = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>("daily");
@@ -40,9 +45,14 @@ export default function ShopeeRevenueTrendChart() {
   }, []);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["shopee", "revenue-trend", granularity],
+    queryKey: ["shopee", "revenue-trend", granularity, dateFrom, dateTo],
     queryFn: async () => {
-      const response = await apiClient.shopee.getRevenueTrend(granularity);
+      const response = await apiClient.shopee.getRevenueTrend(
+        granularity,
+        undefined,
+        dateFrom || undefined,
+        dateTo || undefined,
+      );
       return response.data;
     },
   });

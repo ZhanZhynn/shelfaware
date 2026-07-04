@@ -203,7 +203,7 @@ export default function ShopeeOverview() {
           {stats && (
             <>
               <ShopeeStatsCards stats={stats} />
-              <ShopeeRevenueTrendChart />
+              <ShopeeRevenueTrendChart dateFrom={dateFrom} dateTo={dateTo} />
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <ShopeeOrderStatusChart data={stats.ordersByStatus} />
                 <ShopeeTopProductsTable data={stats.topProducts} />

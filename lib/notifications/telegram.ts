@@ -1,10 +1,12 @@
 /**
  * Telegram notification helper
  * Sends messages via Telegram Bot API.
- * Graceful no-op if TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID are not configured.
+ * Reads credentials from DB (NotificationSetting) first, falls back to env vars.
+ * Graceful no-op if no credentials are configured.
  */
 
 import { logger } from "@/lib/logger";
+import prisma from "@/prisma/client";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -17,30 +19,68 @@ function escapeMarkdownV2(text: string): string {
 }
 
 /**
+ * Resolve Telegram credentials: DB first, env fallback.
+ * Returns null if not configured.
+ */
+async function getTelegramCredentials(): Promise<{
+  token: string;
+  chatId: string;
+} | null> {
+  // Try DB first — find any user with telegram enabled
+  try {
+    const setting = await prisma.notificationSetting.findFirst({
+      where: { telegramEnabled: true },
+    });
+
+    if (setting?.telegramBotToken && setting?.telegramChatId) {
+      return {
+        token: setting.telegramBotToken,
+        chatId: setting.telegramChatId,
+      };
+    }
+  } catch (err) {
+    logger.warn("[Telegram] Failed to read from DB, falling back to env:", err);
+  }
+
+  // Fallback to env vars
+  const envToken = process.env.TELEGRAM_BOT_TOKEN;
+  const envChatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (envToken && envChatId) {
+    return { token: envToken, chatId: envChatId };
+  }
+
+  return null;
+}
+
+/**
  * Send a message via Telegram Bot API.
- * Returns true if sent successfully, false if skipped (missing config) or failed.
+ * @param text - Message text
+ * @param options - Parse mode, silent mode, and optional explicit credentials
+ * @returns true if sent successfully, false if skipped or failed
  */
 export async function sendTelegramMessage(
   text: string,
   options?: {
     parseMode?: "MarkdownV2" | "HTML" | "Markdown";
     silent?: boolean;
+    /** Override credentials (e.g. for test endpoint) */
+    credentials?: { token: string; chatId: string };
   },
 ): Promise<boolean> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const creds = options?.credentials ?? (await getTelegramCredentials());
 
-  if (!token || !chatId) {
+  if (!creds) {
     logger.info(
-      "[Telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping notification",
+      "[Telegram] No credentials configured (DB or env) — skipping notification",
     );
     return false;
   }
 
   try {
-    const url = `${TELEGRAM_API}/bot${token}/sendMessage`;
+    const url = `${TELEGRAM_API}/bot${creds.token}/sendMessage`;
     const body: Record<string, unknown> = {
-      chat_id: chatId,
+      chat_id: creds.chatId,
       text,
       disable_notification: options?.silent ?? false,
     };

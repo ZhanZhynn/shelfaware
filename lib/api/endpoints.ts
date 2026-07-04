@@ -160,6 +160,12 @@ export const API_ENDPOINTS = {
     nearSlaOrders: "/shopee/orders/near-sla",
     slaAlert: "/shopee/alerts/sla",
   },
+
+  // Notification settings
+  settings: {
+    notifications: "/settings/notifications",
+    testNotification: "/settings/notifications/test",
+  },
 } as const;
 
 /**

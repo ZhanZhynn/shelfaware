@@ -23,6 +23,7 @@ import {
   TrendingUp,
   DollarSign,
   Upload,
+  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts";
@@ -280,6 +281,13 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
       >
         <Mail className="h-4 w-4 flex-shrink-0" />
         Email Preferences
+      </Link>
+      <Link
+        href="/admin/settings/notifications"
+        className={linkClass("/admin/settings/notifications", true)}
+      >
+        <Bell className="h-4 w-4 flex-shrink-0" />
+        Notifications
       </Link>
 
       {/* Spacer to push user + logout to bottom */}

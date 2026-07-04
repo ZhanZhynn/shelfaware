@@ -243,6 +243,7 @@ model User {
   // }
   notifications Notification[] // In-app notifications (one-to-many relationship)
   shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
+  notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
 }
 
 model UserAction {
@@ -533,4 +534,16 @@ model ShopeeSyncLog {
   @@index([userId, shopId])
   @@index([status])
   @@index([startedAt])
+}
+
+model NotificationSetting {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String    @unique @db.ObjectId // One setting per user
+  telegramBotToken   String?   // Telegram Bot API token
+  telegramChatId     String?   // Telegram chat/group ID
+  telegramEnabled    Boolean   @default(false) // Master toggle for Telegram notifications
+  createdAt          DateTime  @default(now()) @db.Date
+  updatedAt          DateTime? @updatedAt @db.Date
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

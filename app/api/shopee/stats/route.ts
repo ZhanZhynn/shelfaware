@@ -75,10 +75,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(emptyStats);
     }
 
-    // Base order filter (shop + optional date range)
+    // Base order filter (shop + optional date range on Shopee order date)
     const orderWhere: Record<string, unknown> = { shopId: { in: shopIds } };
     if (hasDateFilter) {
-      orderWhere.createdAt = dateFilter;
+      orderWhere.shopeeCreatedAt = dateFilter;
     }
 
     // For top products, we need to filter orders by date then join items
@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
     if (hasDateFilter) {
       orderItemWhere.order = {
         shopId: { in: shopIds },
-        createdAt: dateFilter,
+        shopeeCreatedAt: dateFilter,
       };
     }
 

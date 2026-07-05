@@ -9,7 +9,7 @@ import type { NextRequest } from "next/server";
 /**
  * Production URL
  */
-const PRODUCTION_URL = "https://stockly-inventory.vercel.app";
+const PRODUCTION_URL = "http://localhost:3000";
 
 /**
  * Check if an origin is allowed for CORS
@@ -25,10 +25,11 @@ export function isAllowedOrigin(origin: string | null): boolean {
     return true;
   }
 
-  // Allow localhost for development (any port)
+  // Allow localhost and Tailscale origins for development
   if (process.env.NODE_ENV === "development") {
-    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
-    if (localhostRegex.test(origin)) {
+    const devOriginRegex =
+      /^https?:\/\/(localhost|100\.72\.140\.36|100\.78\.46\.77)(:\d+)?$/;
+    if (devOriginRegex.test(origin)) {
       return true;
     }
   }
@@ -61,7 +62,7 @@ export function createCorsHeaders(request: NextRequest): Headers {
   headers.set("Access-Control-Allow-Origin", getAllowedOrigin(origin));
   headers.set(
     "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS"
+    "GET, POST, PUT, DELETE, OPTIONS",
   );
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   headers.set("Access-Control-Allow-Credentials", "true");

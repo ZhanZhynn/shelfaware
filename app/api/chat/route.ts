@@ -117,7 +117,6 @@ export async function POST(request: NextRequest) {
     { role: "system", content: SYSTEM_PROMPT },
     ...messages.map((m): ChatMessage => {
       if (m.role === "user") return { role: "user", content: m.content };
-      if (m.role === "system") return { role: "system", content: m.content };
       return { role: "assistant", content: m.content ?? "" };
     }),
   ];

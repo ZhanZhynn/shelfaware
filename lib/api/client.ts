@@ -104,7 +104,7 @@ function createAxiosInstance(): AxiosInstance {
   const instance = axios.create({
     baseURL:
       process.env.NODE_ENV === "production"
-        ? "https://stockly-inventory.vercel.app/api"
+        ? "http://localhost:3000/api"
         : "http://localhost:3000/api",
     headers: {
       "Content-Type": "application/json",
@@ -985,9 +985,7 @@ class ApiClient {
       };
     },
 
-    getClientCatalog: async (): Promise<
-      ApiResponse<ClientCatalogOverview>
-    > => {
+    getClientCatalog: async (): Promise<ApiResponse<ClientCatalogOverview>> => {
       const response = await this.client.get<ClientCatalogOverview>(
         API_ENDPOINTS.portal.clientCatalog,
       );
@@ -1009,9 +1007,11 @@ class ApiClient {
       };
     },
 
-    getClientBrowseProducts: async (
-      params: { ownerId: string; supplierId?: string; categoryId?: string },
-    ): Promise<ApiResponse<ClientBrowseProductsResponse>> => {
+    getClientBrowseProducts: async (params: {
+      ownerId: string;
+      supplierId?: string;
+      categoryId?: string;
+    }): Promise<ApiResponse<ClientBrowseProductsResponse>> => {
       const searchParams = new URLSearchParams();
       searchParams.set("ownerId", params.ownerId);
       if (params.supplierId) searchParams.set("supplierId", params.supplierId);
@@ -1644,8 +1644,18 @@ class ApiClient {
       syncType: "products" | "orders" | "all";
     }): Promise<
       ApiResponse<{
-        products?: { synced: number; created: number; updated: number; errors: string[] };
-        orders?: { synced: number; created: number; updated: number; errors: string[] };
+        products?: {
+          synced: number;
+          created: number;
+          updated: number;
+          errors: string[];
+        };
+        orders?: {
+          synced: number;
+          created: number;
+          updated: number;
+          errors: string[];
+        };
       }>
     > => {
       const response = await this.client.post(API_ENDPOINTS.shopee.sync, data);
@@ -1682,7 +1692,13 @@ class ApiClient {
       limit?: number;
       search?: string;
     }): Promise<
-      ApiResponse<{ products: ShopeeProductData[]; total: number; page: number; limit: number; lowStockThreshold: number }>
+      ApiResponse<{
+        products: ShopeeProductData[];
+        total: number;
+        page: number;
+        limit: number;
+        lowStockThreshold: number;
+      }>
     > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
@@ -1724,7 +1740,12 @@ class ApiClient {
       limit?: number;
       status?: string;
     }): Promise<
-      ApiResponse<{ orders: ShopeeOrderData[]; total: number; page: number; limit: number }>
+      ApiResponse<{
+        orders: ShopeeOrderData[];
+        total: number;
+        page: number;
+        limit: number;
+      }>
     > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
@@ -1790,7 +1811,10 @@ class ApiClient {
       dateFrom?: string,
       dateTo?: string,
     ): Promise<
-      ApiResponse<{ data: { period: string; revenue: number; orders: number }[]; granularity: string }>
+      ApiResponse<{
+        data: { period: string; revenue: number; orders: number }[];
+        granularity: string;
+      }>
     > => {
       const searchParams = new URLSearchParams();
       searchParams.set("granularity", granularity);
@@ -1817,7 +1841,11 @@ class ApiClient {
         repeatBuyers: number;
         repeatRate: number;
         avgOrdersPerBuyer: number;
-        topBuyers: { username: string; totalSpent: number; orderCount: number }[];
+        topBuyers: {
+          username: string;
+          totalSpent: number;
+          orderCount: number;
+        }[];
         geographicDistribution: { region: string; count: number }[];
         spendingTiers: { tier: string; count: number }[];
       }>
@@ -1969,7 +1997,9 @@ class ApiClient {
     /**
      * Test webhook endpoint
      */
-    testWebhook: async (): Promise<ApiResponse<{ status: string; timestamp: string }>> => {
+    testWebhook: async (): Promise<
+      ApiResponse<{ status: string; timestamp: string }>
+    > => {
       const response = await this.client.get(API_ENDPOINTS.shopee.webhook);
       return {
         data: response.data,
@@ -1992,7 +2022,13 @@ class ApiClient {
           avgFrequency: number;
           avgMonetary: number;
         };
-        segments: { champions: number; loyal: number; potential: number; atRisk: number; lost: number };
+        segments: {
+          champions: number;
+          loyal: number;
+          potential: number;
+          atRisk: number;
+          lost: number;
+        };
         churnRisk: { high: number; medium: number; low: number };
         topBuyersByClv: {
           username: string;
@@ -2024,7 +2060,12 @@ class ApiClient {
       limit?: number;
       status?: string;
     }): Promise<
-      ApiResponse<{ returns: Record<string, unknown>[]; total: number; page: number; limit: number }>
+      ApiResponse<{
+        returns: Record<string, unknown>[];
+        total: number;
+        page: number;
+        limit: number;
+      }>
     > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);

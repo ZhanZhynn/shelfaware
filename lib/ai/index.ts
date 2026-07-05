@@ -15,9 +15,18 @@ export {
   type ChatCompletionFailureKind,
   type ChatCompletionResult,
   type LlmProvider,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolFunctionSpec,
 } from "./create-chat-completion";
 
-export { createZenChatCompletion, DEFAULT_ZEN_MODEL } from "./opencode-zen";
+export {
+  createZenChatCompletion,
+  DEFAULT_ZEN_MODEL,
+  DEFAULT_CHAT_MODEL,
+  ZEN_FREE_MODELS,
+  isZenFreeModel,
+} from "./opencode-zen";
 export {
   createGroqChatCompletion,
   DEFAULT_GROQ_MODEL,

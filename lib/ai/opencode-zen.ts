@@ -20,6 +20,27 @@ const ZEN_BASE_URL = "https://opencode.ai/zen/v1";
 /** Default model when none specified — free tier, no billing required. */
 export const DEFAULT_ZEN_MODEL = "mimo-v2.5-free";
 
+/**
+ * Free-tier Zen model ids. Used by the chatbot UI model picker.
+ * Larger models (nemotron) are more reliable at emitting `tool_calls`.
+ */
+export const ZEN_FREE_MODELS = [
+  "mimo-v2.5-free",
+  "deepseek-v4-flash-free",
+  "big-pickle",
+  "north-mini-code-free",
+  "nemotron-3-ultra-free",
+  "gpt-5-nano",
+] as const;
+
+/** Model most likely to support OpenAI-style tool-calling reliably. */
+export const DEFAULT_CHAT_MODEL = "nemotron-3-ultra-free";
+
+/** True when the model id is one of the advertised free Zen models. */
+export function isZenFreeModel(model: string): boolean {
+  return (ZEN_FREE_MODELS as readonly string[]).includes(model);
+}
+
 export function isZenConfigured(): boolean {
   const key = process.env.OPENCODE_ZEN_API_KEY;
   return typeof key === "string" && key.trim().length > 0;
@@ -61,6 +82,12 @@ export async function createZenChatCompletion(
         messages,
         max_tokens: options.max_tokens ?? 1024,
         temperature: options.temperature ?? 0.7,
+        ...(options.tools
+          ? {
+              tools: options.tools,
+              tool_choice: options.tool_choice ?? "auto",
+            }
+          : {}),
       }),
       signal: AbortSignal.timeout(30000),
     });

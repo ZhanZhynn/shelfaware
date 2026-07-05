@@ -103,6 +103,7 @@ const API_WRITE_EXEMPT = new Set([
   "app/api/auth/login/route.ts",
   "app/api/auth/logout/route.ts",
   "app/api/ai/insights/route.ts",
+  "app/api/chat/route.ts",
   "app/api/shipping/rates/route.ts",
   "app/api/notifications/route.ts",
   "app/api/email/queue/process/route.ts",

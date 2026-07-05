@@ -19,6 +19,9 @@ export type {
   ChatCompletionFailureKind,
   ChatCompletionResult,
   LlmProvider,
+  ToolCall,
+  ToolDefinition,
+  ToolFunctionSpec,
 } from "./types";
 
 /** Re-export for callers that only check Zen */

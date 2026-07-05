@@ -5,6 +5,7 @@ import Navbar from "@/components/layouts/Navbar";
 import PageWithSidebar from "@/components/layouts/PageWithSidebar";
 import AdminSidebar from "@/components/layouts/AdminSidebar";
 import { PageContentWrapper } from "@/components/shared";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 
 /**
  * Admin layout: Navbar + left AdminSidebar + scrollable content.
@@ -19,6 +20,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       >
         <div className="min-w-0 flex-1 px-1 sm:px-0">{children}</div>
       </PageWithSidebar>
+      <ChatWidget />
     </Navbar>
   );
 }

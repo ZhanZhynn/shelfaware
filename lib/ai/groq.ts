@@ -76,6 +76,12 @@ export async function createGroqChatCompletion(
         messages,
         max_tokens: options.max_tokens ?? 1024,
         temperature: options.temperature ?? 0.7,
+        ...(options.tools
+          ? {
+              tools: options.tools,
+              tool_choice: options.tool_choice ?? "auto",
+            }
+          : {}),
       }),
       signal: AbortSignal.timeout(30000),
     });

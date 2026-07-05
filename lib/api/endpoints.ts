@@ -160,6 +160,11 @@ export const API_ENDPOINTS = {
     import: "/shopee/import",
     nearSlaOrders: "/shopee/orders/near-sla",
     slaAlert: "/shopee/alerts/sla",
+    lowStockAlert: "/shopee/alerts/low-stock",
+    digest: "/shopee/digest",
+    clv: "/shopee/stats/clv",
+    returns: "/shopee/returns",
+    returnsStats: "/shopee/stats/returns",
   },
 
   // Notification settings

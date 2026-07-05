@@ -19,6 +19,7 @@ import ShopeeOrderStatusChart from "./ShopeeOrderStatusChart";
 import ShopeeTopProductsTable from "./ShopeeTopProductsTable";
 import ShopeeRevenueTrendChart from "./ShopeeRevenueTrendChart";
 import ShopeeSlaAlertWidget from "./ShopeeSlaAlertWidget";
+import ShopeeLowStockAlertWidget from "./ShopeeLowStockAlertWidget";
 import ShopeeDateRangeFilter from "./ShopeeDateRangeFilter";
 
 export default function ShopeeOverview() {
@@ -186,8 +187,13 @@ export default function ShopeeOverview() {
         </Card>
       )}
 
-      {/* SLA Alert Widget */}
-      {shops && shops.length > 0 && <ShopeeSlaAlertWidget />}
+      {/* Alert Widgets */}
+      {shops && shops.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <ShopeeSlaAlertWidget />
+          <ShopeeLowStockAlertWidget />
+        </div>
+      )}
 
       {/* Date Range Filter + Stats */}
       {shops && shops.length > 0 && (

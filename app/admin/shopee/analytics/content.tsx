@@ -4,6 +4,7 @@ import { useState } from "react";
 import ShopeeRevenueTrendChart from "@/components/shopee/ShopeeRevenueTrendChart";
 import ShopeeBuyerAnalytics from "@/components/shopee/ShopeeBuyerAnalytics";
 import ShopeeProductPerformance from "@/components/shopee/ShopeeProductPerformance";
+import ShopeeClvAnalytics from "@/components/shopee/ShopeeClvAnalytics";
 import ShopeeDateRangeFilter from "@/components/shopee/ShopeeDateRangeFilter";
 
 export default function ShopeeAnalyticsContent() {
@@ -32,6 +33,8 @@ export default function ShopeeAnalyticsContent() {
       <ShopeeRevenueTrendChart />
 
       <ShopeeBuyerAnalytics />
+
+      <ShopeeClvAnalytics />
 
       <ShopeeProductPerformance />
     </div>

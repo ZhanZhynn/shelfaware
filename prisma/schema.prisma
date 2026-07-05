@@ -409,6 +409,7 @@ model ShopeeShop {
   products       ShopeeProduct[]
   orders         ShopeeOrder[]
   syncLogs       ShopeeSyncLog[]
+  returns        ShopeeReturn[]
 
   @@unique([userId, shopId])
   @@index([userId])
@@ -535,6 +536,45 @@ model ShopeeSyncLog {
   @@index([userId, shopId])
   @@index([status])
   @@index([startedAt])
+}
+
+model ShopeeReturn {
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId                String    @db.ObjectId
+  userId                String    @db.ObjectId
+  returnSn              String    @unique // Shopee return serial number
+  orderSn               String    // FK to ShopeeOrder.shopeeOrderId
+  status                String    // REQUESTED, PROCESSING, ACCEPTED, COMPLETED, CANCELLED
+  refundAmount          Float     @default(0)
+  currency              String?
+  reason                String?
+  textReason            String?
+  trackingNumber        String?
+  needsLogistics        Boolean   @default(false)
+  amountBeforeDiscount  Float?    @default(0)
+  negotiationStatus     String?
+  sellerProofStatus     String?
+  sellerCompensationStatus String?
+  returnRefundType      String?
+  returnSolution        Int?
+  returnRefundRequestType Int?
+  validationType        String?
+  returnShipDueDate     DateTime?
+  returnSellerDueDate   DateTime?
+  images                Json?     // Array of image URLs
+  items                 Json?     // Array of ReturnItem { model_id, name, images, amount, item_price }
+  buyerUsername         String?
+  buyerEmail            String?
+  shopeeCreatedAt       DateTime?
+  shopeeUpdatedAt       DateTime?
+  createdAt             DateTime  @default(now()) @db.Date
+  updatedAt             DateTime? @updatedAt @db.Date
+  shop                  ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([orderSn])
+  @@index([status])
+  @@index([shopeeCreatedAt])
 }
 
 model NotificationSetting {

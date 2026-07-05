@@ -125,7 +125,7 @@ export default function ShopeeNotificationSettings() {
           Telegram Notifications
         </CardTitle>
         <CardDescription>
-          Configure Telegram bot for SLA alerts and order notifications. Get alerts when orders are approaching their ship-by deadline.
+          Configure Telegram bot for SLA alerts, low stock alerts, and daily/weekly digests. Get alerts when orders are approaching their ship-by deadline or products need restocking.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -134,7 +134,7 @@ export default function ShopeeNotificationSettings() {
           <div className="space-y-0.5">
             <Label htmlFor="telegram-enabled">Enable Telegram Alerts</Label>
             <p className="text-sm text-muted-foreground">
-              Receive SLA and order notifications via Telegram
+              Receive SLA alerts, low stock alerts, and daily/weekly digests via Telegram
             </p>
           </div>
           <Switch

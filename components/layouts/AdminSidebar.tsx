@@ -24,6 +24,7 @@ import {
   DollarSign,
   Upload,
   Bell,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts";
@@ -166,6 +167,11 @@ const SHOPEE_ITEMS: NavItem[] = [
     href: "/admin/shopee/import",
     label: "Excel Import",
     icon: Upload,
+  },
+  {
+    href: "/admin/shopee/returns",
+    label: "Returns",
+    icon: RotateCcw,
   },
 ];
 

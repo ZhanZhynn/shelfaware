@@ -1979,6 +1979,100 @@ class ApiClient {
     },
 
     /**
+     * Get CLV (Customer Lifetime Value) analytics
+     */
+    getClvAnalytics: async (
+      shopId?: string,
+    ): Promise<
+      ApiResponse<{
+        summary: {
+          totalBuyers: number;
+          avgClv: number;
+          avgRecency: number;
+          avgFrequency: number;
+          avgMonetary: number;
+        };
+        segments: { champions: number; loyal: number; potential: number; atRisk: number; lost: number };
+        churnRisk: { high: number; medium: number; low: number };
+        topBuyersByClv: {
+          username: string;
+          clvEstimate: number;
+          orderCount: number;
+          avgOrderValue: number;
+          recencyDays: number;
+          totalSpent: number;
+        }[];
+      }>
+    > => {
+      const url = shopId
+        ? `${API_ENDPOINTS.shopee.clv}?shopId=${shopId}`
+        : API_ENDPOINTS.shopee.clv;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
+     * Get returns list
+     */
+    getReturns: async (params?: {
+      shopId?: string;
+      page?: number;
+      limit?: number;
+      status?: string;
+    }): Promise<
+      ApiResponse<{ returns: Record<string, unknown>[]; total: number; page: number; limit: number }>
+    > => {
+      const searchParams = new URLSearchParams();
+      if (params?.shopId) searchParams.set("shopId", params.shopId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.shopee.returns}?${qs}`
+        : API_ENDPOINTS.shopee.returns;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
+     * Get returns stats
+     */
+    getReturnsStats: async (
+      shopId?: string,
+    ): Promise<
+      ApiResponse<{
+        summary: {
+          totalReturns: number;
+          totalRefundAmount: number;
+          returnRate: number;
+          avgRefund: number;
+        };
+        byStatus: { status: string; count: number }[];
+        topReasons: { reason: string; count: number }[];
+        recentReturns: Record<string, unknown>[];
+      }>
+    > => {
+      const url = shopId
+        ? `${API_ENDPOINTS.shopee.returnsStats}?shopId=${shopId}`
+        : API_ENDPOINTS.shopee.returnsStats;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    /**
      * Import orders from Shopee Seller Center Excel export
      */
     importFromExcel: async (

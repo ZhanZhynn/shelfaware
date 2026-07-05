@@ -704,6 +704,189 @@ export async function syncShopeeOrders(
   }
 }
 
+// ─── Return Sync ─────────────────────────────────────────────────────────────
+
+/**
+ * Sync returns from a Shopee shop.
+ * Uses getReturnList with cursor pagination.
+ * Shopee limits create_time window to 15 days per call,
+ * so for 90 days of history we make 6 calls.
+ */
+export async function syncShopeeReturns(
+  shopId: number,
+  userId: string,
+  timeFrom?: number,
+  timeTo?: number,
+): Promise<{
+  synced: number;
+  created: number;
+  updated: number;
+  errors: string[];
+}> {
+  const sdk = getShopeeSDK();
+  const errors: string[] = [];
+  let synced = 0;
+  let created = 0;
+  let updated = 0;
+
+  const shop = await prisma.shopeeShop.findFirst({
+    where: { shopId },
+  });
+  if (!shop) {
+    throw new Error(`ShopeeShop record not found for shop_id=${shopId}`);
+  }
+
+  const syncLog = await prisma.shopeeSyncLog.create({
+    data: {
+      shopId: shop.id,
+      userId,
+      syncType: "returns",
+      status: "running",
+      triggeredBy: "manual",
+    },
+  });
+
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const WINDOW_DAYS = 15;
+    const WINDOW_SECONDS = WINDOW_DAYS * 24 * 60 * 60;
+    const defaultTimeFrom = timeFrom || (now - 90 * 24 * 60 * 60); // 90 days back
+    const effectiveTimeTo = timeTo || now;
+
+    // Break into 15-day windows
+    const windows: Array<{ from: number; to: number }> = [];
+    let windowStart = defaultTimeFrom;
+    while (windowStart < effectiveTimeTo) {
+      const windowEnd = Math.min(windowStart + WINDOW_SECONDS, effectiveTimeTo);
+      windows.push({ from: windowStart, to: windowEnd });
+      windowStart = windowEnd;
+    }
+
+    const allReturns: Record<string, unknown>[] = [];
+
+    for (const win of windows) {
+      let pageNo = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        try {
+          const result = await sdk.returns.getReturnList({
+            page_no: pageNo,
+            page_size: 100,
+            create_time_from: win.from,
+            create_time_to: win.to,
+          });
+
+          const resp = (result as unknown as { response?: { more?: boolean; return?: Record<string, unknown>[] } }).response;
+          const returns = resp?.return || [];
+          hasMore = resp?.more === true;
+
+          for (const ret of returns) {
+            allReturns.push(ret);
+          }
+
+          pageNo++;
+          if (returns.length === 0) hasMore = false;
+        } catch (err) {
+          logger.warn(`[Shopee Sync] Failed to fetch returns for window ${win.from}-${win.to}, page ${pageNo}: ${err instanceof Error ? err.message : String(err)}`);
+          hasMore = false;
+        }
+      }
+    }
+
+    logger.info(`[Shopee Sync] Found ${allReturns.length} returns`);
+
+    for (const ret of allReturns) {
+      try {
+        const returnSn = String(ret.return_sn || "");
+        if (!returnSn) continue;
+
+        const existing = await prisma.shopeeReturn.findFirst({
+          where: { returnSn },
+        });
+
+        const returnData = {
+          shopId: shop.id,
+          userId,
+          returnSn,
+          orderSn: String(ret.order_sn || ""),
+          status: String(ret.status || ""),
+          refundAmount: Number(ret.refund_amount || 0),
+          currency: String(ret.currency || ""),
+          reason: String(ret.reason || ""),
+          textReason: String(ret.text_reason || ""),
+          trackingNumber: String(ret.tracking_number || ""),
+          needsLogistics: Boolean(ret.needs_logistics),
+          amountBeforeDiscount: Number(ret.amount_before_discount || 0),
+          negotiationStatus: String(ret.negotiation_status || ""),
+          sellerProofStatus: String(ret.seller_proof_status || ""),
+          sellerCompensationStatus: String(ret.seller_compensation_status || ""),
+          returnRefundType: String(ret.return_refund_type || ""),
+          returnSolution: ret.return_solution != null ? Number(ret.return_solution) : null,
+          returnRefundRequestType: ret.return_refund_request_type != null ? Number(ret.return_refund_request_type) : null,
+          validationType: String(ret.validation_type || ""),
+          returnShipDueDate: ret.return_ship_due_date ? new Date(Number(ret.return_ship_due_date) * 1000) : null,
+          returnSellerDueDate: ret.return_seller_due_date ? new Date(Number(ret.return_seller_due_date) * 1000) : null,
+          images: toInputJson(ret.image || []),
+          items: toInputJson(ret.item || []),
+          buyerUsername: String((ret.user as Record<string, unknown>)?.username || ""),
+          buyerEmail: String((ret.user as Record<string, unknown>)?.email || ""),
+          shopeeCreatedAt: ret.create_time ? new Date(Number(ret.create_time) * 1000) : null,
+          shopeeUpdatedAt: ret.update_time ? new Date(Number(ret.update_time) * 1000) : null,
+          updatedAt: new Date(),
+        };
+
+        if (existing) {
+          await prisma.shopeeReturn.update({
+            where: { id: existing.id },
+            data: returnData,
+          });
+          updated++;
+        } else {
+          await prisma.shopeeReturn.create({
+            data: returnData,
+          });
+          created++;
+        }
+
+        synced++;
+      } catch (itemError) {
+        const msg = `Failed to sync return ${ret.return_sn}: ${itemError instanceof Error ? itemError.message : String(itemError)}`;
+        errors.push(msg);
+        logger.warn(`[Shopee Sync] ${msg}`);
+      }
+    }
+
+    await prisma.shopeeSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: errors.length > 0 ? "completed_with_errors" : "completed",
+        itemsSynced: synced,
+        itemsCreated: created,
+        itemsUpdated: updated,
+        errors: errors.length > 0 ? errors : null,
+        completedAt: new Date(),
+      },
+    });
+
+    logger.info(
+      `[Shopee Sync] Returns synced: ${synced} (created: ${created}, updated: ${updated}, errors: ${errors.length})`,
+    );
+
+    return { synced, created, updated, errors };
+  } catch (error) {
+    await prisma.shopeeSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "failed",
+        errors: [error instanceof Error ? error.message : String(error)],
+        completedAt: new Date(),
+      },
+    });
+    throw error;
+  }
+}
+
 // ─── Full Sync (with lock) ──────────────────────────────────────────────────
 
 /**

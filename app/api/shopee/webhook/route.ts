@@ -79,6 +79,10 @@ export async function POST(request: NextRequest) {
         await handleItemUpdate(shop.id, data);
         break;
 
+      case "return_status_updated":
+        await handleReturnStatusUpdate(shop.id, data);
+        break;
+
       default:
         logger.info(`[Shopee Webhook] Unhandled event type: ${data.event_type}`);
     }
@@ -92,6 +96,8 @@ export async function POST(request: NextRequest) {
       invalidateCache(`shopee:buyers:*`),
       invalidateCache(`shopee:product-performance:*`),
       invalidateCache(`shopee:profit:*`),
+      invalidateCache(`shopee:returns:*`),
+      invalidateCache(`shopee:returns-stats:*`),
     ]);
 
     return NextResponse.json({ received: true });
@@ -178,4 +184,37 @@ async function handleItemUpdate(
  */
 export async function GET() {
   return NextResponse.json({ status: "ok", timestamp: new Date().toISOString() });
+}
+
+async function handleReturnStatusUpdate(
+  shopId: string,
+  data: ShopeeWebhookPayload["data"],
+) {
+  if (!data.order_sn) return;
+
+  try {
+    // Find the return by order_sn
+    const existing = await prisma.shopeeReturn.findFirst({
+      where: {
+        shopId,
+        orderSn: data.order_sn,
+      },
+    });
+
+    if (existing) {
+      await prisma.shopeeReturn.update({
+        where: { id: existing.id },
+        data: {
+          status: data.order_status || existing.status,
+          shopeeUpdatedAt: new Date(data.update_time * 1000),
+          updatedAt: new Date(),
+        },
+      });
+      logger.info(`[Shopee Webhook] Return for order ${data.order_sn} status → ${data.order_status}`);
+    } else {
+      logger.info(`[Shopee Webhook] Return for order ${data.order_sn} not found locally, will be synced on next cron`);
+    }
+  } catch (error) {
+    logger.error(`[Shopee Webhook] Failed to update return for order ${data.order_sn}:`, error);
+  }
 }

@@ -143,3 +143,10 @@ export {
   type ShopeeShopDisconnect,
   type ShopeeCallbackQuery,
 } from "./shopee";
+
+// Receiving validations
+export {
+  receiveItemSchema,
+  receiveBodySchema,
+  type ReceiveBody,
+} from "./receiving";

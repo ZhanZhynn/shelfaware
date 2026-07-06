@@ -417,6 +417,7 @@ export const cacheKeys = {
     importData: (shopId: string) => `shopee:import:${shopId}`,
     nearSla: (shopId: string | null, hours: number) =>
       `shopee:near-sla:${shopId || "all"}:${hours}`,
+    ads: (userId: string, dateRange?: string) => `shopee:ads:${userId}:${dateRange || "all"}`,
     pattern: "shopee:*",
   },
 } as const;

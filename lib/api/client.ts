@@ -306,6 +306,20 @@ class ApiClient {
         statusText: response.statusText,
       };
     },
+
+    /**
+     * Lookup product by scanned QR/QR payload or SKU (for receiving)
+     */
+    lookup: async (q: string) => {
+      const response = await this.client.get(
+        `${API_ENDPOINTS.productLookup}?q=${encodeURIComponent(q)}`,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
   };
 
   /**
@@ -1126,8 +1140,74 @@ class ApiClient {
   };
 
   /**
-   * Portal API methods (external supplier/client portals)
-   */
+    * Shopee Ads API methods
+    */
+  shopeeAds = {
+    get: async (params?: {
+      dateFrom?: string;
+      dateTo?: string;
+    }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.dateFrom) searchParams.set("dateFrom", params.dateFrom);
+      if (params?.dateTo) searchParams.set("dateTo", params.dateTo);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.shopee.ads}?${qs}`
+        : API_ENDPOINTS.shopee.ads;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+  };
+
+  /**
+    * Receiving API methods (warehouse stock-in by scan)
+    */
+  receiving = {
+    create: async (data: {
+      warehouseId: string;
+      poId?: string;
+      items: { productId: string; sku?: string; quantity: number; poItemId?: string; notes?: string }[];
+      notes?: string;
+    }) => {
+      const response = await this.client.post(API_ENDPOINTS.receiving.base, data);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getMovements: async (params?: {
+      productId?: string;
+      warehouseId?: string;
+      sourceType?: string;
+      limit?: number;
+    }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.productId) searchParams.set("productId", params.productId);
+      if (params?.warehouseId) searchParams.set("warehouseId", params.warehouseId);
+      if (params?.sourceType) searchParams.set("sourceType", params.sourceType);
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.receiving.movements}?${qs}`
+        : API_ENDPOINTS.receiving.movements;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+  };
+
+  /**
+    * Portal API methods (external supplier/client portals)
+    */
   portal = {
     getSupplierDashboard: async (): Promise<
       ApiResponse<SupplierPortalDashboard>

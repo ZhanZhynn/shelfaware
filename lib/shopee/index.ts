@@ -16,5 +16,6 @@ export {
   syncShopeeOrders,
   syncShopeeReturns,
   syncShopeeAll,
+  syncShopeeAds,
   isShopSyncing,
 } from "./sync";

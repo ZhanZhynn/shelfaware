@@ -14,6 +14,7 @@ export interface PurchaseOrderItem {
   productName: string;
   sku?: string;
   quantity: number;
+  quantityReceived: number;
   unitCost: number;
   subtotal: number;
 }

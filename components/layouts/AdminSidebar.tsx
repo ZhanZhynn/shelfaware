@@ -29,6 +29,8 @@ import {
   ClipboardList,
   Gauge,
   Receipt,
+  Megaphone,
+  ScanLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts";
@@ -114,6 +116,11 @@ const MANAGEMENT_ITEMS: NavItem[] = [
     icon: ClipboardList,
   },
   {
+    href: "/admin/receiving",
+    label: "Receiving",
+    icon: ScanLine,
+  },
+  {
     href: "/admin/supplier-portal",
     label: "Supplier Portal",
     icon: Truck,
@@ -184,6 +191,11 @@ const SHOPEE_ITEMS: NavItem[] = [
     href: "/admin/shopee/profit",
     label: "Profit Tracking",
     icon: DollarSign,
+  },
+  {
+    href: "/admin/shopee/ads",
+    label: "Shopee Ads",
+    icon: Megaphone,
   },
   {
     href: "/admin/shopee/sync-history",

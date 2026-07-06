@@ -8,7 +8,7 @@ import { z } from "zod";
 // --- Sync Trigger ---
 export const shopeeSyncBodySchema = z.object({
   shopId: z.number().int().positive("Shop ID is required"),
-  syncType: z.enum(["products", "orders", "returns", "all"]).default("all"),
+  syncType: z.enum(["products", "orders", "returns", "ads", "all"]).default("all"),
 });
 
 export type ShopeeSyncBody = z.infer<typeof shopeeSyncBodySchema>;

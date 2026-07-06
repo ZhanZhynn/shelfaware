@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveShop, syncShopeeProducts, syncShopeeOrders, syncShopeeReturns, syncShopeeAll, isShopSyncing } from "@/lib/shopee";
+import { setActiveShop, syncShopeeProducts, syncShopeeOrders, syncShopeeReturns, syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
 import { shopeeSyncBodySchema } from "@/lib/validations/shopee";
 import { prisma } from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
       products?: { synced: number; created: number; updated: number; errors: string[] };
       orders?: { synced: number; created: number; updated: number; errors: string[] };
       returns?: { synced: number; created: number; updated: number; errors: string[] };
+      ads?: { synced: number; campaigns: number; errors: string[] };
     };
 
     switch (syncType) {
@@ -79,6 +80,9 @@ export async function POST(request: NextRequest) {
         break;
       case "returns":
         result = { returns: await syncShopeeReturns(shopId, userId) };
+        break;
+      case "ads":
+        result = { ads: await syncShopeeAds(shopId, userId) };
         break;
       case "all":
       default:

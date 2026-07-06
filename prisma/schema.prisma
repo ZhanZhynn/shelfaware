@@ -142,6 +142,7 @@ model Product {
   deletedBy        String?     @db.ObjectId // User who soft-deleted the product
   orderItems       OrderItem[] // Orders containing this product (one-to-many relationship)
   channelMappings  ProductChannelMapping[] // Channel links (Shopee, etc.)
+  stockMovements   StockMovement[] // Inbound/outbound movement ledger
 
   @@index([deletedAt])
 }
@@ -205,6 +206,30 @@ model StockTransfer {
   @@index([status])
 }
 
+// Stock movement ledger - tracks every inbound/outbound stock event for audit
+model StockMovement {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  productId     String    @db.ObjectId
+  warehouseId   String    @db.ObjectId
+  quantity      BigInt                  // positive = inbound, negative = outbound
+  type          String                  // "in" | "out" | "adjustment" | "transfer"
+  sourceType    String?                 // "purchase_order" | "ad_hoc" | "transfer" | "return"
+  sourceId      String?   @db.ObjectId  // PO id or transfer id
+  poItemId      String?   @db.ObjectId  // specific PO item (for PO-linked receiving)
+  receivedById  String    @db.ObjectId  // User who performed the movement
+  receivedAt    DateTime  @default(now()) @db.Date
+  notes         String?
+  createdAt     DateTime  @default(now()) @db.Date
+  user          User      @relation(fields: [receivedById], references: [id])
+  product       Product   @relation(fields: [productId], references: [id])
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+
+  @@index([productId, warehouseId, receivedAt])
+  @@index([sourceType, sourceId])
+  @@index([receivedById])
+  @@index([warehouseId])
+}
+
 model Warehouse {
   id          String    @id @default(auto()) @map("_id") @db.ObjectId
   name        String
@@ -216,6 +241,7 @@ model Warehouse {
   updatedAt   DateTime? @db.Date
   createdBy   String    @db.ObjectId
   updatedBy   String?   @db.ObjectId
+  stockMovements StockMovement[]
 
   @@index([userId])
 }
@@ -261,6 +287,7 @@ model User {
   notifications Notification[] // In-app notifications (one-to-many relationship)
   shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
   notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
+  stockMovements StockMovement[] // Stock movements performed by this user
 }
 
 model UserAction {
@@ -427,6 +454,8 @@ model ShopeeShop {
   orders         ShopeeOrder[]
   syncLogs       ShopeeSyncLog[]
   returns        ShopeeReturn[]
+  adsDaily       ShopeeAdsDailyPerformance[]
+  adsCampaignDaily ShopeeAdsCampaignDailyPerformance[]
 
   @@unique([userId, shopId])
   @@index([userId])
@@ -633,6 +662,70 @@ model ShopeeReturn {
   @@index([shopeeCreatedAt])
 }
 
+// Shopee Ads - shop-level daily performance snapshot
+model ShopeeAdsDailyPerformance {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  shopId              String   @db.ObjectId // FK ShopeeShop
+  userId              String   @db.ObjectId
+  date                DateTime @db.Date // midnight of the day
+  impressions        Int      @default(0)
+  clicks             Int      @default(0)
+  ctr                Float    @default(0)
+  directOrder        Int      @default(0)
+  broadOrder         Int      @default(0)
+  directGmv          Float    @default(0)
+  broadGmv           Float    @default(0)
+  expense            Float    @default(0) // ad spend
+  directRoas         Float    @default(0)
+  broadRoas          Float    @default(0)
+  directConversions  Float    @default(0)
+  broadConversions   Float    @default(0)
+  directItemSold     Int      @default(0)
+  broadItemSold      Int      @default(0)
+  costPerConversion  Float    @default(0)
+  totalBalance       Float?   // snapshot of ads credit balance that day
+  syncedAt           DateTime @default(now()) @db.Date
+  shop               ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, date])
+  @@index([userId, shopId, date])
+  @@index([date])
+}
+
+// Shopee Ads - campaign-level daily performance snapshot
+model ShopeeAdsCampaignDailyPerformance {
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  shopId              String   @db.ObjectId
+  userId              String   @db.ObjectId
+  campaignId          String   // Shopee campaign_id (stringified number)
+  campaignName        String?
+  adType              String?  // auto | manual | gms
+  campaignPlacement   String?
+  date                DateTime @db.Date
+  impressions        Int      @default(0)
+  clicks             Int      @default(0)
+  ctr                Float    @default(0)
+  directOrder        Int      @default(0)
+  broadOrder         Int      @default(0)
+  directGmv          Float    @default(0)
+  broadGmv           Float    @default(0)
+  expense            Float    @default(0)
+  directRoas         Float    @default(0)
+  broadRoas          Float    @default(0)
+  directConversions  Float    @default(0)
+  broadConversions   Float    @default(0)
+  directItemSold     Int      @default(0)
+  broadItemSold      Int      @default(0)
+  costPerConversion  Float    @default(0)
+  syncedAt           DateTime @default(now()) @db.Date
+  shop               ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, campaignId, date])
+  @@index([userId, shopId, date])
+  @@index([campaignId, date])
+  @@index([date])
+}
+
 model NotificationSetting {
   id                 String    @id @default(auto()) @map("_id") @db.ObjectId
   userId             String    @unique @db.ObjectId // One setting per user
@@ -678,6 +771,7 @@ model PurchaseOrderItem {
   productName     String
   sku             String?
   quantity        Int
+  quantityReceived Int         @default(0) // Quantity received so far (for partial receiving)
   unitCost        Float
   subtotal        Float
   createdAt       DateTime      @default(now()) @db.Date

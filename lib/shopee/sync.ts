@@ -1026,3 +1026,330 @@ export async function syncShopeeAll(
     releaseSyncLock(shopId);
   }
 }
+
+// ─── Ads Sync Helpers ─────────────────────────────────────────────────────────
+
+/** Format a Date to Shopee's DD-MM-YYYY format (for ads API request params). */
+function toShopeeDate(date: Date): string {
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0"); // month is 0-indexed
+  const yyyy = date.getUTCFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+/** Parse Shopee's DD-MM-YYYY date string into a UTC Date at midnight. */
+function parseShopeeDate(s: string): Date {
+  const parts = s.split("-").map(Number);
+  const dd = parts[0] ?? 1;
+  const mm = parts[1] ?? 1;
+  const yyyy = parts[2] ?? 2000;
+  return new Date(Date.UTC(yyyy, mm - 1, dd));
+}
+
+/** Map a Shopee ads API snake_case row to our Prisma camelCase input shape. */
+function mapAdsRow(row: Record<string, number | string>) {
+  return {
+    impressions: Number(row.impression ?? 0),
+    clicks: Number(row.clicks ?? 0),
+    ctr: Number(row.ctr ?? 0),
+    directOrder: Number(row.direct_order ?? 0),
+    broadOrder: Number(row.broad_order ?? 0),
+    directGmv: Number(row.direct_gmv ?? 0),
+    broadGmv: Number(row.broad_gmv ?? 0),
+    expense: Number(row.expense ?? 0),
+    directRoas: Number(row.direct_roas ?? 0),
+    broadRoas: Number(row.broad_roas ?? 0),
+    directConversions: Number(row.direct_conversions ?? 0),
+    broadConversions: Number(row.broad_conversions ?? 0),
+    directItemSold: Number(row.direct_item_sold ?? 0),
+    broadItemSold: Number(row.broad_item_sold ?? 0),
+    costPerConversion: Number(row.cost_per_conversion ?? 0),
+  };
+}
+
+/**
+ * Retry wrapper for Shopee ads API calls.
+ * The ads API has specific rate-limit errors (ads.rate_limit.exceed_*).
+ * Retries with exponential backoff: 1s, 2s, 4s.
+ */
+async function withAdsRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: unknown) {
+      lastError = error;
+      const isRateLimit =
+        error instanceof Error &&
+        /ads\.rate_limit|rate_limit|error_rate_limit/i.test(error.message);
+      if (!isRateLimit || attempt === retries) {
+        throw error;
+      }
+      const delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+      logger.warn(
+        `[Shopee Ads] Rate limited (attempt ${attempt + 1}/${retries + 1}), retrying in ${delayMs}ms...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
+/** Split a date range into chunks of at most `chunkDays` days (inclusive start, exclusive end). */
+function chunkDateRange(start: Date, end: Date, chunkDays: number): { from: Date; to: Date }[] {
+  const chunks: { from: Date; to: Date }[] = [];
+  const chunkMs = chunkDays * 24 * 60 * 60 * 1000;
+  let cursor = new Date(start);
+  while (cursor < end) {
+    const to = new Date(Math.min(cursor.getTime() + chunkMs, end.getTime()));
+    // Shopee ads API requires start_date != end_date; if chunk collapses to a single day, skip
+    if (to.getTime() - cursor.getTime() < 24 * 60 * 60 * 1000) {
+      cursor = new Date(cursor.getTime() + chunkMs);
+      continue;
+    }
+    chunks.push({ from: new Date(cursor), to: new Date(to) });
+    cursor = new Date(to);
+  }
+  return chunks;
+}
+
+/**
+ * Sync Shopee Ads performance data (shop-level + campaign-level daily).
+ * @param shopId Shopee numeric shop ID
+ * @param userId Owner user ID
+ * @param daysBack How many days back to sync (default 30). Max 6 months per Shopee limits.
+ */
+export async function syncShopeeAds(
+  shopId: number,
+  userId: string,
+  daysBack = 30,
+): Promise<{
+  synced: number;
+  campaigns: number;
+  errors: string[];
+}> {
+  const sdk = getShopeeSDK();
+  const errors: string[] = [];
+  let synced = 0;
+  let campaigns = 0;
+
+  const shop = await prisma.shopeeShop.findFirst({ where: { shopId } });
+  if (!shop) {
+    throw new Error(`ShopeeShop record not found for shop_id=${shopId}`);
+  }
+
+  const syncLog = await prisma.shopeeSyncLog.create({
+    data: {
+      shopId: shop.id,
+      userId,
+      syncType: "ads",
+      status: "running",
+      triggeredBy: "manual",
+    },
+  });
+
+  try {
+    // Date range: today minus daysBack → today (UTC midnight)
+    const now = new Date();
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const start = new Date(end.getTime() - daysBack * 24 * 60 * 60 * 1000);
+
+    // Chunk into 28-day segments (Shopee max 1-month range, start != end)
+    const chunks = chunkDateRange(start, end, 28);
+    logger.info(`[Shopee Ads] Syncing ${daysBack} days in ${chunks.length} chunks for shop ${shopId}`);
+
+    // ── Shop-level daily performance ──────────────────────────────────────────
+    for (const chunk of chunks) {
+      try {
+        const result = await withAdsRetry(() =>
+          sdk.ads.getAllCpcAdsDailyPerformance({
+            start_date: toShopeeDate(chunk.from),
+            end_date: toShopeeDate(chunk.to),
+          }),
+        );
+        const resp = (
+          result as unknown as {
+            response?: Array<Record<string, number | string>>;
+          }
+        ).response;
+
+        for (const row of resp ?? []) {
+          const dateStr = String(row.date);
+          const date = parseShopeeDate(dateStr);
+          const mapped = mapAdsRow(row);
+          await prisma.shopeeAdsDailyPerformance.upsert({
+            where: { shopId_date: { shopId: shop.id, date } },
+            update: { ...mapped, syncedAt: new Date() },
+            create: { shopId: shop.id, userId, date, ...mapped },
+          });
+          synced++;
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        errors.push(`shop-level chunk ${toShopeeDate(chunk.from)}→${toShopeeDate(chunk.to)}: ${msg}`);
+        logger.error(`[Shopee Ads] Shop-level chunk failed:`, error);
+      }
+    }
+
+    // ── Snapshot total balance onto today's row ──────────────────────────────
+    try {
+      const balanceResult = await withAdsRetry(() => sdk.ads.getTotalBalance());
+      const balanceResp = (
+        balanceResult as unknown as {
+          response?: { total_balance?: number; data_timestamp?: number };
+        }
+      ).response;
+      const totalBalance = balanceResp?.total_balance;
+      if (typeof totalBalance === "number") {
+        const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        await prisma.shopeeAdsDailyPerformance.upsert({
+          where: { shopId_date: { shopId: shop.id, date: today } },
+          update: { totalBalance, syncedAt: new Date() },
+          create: { shopId: shop.id, userId, date: today, totalBalance },
+        });
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      errors.push(`total_balance: ${msg}`);
+      logger.error(`[Shopee Ads] Balance snapshot failed:`, error);
+    }
+
+    // ── Campaign-level daily performance ──────────────────────────────────────
+    // 1. Paginate to collect all campaign IDs
+    const allCampaignIds: number[] = [];
+    let offset = 0;
+    let hasNext = true;
+    while (hasNext) {
+      try {
+        const result = await withAdsRetry(() =>
+          sdk.ads.getProductLevelCampaignIdList({
+            ad_type: "all",
+            offset,
+            limit: 100,
+          }),
+        );
+        const resp = (
+          result as unknown as {
+            response?: {
+              has_next_page?: boolean;
+              campaign_list?: Array<{ campaign_id: number; ad_type?: string }>;
+            };
+          }
+        ).response;
+        const list = resp?.campaign_list ?? [];
+        allCampaignIds.push(...list.map((c) => c.campaign_id));
+        hasNext = resp?.has_next_page ?? false;
+        offset += 100;
+        if (list.length === 0) break; // safety: empty page
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        errors.push(`campaign list (offset ${offset}): ${msg}`);
+        logger.error(`[Shopee Ads] Campaign ID pagination failed:`, error);
+        break;
+      }
+    }
+
+    logger.info(`[Shopee Ads] Found ${allCampaignIds.length} campaigns for shop ${shopId}`);
+
+    // 2. For each batch of 100 campaigns × each date chunk, fetch performance
+    for (let i = 0; i < allCampaignIds.length; i += 100) {
+      const batch = allCampaignIds.slice(i, i + 100);
+      const campaignIdList = batch.join(",");
+
+      for (const chunk of chunks) {
+        try {
+          const result = await withAdsRetry(() =>
+            sdk.ads.getProductCampaignDailyPerformance({
+              start_date: toShopeeDate(chunk.from),
+              end_date: toShopeeDate(chunk.to),
+              campaign_id_list: campaignIdList,
+            }),
+          );
+          const resp = (
+            result as unknown as {
+              response?: {
+                campaign_list?: Array<{
+                  campaign_id: number;
+                  ad_type?: string;
+                  campaign_placement?: string;
+                  ad_name?: string;
+                  daily_metrics?: Array<Record<string, number | string>>;
+                }>;
+              };
+            }
+          ).response;
+
+          for (const campaign of resp?.campaign_list ?? []) {
+            for (const row of campaign.daily_metrics ?? []) {
+              const dateStr = String(row.date);
+              const date = parseShopeeDate(dateStr);
+              const mapped = mapAdsRow(row);
+              await prisma.shopeeAdsCampaignDailyPerformance.upsert({
+                where: {
+                  shopId_campaignId_date: {
+                    shopId: shop.id,
+                    campaignId: String(campaign.campaign_id),
+                    date,
+                  },
+                },
+                update: {
+                  ...mapped,
+                  campaignName: campaign.ad_name,
+                  adType: campaign.ad_type,
+                  campaignPlacement: campaign.campaign_placement,
+                  syncedAt: new Date(),
+                },
+                create: {
+                  shopId: shop.id,
+                  userId,
+                  campaignId: String(campaign.campaign_id),
+                  campaignName: campaign.ad_name,
+                  adType: campaign.ad_type,
+                  campaignPlacement: campaign.campaign_placement,
+                  date,
+                  ...mapped,
+                },
+              });
+              campaigns++;
+            }
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          errors.push(`campaign batch ${i}-${i + batch.length} chunk ${toShopeeDate(chunk.from)}: ${msg}`);
+          logger.error(`[Shopee Ads] Campaign batch chunk failed:`, error);
+        }
+      }
+    }
+
+    await prisma.shopeeSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: errors.length > 0 ? "completed_with_errors" : "completed",
+        itemsSynced: synced + campaigns,
+        errors: errors.length > 0 ? errors : null,
+        completedAt: new Date(),
+      },
+    });
+
+    await prisma.shopeeShop.update({
+      where: { id: shop.id },
+      data: { lastSyncedAt: new Date() },
+    });
+
+    logger.info(
+      `[Shopee Ads] Sync complete: ${synced} daily rows, ${campaigns} campaign rows, ${errors.length} errors`,
+    );
+
+    return { synced, campaigns, errors };
+  } catch (error) {
+    await prisma.shopeeSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "failed",
+        errors: [error instanceof Error ? error.message : String(error)],
+        completedAt: new Date(),
+      },
+    });
+    throw error;
+  }
+}

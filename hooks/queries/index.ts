@@ -167,6 +167,12 @@ export {
   useBulkCreateWmsProducts,
 } from "./use-shopee-product-mapping";
 
+// Shopee Ads hooks
+export { useShopeeAds } from "./use-shopee-ads";
+
+// Receiving hooks
+export { useReceiveItems, useStockMovements, useProductLookup } from "./use-receiving";
+
 // Portal hooks (external supplier/client portals)
 export {
   useSupplierPortalDashboard,

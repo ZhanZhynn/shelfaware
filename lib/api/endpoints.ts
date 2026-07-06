@@ -189,6 +189,7 @@ export const API_ENDPOINTS = {
     returns: "/shopee/returns",
     returnsStats: "/shopee/stats/returns",
     createWmsProduct: "/shopee/products/create-wms-product",
+    ads: "/shopee/ads",
   },
 
   // Notification settings
@@ -196,6 +197,15 @@ export const API_ENDPOINTS = {
     notifications: "/settings/notifications",
     testNotification: "/settings/notifications/test",
   },
+
+  // Receiving (warehouse stock-in by scan)
+  receiving: {
+    base: "/receiving",
+    movements: "/receiving/movements",
+  },
+
+  // Product lookup (by scan)
+  productLookup: "/products/lookup",
 } as const;
 
 /**

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/prisma/client";
-import { setActiveShop, syncShopeeAll, isShopSyncing } from "@/lib/shopee";
+import { setActiveShop, syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
 import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 
@@ -69,6 +69,12 @@ export async function POST(request: NextRequest) {
       try {
         setActiveShop(shop.shopId);
         await syncShopeeAll(shop.shopId, shop.userId);
+        // Sync ads after products+orders (separate to avoid one failure blocking the other)
+        try {
+          await syncShopeeAds(shop.shopId, shop.userId, 30);
+        } catch (adsError) {
+          logger.error(`[Shopee Cron] Ads sync failed for ${shop.shopName}:`, adsError);
+        }
         results.push({
           shopId: shop.shopId,
           shopName: shop.shopName,

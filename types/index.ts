@@ -279,6 +279,23 @@ export type {
   ShopeeProductMappingStatus,
 } from "./product-channel-mapping";
 
+// Shopee Ads types
+export type {
+  ShopeeAdsDailyPoint,
+  ShopeeAdsCampaignRow,
+  ShopeeAdsData,
+} from "./shopee-ads";
+
+// Receiving types
+export type {
+  ReceiveItemInput,
+  ReceiveInput,
+  ReceivedItemResult,
+  ReceiveResult,
+  ProductLookupResult,
+  StockMovementRecord,
+} from "./receiving";
+
 // API types (AdminCounts for admin sidebar counts)
 export type {
   AdminCounts,

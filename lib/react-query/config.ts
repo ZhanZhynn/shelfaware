@@ -320,4 +320,21 @@ export const queryKeys = {
     mappingStatus: (ids: string[]) =>
       [...queryKeys.shopee.all, "mappingStatus", ids] as const,
   },
+
+  // Shopee Ads queries
+  shopeeAds: {
+    all: ["shopeeAds"] as const,
+    report: (params?: string) =>
+      [...queryKeys.shopeeAds.all, "report", params ?? ""] as const,
+  },
+
+  // Receiving queries
+  receiving: {
+    all: ["receiving"] as const,
+    movements: (filters?: string) =>
+      [...queryKeys.receiving.all, "movements", filters ?? "all"] as const,
+  },
+
+  // Product lookup (by scan) — short-lived, keyed by query
+  productLookup: (q: string) => ["productLookup", q] as const,
 } as const;

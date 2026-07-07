@@ -429,6 +429,28 @@ export const cacheKeys = {
     ads: (userId: string, dateRange?: string) => `shopee:ads:${userId}:${dateRange || "all"}`,
     pattern: "shopee:*",
   },
+
+  /**
+   * Lazada integration cache keys
+   */
+  lazada: {
+    all: "lazada:all",
+    shops: (userId: string) => `lazada:shops:${userId}`,
+    shopDetail: (id: string) => `lazada:shop:${id}`,
+    products: (sellerId: string, filters?: Record<string, unknown>) => {
+      const filterStr = filters ? JSON.stringify(filters) : "default";
+      return `lazada:products:${sellerId}:${filterStr}`;
+    },
+    productDetail: (id: string) => `lazada:product:${id}`,
+    orders: (sellerId: string, filters?: Record<string, unknown>) => {
+      const filterStr = filters ? JSON.stringify(filters) : "default";
+      return `lazada:orders:${sellerId}:${filterStr}`;
+    },
+    orderDetail: (id: string) => `lazada:order:${id}`,
+    stats: (sellerId: string, dateRange?: string) => `lazada:stats:${sellerId}:${dateRange || "all"}`,
+    syncLogs: (sellerId: string) => `lazada:sync-logs:${sellerId}`,
+    pattern: "lazada:*",
+  },
 } as const;
 
 /**
@@ -459,6 +481,7 @@ export async function invalidateAllServerCaches(): Promise<void> {
     invalidateCache(cacheKeys.supplierPortal.pattern),
     invalidateCache(cacheKeys.sessions.pattern),
     invalidateCache(cacheKeys.shopee.pattern),
+    invalidateCache(cacheKeys.lazada.pattern),
     invalidateCache("forecasting:*"),
     invalidateCache("system-config:*"),
     invalidateCache(cacheKeys.abcAnalysis.pattern),

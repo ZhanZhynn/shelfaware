@@ -55,6 +55,10 @@ const optionalEnvVars = [
   "SHOPEE_PARTNER_ID",
   "SHOPEE_PARTNER_KEY",
   "SHOPEE_REDIRECT_URL",
+  // --- Lazada (marketplace sync) - https://open.lazada.com ---
+  "LAZADA_APP_KEY",
+  "LAZADA_APP_SECRET",
+  "LAZADA_REDIRECT_URL",
 ] as const;
 
 type RequiredEnvVar = (typeof requiredEnvVars)[number];

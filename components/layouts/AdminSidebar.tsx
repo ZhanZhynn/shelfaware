@@ -214,6 +214,29 @@ const SHOPEE_ITEMS: NavItem[] = [
   },
 ];
 
+const LAZADA_ITEMS: NavItem[] = [
+  {
+    href: "/admin/lazada",
+    label: "Lazada Overview",
+    icon: Store,
+  },
+  {
+    href: "/admin/lazada/products",
+    label: "Lazada Products",
+    icon: Package,
+  },
+  {
+    href: "/admin/lazada/orders",
+    label: "Lazada Orders",
+    icon: ShoppingCart,
+  },
+  {
+    href: "/admin/lazada/sync-history",
+    label: "Sync History",
+    icon: History,
+  },
+];
+
 export default function AdminSidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
@@ -277,6 +300,8 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(SHOPEE_ITEMS)}
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
+        {renderNavItems(LAZADA_ITEMS)}
+        <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(FINANCIALS_ITEMS)}
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(MY_ACTIVITY_ITEMS)}
@@ -311,6 +336,12 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
         Shopee
       </p>
       {renderNavItems(SHOPEE_ITEMS)}
+
+      {/* Lazada Integration */}
+      <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Lazada
+      </p>
+      {renderNavItems(LAZADA_ITEMS)}
 
       {/* Financials */}
       <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">

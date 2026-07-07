@@ -132,6 +132,7 @@ export type {
   DashboardReviewStatusBreakdown,
   DashboardSelfOthersBreakdown,
   DashboardShopeeOrderAnalytics,
+  DashboardLazadaOrderAnalytics,
 } from "./dashboard";
 
 // Stock Allocation types
@@ -309,6 +310,9 @@ export type {
   ShopeeStatsData,
   ShopeeSlaAlert,
 } from "./api";
+
+// Marketplace cross-cutting types
+export type { MarketSource, MarketplaceChannel } from "./marketplace";
 
 // Re-export email types (InvoiceEmailData is in lib/email/types.ts, not types/)
 export type { InvoiceEmailData } from "@/lib/email/types";

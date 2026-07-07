@@ -197,6 +197,14 @@ export interface DashboardShopeeOrderAnalytics {
   nearSlaCount: number;
 }
 
+/** Lazada order analytics summary */
+export interface DashboardLazadaOrderAnalytics {
+  totalOrders: number;
+  totalRevenue: number;
+  averageOrderValue: number;
+  ordersByStatus: Record<string, number>;
+}
+
 /** Product review status counts (reviews for owner's products) */
 export interface DashboardReviewStatusBreakdown {
   pending: number;
@@ -240,4 +248,6 @@ export interface DashboardStats {
   selfOthersBreakdown?: DashboardSelfOthersBreakdown;
   /** Shopee order analytics (total orders, revenue, status distribution) */
   shopeeOrderAnalytics?: DashboardShopeeOrderAnalytics;
+  /** Lazada order analytics (total orders, revenue, status distribution) */
+  lazadaOrderAnalytics?: DashboardLazadaOrderAnalytics;
 }

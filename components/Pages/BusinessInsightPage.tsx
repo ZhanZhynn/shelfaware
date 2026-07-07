@@ -32,6 +32,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Sparkles,
+  Store,
   Tag,
   TrendingDown,
   TrendingUp,
@@ -96,11 +97,13 @@ export default function BusinessInsightPage({
   const { user, isCheckingAuth } = useAuth();
   const { toast } = useToast();
 
-  // Combined insights (WMS + Shopee orders, Shopee product stats, top Shopee products)
+  // Combined insights (WMS + marketplace orders, product stats, top products)
   const combinedInsights = initialCombinedInsights;
   const allCombinedOrders = combinedInsights?.orders ?? [];
   const shopeeProducts = combinedInsights?.shopeeProducts;
   const shopeeTopProducts = combinedInsights?.shopeeTopProducts ?? [];
+  const lazadaProducts = combinedInsights?.lazadaProducts;
+  const lazadaTopProducts = combinedInsights?.lazadaTopProducts ?? [];
 
   // Hydrate React Query with server data so first paint uses it (one round-trip)
   useLayoutEffect(() => {
@@ -1017,6 +1020,15 @@ export default function BusinessInsightPage({
                     description="Shopee marketplace products"
                   />
                 )}
+                {lazadaProducts && lazadaProducts.total > 0 && (
+                  <AnalyticsCard
+                    title="Lazada Listings"
+                    value={lazadaProducts.total}
+                    icon={Store}
+                    variant="blue"
+                    description="Lazada marketplace products"
+                  />
+                )}
               </>
             )}
           </div>
@@ -1364,6 +1376,28 @@ export default function BusinessInsightPage({
                         </ResponsiveChartContainer>
                       </ChartCard>
                     )}
+                    {lazadaProducts && lazadaProducts.total > 0 && (
+                      <ChartCard
+                        title="Lazada Product Status"
+                        icon={Tag}
+                        variant="blue"
+                      >
+                        <ResponsiveChartContainer>
+                          <BarChart
+                            data={Object.entries(
+                              lazadaProducts.byStatus,
+                            ).map(([name, value]) => ({ name, value }))}
+                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="name" />
+                            <YAxis />
+                            <Tooltip />
+                            <Bar dataKey="value" fill="#0F172A" />
+                          </BarChart>
+                        </ResponsiveChartContainer>
+                      </ChartCard>
+                    )}
                   </div>
                 </TabsContent>
 
@@ -1445,6 +1479,37 @@ export default function BusinessInsightPage({
                               labelFormatter={(label) => `Product: ${label}`}
                             />
                             <Bar dataKey="revenue" fill="#FF8042" />
+                          </BarChart>
+                        </ResponsiveChartContainer>
+                      </ChartCard>
+                    )}
+                    {lazadaTopProducts.length > 0 && (
+                      <ChartCard
+                        title="Top Lazada Products by Revenue"
+                        icon={Store}
+                        variant="blue"
+                      >
+                        <ResponsiveChartContainer>
+                          <BarChart
+                            data={lazadaTopProducts.map((p) => ({
+                              name: p.productName,
+                              revenue: p.revenue,
+                            }))}
+                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="name" />
+                            <YAxis />
+                            <Tooltip
+                              formatter={(value) => [
+                                value != null
+                                  ? `$${Number(value).toLocaleString()}`
+                                  : "$0",
+                                "Revenue",
+                              ]}
+                              labelFormatter={(label) => `Product: ${label}`}
+                            />
+                            <Bar dataKey="revenue" fill="#0F172A" />
                           </BarChart>
                         </ResponsiveChartContainer>
                       </ChartCard>

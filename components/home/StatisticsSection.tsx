@@ -16,6 +16,7 @@ import {
   FileText,
   Warehouse,
   ShoppingBag,
+  Store,
 } from "lucide-react";
 import { StatisticsCard } from "./StatisticsCard";
 import { StatisticsCardSkeleton } from "./StatisticsCardSkeleton";
@@ -230,6 +231,37 @@ export function StatisticsSection() {
                 ...(stats.shopeeOrderAnalytics.nearSlaCount > 0
                   ? [{ label: "Near SLA", value: stats.shopeeOrderAnalytics.nearSlaCount }]
                   : []),
+              ]}
+            />
+          )}
+          {stats.lazadaOrderAnalytics && (
+            <StatisticsCard
+              title="Lazada Orders"
+              value={stats.lazadaOrderAnalytics.totalOrders}
+              description={`Revenue: ${formatCurrency(stats.lazadaOrderAnalytics.totalRevenue)}`}
+              icon={Store}
+              variant="blue"
+              badges={[
+                {
+                  label: "Pending",
+                  value: stats.lazadaOrderAnalytics.ordersByStatus?.pending ?? 0,
+                },
+                {
+                  label: "Processing",
+                  value: stats.lazadaOrderAnalytics.ordersByStatus?.processing ?? 0,
+                },
+                {
+                  label: "Shipped",
+                  value: stats.lazadaOrderAnalytics.ordersByStatus?.shipped ?? 0,
+                },
+                {
+                  label: "Delivered",
+                  value: stats.lazadaOrderAnalytics.ordersByStatus?.delivered ?? 0,
+                },
+                {
+                  label: "Cancelled",
+                  value: stats.lazadaOrderAnalytics.ordersByStatus?.cancelled ?? 0,
+                },
               ]}
             />
           )}

@@ -11,10 +11,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { invalidateCache } from "@/lib/cache/cache-utils";
+import { verifyHmacSha256Hex } from "@/lib/auth/hmac-utils";
 
 export const runtime = "nodejs";
 
@@ -32,38 +32,13 @@ interface ShopeeWebhookPayload {
   };
 }
 
-// HMAC verification for webhook authenticity
-// Shopee signs webhook payloads with SHA256 HMAC using the partner key
-function verifyWebhookSignature(
-  body: string,
-  signature: string | null,
-): boolean {
-  if (!signature) return false;
-  const partnerKey = process.env.SHOPEE_PARTNER_KEY;
-  if (!partnerKey) return false;
-
-  const expected = crypto
-    .createHmac("sha256", partnerKey)
-    .update(body)
-    .digest("hex");
-
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expected),
-    );
-  } catch {
-    return false;
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const rawBody = await request.text();
     const signature = request.headers.get("x-shopee-signature");
 
     // Verify webhook signature
-    if (!verifyWebhookSignature(rawBody, signature)) {
+    if (!verifyHmacSha256Hex(rawBody, signature, process.env.SHOPEE_PARTNER_KEY)) {
       logger.warn("[Shopee Webhook] Invalid signature");
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }

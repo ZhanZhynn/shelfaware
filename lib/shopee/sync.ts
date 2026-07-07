@@ -1077,32 +1077,16 @@ function mapAdsRow(row: Record<string, number | string>) {
   };
 }
 
-/**
- * Retry wrapper for Shopee ads API calls.
- * The ads API has specific rate-limit errors (ads.rate_limit.exceed_*).
- * Retries with exponential backoff: 1s, 2s, 4s.
- */
-async function withAdsRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (error: unknown) {
-      lastError = error;
-      const isRateLimit =
-        error instanceof Error &&
-        /ads\.rate_limit|rate_limit|error_rate_limit/i.test(error.message);
-      if (!isRateLimit || attempt === retries) {
-        throw error;
-      }
-      const delayMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
-      logger.warn(
-        `[Shopee Ads] Rate limited (attempt ${attempt + 1}/${retries + 1}), retrying in ${delayMs}ms...`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw lastError;
+import { withRetry } from "@/lib/api/retry";
+
+/** Retry wrapper for Shopee ads API calls using generic withRetry. */
+function withAdsRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+  return withRetry(fn, {
+    retries,
+    match: /ads\.rate_limit|rate_limit|error_rate_limit/i,
+    baseDelayMs: 1000,
+    label: "Shopee Ads",
+  });
 }
 
 /** Split a date range into chunks of at most `chunkDays` days (inclusive start, exclusive end). */

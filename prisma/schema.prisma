@@ -288,6 +288,7 @@ model User {
   // }
   notifications Notification[] // In-app notifications (one-to-many relationship)
   shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
+  lazadaShops   LazadaShop[]   // Lazada connected sellers (one-to-many relationship)
   notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
   stockMovements StockMovement[] // Stock movements performed by this user
 }
@@ -781,4 +782,149 @@ model PurchaseOrderItem {
 
   @@index([purchaseOrderId])
   @@index([productId])
+}
+
+// ─── Lazada Marketplace ───────────────────────────────────────────────────
+
+model LazadaShop {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String    @db.ObjectId
+  sellerId       String    // Lazada seller ID (from country_user_info)
+  sellerName     String    // Seller display name
+  countryCode    String    // Country code: my, sg, th, vn, id, ph, cb
+  accessToken    String
+  refreshToken   String
+  tokenExpiry    DateTime? // When access_token expires (10-day window)
+  refreshExpiry  DateTime? // When refresh_token expires (50-day window)
+  lastSyncedAt   DateTime?
+  lowStockThreshold Int    @default(10)
+  createdAt      DateTime  @default(now()) @db.Date
+  updatedAt      DateTime? @db.Date
+  createdBy      String    @db.ObjectId
+  updatedBy      String?   @db.ObjectId
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products       LazadaProduct[]
+  orders         LazadaOrder[]
+
+  @@unique([userId, sellerId])
+  @@index([userId])
+  @@index([sellerId])
+}
+
+model LazadaProduct {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId         String    @db.ObjectId
+  userId         String    @db.ObjectId
+  lazadaItemId   Int       // Lazada item_id
+  itemName       String
+  description    String?
+  sellerSku      String?
+  primaryCategory Int?
+  status         String    // active, inactive, deleted
+  price          Float
+  specialPrice   Float?
+  stock          Int       @default(0)
+  imageUrl       String?
+  images         Json?
+  weight         Float?
+  dimensions     Json?     // { width, height, length }
+  lastSyncedAt   DateTime?
+  createdAt      DateTime  @default(now()) @db.Date
+  updatedAt      DateTime? @db.Date
+  shop           LazadaShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, lazadaItemId])
+  @@index([shopId])
+  @@index([lazadaItemId])
+  @@index([userId])
+  @@index([sellerSku])
+}
+
+model LazadaOrder {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId            String    @db.ObjectId
+  userId            String    @db.ObjectId
+  lazadaOrderId     String    @unique // Lazada order_id (numeric as string)
+  orderNumber       String?   // Lazada order_number
+  orderStatus       String    // pending, confirmed, packed, ready_to_ship, shipped, delivered, cancelled, returned
+  paymentStatus     String    @default("unpaid")
+  totalAmount       Float
+  shippingFee       Float?
+  currency          String?
+  customerFirstName String?
+  customerLastName  String?
+  paymentMethod     String?
+  remarks           String?
+  trackingNumber    String?
+  trackingCarrier   String?
+  shippingAddress   Json?
+  billingAddress    Json?
+  lazadaCreatedAt   DateTime?
+  lazadaUpdatedAt   DateTime?
+  paidAt            DateTime?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime? @db.Date
+  shop              LazadaShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items             LazadaOrderItem[]
+
+  @@index([shopId])
+  @@index([userId])
+  @@index([orderStatus])
+  @@index([lazadaCreatedAt])
+  @@index([createdAt])
+}
+
+model LazadaOrderItem {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  orderId         String    @db.ObjectId
+  shopId          String    @db.ObjectId
+  lazadaOrderItemId Int     // Lazada order_item_id
+  itemId          Int?      // Lazada item_id
+  skuId           String?
+  sellerSku       String?
+  shopSku         String?
+  productName     String
+  variation       String?
+  quantity        Int
+  price           Float
+  paidPrice       Float?
+  itemPrice       Float?
+  currency        String?
+  status          String
+  shipmentProvider String?
+  trackingNumber  String?
+  createdAt       DateTime  @default(now()) @db.Date
+  order           LazadaOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([shopId])
+  @@index([sellerSku])
+}
+
+// ─── Generic Sync Log (multi-channel) ─────────────────────────────────────
+
+model SyncLog {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId           String    @db.ObjectId // FK to ShopeeShop or LazadaShop
+  userId           String    @db.ObjectId
+  channel          String    @default("shopee") // "shopee" | "lazada"
+  syncType         String    // "products", "orders", "all"
+  status           String    @default("running") // "running", "completed", "completed_with_errors", "failed"
+  itemsSynced      Int       @default(0)
+  itemsCreated     Int       @default(0)
+  itemsUpdated     Int       @default(0)
+  errors           Json?
+  startedAt        DateTime  @default(now()) @db.Date
+  completedAt      DateTime? @db.Date
+  triggeredBy      String    @default("manual") // "manual", "cron", "webhook"
+
+  @@index([shopId])
+  @@index([userId])
+  @@index([channel])
+  @@index([status])
+  @@index([startedAt])
 }

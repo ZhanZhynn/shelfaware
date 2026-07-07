@@ -396,6 +396,45 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     };
   }
 
+  // ── Lazada order analytics ─────────────────────────────────────────────────
+  const lazadaShops = await prisma.lazadaShop.findMany({
+    where: { userId },
+    select: { id: true },
+  });
+  const lazadaShopIds = lazadaShops.map((s) => s.id);
+
+  let lazadaOrderAnalytics: import("@/types").DashboardLazadaOrderAnalytics | undefined;
+  if (lazadaShopIds.length > 0) {
+    const [lazadaOrderCount, lazadaOrderSum, lazadaStatusGroups] =
+      await Promise.all([
+        prisma.lazadaOrder.count({
+          where: { shopId: { in: lazadaShopIds } },
+        }),
+        prisma.lazadaOrder.aggregate({
+          where: { shopId: { in: lazadaShopIds } },
+          _sum: { totalAmount: true },
+          _avg: { totalAmount: true },
+        }),
+        prisma.lazadaOrder.groupBy({
+          by: ["orderStatus"],
+          where: { shopId: { in: lazadaShopIds } },
+          _count: true,
+        }),
+      ]);
+
+    const lazadaStatusMap: Record<string, number> = {};
+    for (const s of lazadaStatusGroups) {
+      lazadaStatusMap[s.orderStatus] = s._count;
+    }
+
+    lazadaOrderAnalytics = {
+      totalOrders: lazadaOrderCount,
+      totalRevenue: lazadaOrderSum._sum.totalAmount || 0,
+      averageOrderValue: lazadaOrderSum._avg.totalAmount || 0,
+      ordersByStatus: lazadaStatusMap,
+    };
+  }
+
   const productStatusBreakdown: DashboardProductStatusBreakdown = {
     available: 0,
     stockLow: 0,
@@ -709,6 +748,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     reviewStatusBreakdown,
     selfOthersBreakdown,
     shopeeOrderAnalytics,
+    lazadaOrderAnalytics,
   };
   await setCache(cacheKey, result, 300);
   return result;

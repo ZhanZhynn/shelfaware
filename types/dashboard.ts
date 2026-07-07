@@ -188,6 +188,15 @@ export interface DashboardTicketStatusBreakdown {
   closed: number;
 }
 
+/** Shopee order analytics summary */
+export interface DashboardShopeeOrderAnalytics {
+  totalOrders: number;
+  totalRevenue: number;
+  averageOrderValue: number;
+  ordersByStatus: Record<string, number>;
+  nearSlaCount: number;
+}
+
 /** Product review status counts (reviews for owner's products) */
 export interface DashboardReviewStatusBreakdown {
   pending: number;
@@ -229,4 +238,6 @@ export interface DashboardStats {
   reviewStatusBreakdown?: DashboardReviewStatusBreakdown;
   /** Self vs others breakdown (orders, invoices, revenue) for homepage cards */
   selfOthersBreakdown?: DashboardSelfOthersBreakdown;
+  /** Shopee order analytics (total orders, revenue, status distribution) */
+  shopeeOrderAnalytics?: DashboardShopeeOrderAnalytics;
 }

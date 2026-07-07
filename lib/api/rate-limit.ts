@@ -56,10 +56,10 @@ export const defaultRateLimits = {
     },
   },
   /**
-   * Auth rate limit (5 requests per minute)
+   * Auth rate limit (20 requests per minute)
    */
   auth: {
-    limit: 5,
+    limit: 20,
     window: 60,
     getIdentifier: (request: NextRequest) => {
       // Use IP for auth endpoints to prevent brute force

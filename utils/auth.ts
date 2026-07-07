@@ -9,8 +9,11 @@ import Cookies from "js-cookie"; // Import js-cookie
 import { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/prisma/client";
 
-/** Secret for signing/verifying JWT; must match across server and be set in production. */
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
+/** Secret for signing/verifying JWT; must be set in environment. */
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET environment variable is required");
+}
 
 type User = PrismaUser;
 

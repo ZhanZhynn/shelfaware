@@ -15,6 +15,7 @@ import {
   ShoppingCart,
   FileText,
   Warehouse,
+  ShoppingBag,
 } from "lucide-react";
 import { StatisticsCard } from "./StatisticsCard";
 import { StatisticsCardSkeleton } from "./StatisticsCardSkeleton";
@@ -55,7 +56,7 @@ export function StatisticsSection() {
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
       {isLoading ? (
         <>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
             <StatisticsCardSkeleton key={i} />
           ))}
         </>
@@ -198,6 +199,40 @@ export function StatisticsSection() {
                 : []),
             ]}
           />
+          {stats.shopeeOrderAnalytics && (
+            <StatisticsCard
+              title="Shopee Orders"
+              value={stats.shopeeOrderAnalytics.totalOrders}
+              description={`Revenue: ${formatCurrency(stats.shopeeOrderAnalytics.totalRevenue)}`}
+              icon={ShoppingBag}
+              variant="orange"
+              badges={[
+                {
+                  label: "Unpaid",
+                  value: stats.shopeeOrderAnalytics.ordersByStatus?.UNPAID ?? 0,
+                },
+                {
+                  label: "To Ship",
+                  value: stats.shopeeOrderAnalytics.ordersByStatus?.READY_TO_SHIP ?? 0,
+                },
+                {
+                  label: "Shipped",
+                  value: stats.shopeeOrderAnalytics.ordersByStatus?.SHIPPED ?? 0,
+                },
+                {
+                  label: "Completed",
+                  value: stats.shopeeOrderAnalytics.ordersByStatus?.COMPLETED ?? 0,
+                },
+                {
+                  label: "Cancelled",
+                  value: stats.shopeeOrderAnalytics.ordersByStatus?.CANCELLED ?? 0,
+                },
+                ...(stats.shopeeOrderAnalytics.nearSlaCount > 0
+                  ? [{ label: "Near SLA", value: stats.shopeeOrderAnalytics.nearSlaCount }]
+                  : []),
+              ]}
+            />
+          )}
           <StatisticsCard
             title="Total Warehouses"
             value={stats.counts?.warehouses}

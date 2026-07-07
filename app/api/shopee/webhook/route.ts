@@ -11,9 +11,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { invalidateCache } from "@/lib/cache/cache-utils";
+
+export const runtime = "nodejs";
 
 interface ShopeeWebhookPayload {
   code: string;
@@ -30,17 +33,28 @@ interface ShopeeWebhookPayload {
 }
 
 // HMAC verification for webhook authenticity
-// Shopee signs webhook payloads with the partner key
+// Shopee signs webhook payloads with SHA256 HMAC using the partner key
 function verifyWebhookSignature(
   body: string,
   signature: string | null,
 ): boolean {
   if (!signature) return false;
+  const partnerKey = process.env.SHOPEE_PARTNER_KEY;
+  if (!partnerKey) return false;
 
-  // Shopee uses SHA256 HMAC with partner key
-  // For now, we validate that the request has a valid signature header
-  // In production, implement full HMAC verification using SHOPEE_PARTNER_KEY
-  return !!signature;
+  const expected = crypto
+    .createHmac("sha256", partnerKey)
+    .update(body)
+    .digest("hex");
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expected),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(request: NextRequest) {

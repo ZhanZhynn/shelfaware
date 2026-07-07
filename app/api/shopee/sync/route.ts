@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { shopId, syncType } = validationResult.data;
+    const { shopId, syncType, daysBack } = validationResult.data;
 
     // Ownership check — verify the user owns this shop
     const shop = await prisma.shopeeShop.findFirst({
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         result = { returns: await syncShopeeReturns(shopId, userId) };
         break;
       case "ads":
-        result = { ads: await syncShopeeAds(shopId, userId) };
+        result = { ads: await syncShopeeAds(shopId, userId, daysBack) };
         break;
       case "all":
       default:

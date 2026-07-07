@@ -315,6 +315,15 @@ export const cacheKeys = {
   },
 
   /**
+   * Business Insights page cache keys — per-user (userId)
+   */
+  businessInsights: {
+    combinedOrders: (userId: string) =>
+      `businessInsights:combinedOrders:${userId}`,
+    pattern: "businessInsights:*",
+  },
+
+  /**
    * User Management (admin) cache keys
    */
   userManagement: {

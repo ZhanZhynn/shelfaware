@@ -1891,7 +1891,8 @@ class ApiClient {
      */
     triggerSync: async (data: {
       shopId: number;
-      syncType: "products" | "orders" | "all";
+      syncType: "products" | "orders" | "returns" | "ads" | "all";
+      daysBack?: number;
     }): Promise<
       ApiResponse<{
         products?: {
@@ -1904,6 +1905,17 @@ class ApiClient {
           synced: number;
           created: number;
           updated: number;
+          errors: string[];
+        };
+        returns?: {
+          synced: number;
+          created: number;
+          updated: number;
+          errors: string[];
+        };
+        ads?: {
+          synced: number;
+          campaigns: number;
           errors: string[];
         };
       }>

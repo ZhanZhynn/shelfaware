@@ -131,6 +131,7 @@ export type {
   DashboardTicketStatusBreakdown,
   DashboardReviewStatusBreakdown,
   DashboardSelfOthersBreakdown,
+  DashboardShopeeOrderAnalytics,
 } from "./dashboard";
 
 // Stock Allocation types

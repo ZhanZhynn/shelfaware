@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getSessionFromRequest } from "@/utils/auth";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/prisma/client";
@@ -29,8 +30,22 @@ export async function POST(request: NextRequest) {
     // Check for optional authorization (admin or internal cron call)
     const session = await getSessionFromRequest(request);
     const authHeader = request.headers.get("authorization");
-    const isInternalCall =
-      authHeader === `Bearer ${process.env.INTERNAL_API_KEY}`;
+    const internalApiKey = process.env.INTERNAL_API_KEY;
+
+    let isInternalCall = false;
+    if (internalApiKey && authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      if (token.length === internalApiKey.length) {
+        try {
+          isInternalCall = crypto.timingSafeEqual(
+            Buffer.from(token),
+            Buffer.from(internalApiKey),
+          );
+        } catch {
+          isInternalCall = false;
+        }
+      }
+    }
 
     // Either admin or internal call required
     if (!isInternalCall && (!session || session.role !== "admin")) {

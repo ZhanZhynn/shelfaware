@@ -63,12 +63,18 @@ import { queryKeys } from "@/lib/react-query";
 import { exportToExcel, exportToCSV } from "@/lib/export";
 import type { ProductForHome } from "@/lib/server/home-data";
 import type { OrderForPage } from "@/lib/server/orders-data";
+import type { CombinedOrder } from "@/lib/server/combined-orders-data";
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"];
+const SOURCE_COLORS: Record<string, string> = {
+  wms: "#0088FE",
+  shopee: "#FF8042",
+};
 
 export type BusinessInsightPageProps = {
   initialProducts?: ProductForHome[];
   initialOrders?: OrderForPage[];
+  initialCombinedOrders?: CombinedOrder[];
 };
 
 /**
@@ -79,6 +85,7 @@ export type BusinessInsightPageProps = {
 export default function BusinessInsightPage({
   initialProducts,
   initialOrders,
+  initialCombinedOrders,
 }: BusinessInsightPageProps = {}) {
   const queryClient = useQueryClient();
   // Use TanStack Query for data fetching
@@ -86,6 +93,9 @@ export default function BusinessInsightPage({
   const { data: allOrders = [], isLoading: isOrdersLoading } = useOrders();
   const { user, isCheckingAuth } = useAuth();
   const { toast } = useToast();
+
+  // Combined orders (WMS + Shopee) — used for order trend charts
+  const allCombinedOrders = initialCombinedOrders ?? [];
 
   // Hydrate React Query with server data so first paint uses it (one round-trip)
   useLayoutEffect(() => {
@@ -410,7 +420,7 @@ export default function BusinessInsightPage({
     };
   }, [filteredProducts]);
 
-  // Sales / order trend by month (from orders) — respects date range filter
+  // Sales / order trend by month (WMS + Shopee combined) — respects date range filter
   const orderTrendByMonth = useMemo(() => {
     const months = [
       "Jan",
@@ -426,12 +436,21 @@ export default function BusinessInsightPage({
       "Nov",
       "Dec",
     ];
-    if (!allOrders || allOrders.length === 0) {
-      return months.map((month) => ({ month, totalValue: 0, orderCount: 0 }));
+    const orders = allCombinedOrders;
+    if (!orders || orders.length === 0) {
+      return months.map((month) => ({
+        month,
+        totalValue: 0,
+        orderCount: 0,
+        wmsValue: 0,
+        wmsCount: 0,
+        shopeeValue: 0,
+        shopeeCount: 0,
+      }));
     }
-    let orders = allOrders;
+    let filtered = orders;
     if (dateRange.startDate || dateRange.endDate) {
-      orders = orders.filter((order) => {
+      filtered = orders.filter((order) => {
         const orderDate = new Date(order.createdAt);
         orderDate.setUTCHours(0, 0, 0, 0);
         if (dateRange.startDate) {
@@ -449,31 +468,62 @@ export default function BusinessInsightPage({
     }
     const byMonth = new Map<
       string,
-      { totalValue: number; orderCount: number }
+      {
+        totalValue: number;
+        orderCount: number;
+        wmsValue: number;
+        wmsCount: number;
+        shopeeValue: number;
+        shopeeCount: number;
+      }
     >();
-    orders.forEach((order) => {
+    filtered.forEach((order) => {
       const date = new Date(order.createdAt);
       const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-      const current = byMonth.get(monthKey) || { totalValue: 0, orderCount: 0 };
+      const current = byMonth.get(monthKey) || {
+        totalValue: 0,
+        orderCount: 0,
+        wmsValue: 0,
+        wmsCount: 0,
+        shopeeValue: 0,
+        shopeeCount: 0,
+      };
+      const isShopee = order.source === "shopee";
       byMonth.set(monthKey, {
         totalValue: current.totalValue + order.total,
         orderCount: current.orderCount + 1,
+        wmsValue: current.wmsValue + (isShopee ? 0 : order.total),
+        wmsCount: current.wmsCount + (isShopee ? 0 : 1),
+        shopeeValue: current.shopeeValue + (isShopee ? order.total : 0),
+        shopeeCount: current.shopeeCount + (isShopee ? 1 : 0),
       });
     });
+    // Determine the year from the most recent order
     const dataYear =
-      orders.length > 0 && orders[0]?.createdAt
-        ? new Date(orders[0].createdAt).getUTCFullYear()
+      filtered.length > 0 && filtered[0]?.createdAt
+        ? new Date(filtered[0].createdAt).getUTCFullYear()
         : new Date().getUTCFullYear();
     return months.map((month, index) => {
       const monthKey = `${dataYear}-${String(index + 1).padStart(2, "0")}`;
-      const data = byMonth.get(monthKey) || { totalValue: 0, orderCount: 0 };
+      const data = byMonth.get(monthKey) || {
+        totalValue: 0,
+        orderCount: 0,
+        wmsValue: 0,
+        wmsCount: 0,
+        shopeeValue: 0,
+        shopeeCount: 0,
+      };
       return {
         month,
         totalValue: data.totalValue,
         orderCount: data.orderCount,
+        wmsValue: data.wmsValue,
+        wmsCount: data.wmsCount,
+        shopeeValue: data.shopeeValue,
+        shopeeCount: data.shopeeCount,
       };
     });
-  }, [allOrders, dateRange]);
+  }, [allCombinedOrders, dateRange]);
 
   /**
    * Export analytics data to CSV
@@ -1069,7 +1119,7 @@ export default function BusinessInsightPage({
                     )}
                   </div>
                   {/* Sales / Order value trend — only when orders exist */}
-                  {!showSkeleton && allOrders.length > 0 && (
+                  {!showSkeleton && allCombinedOrders.length > 0 && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 text-sm sm:text-base">
                       <ChartCard
                         title="Sales / Order Value Trend"
@@ -1082,21 +1132,54 @@ export default function BusinessInsightPage({
                             <XAxis dataKey="month" />
                             <YAxis />
                             <Tooltip
-                              formatter={(value) => [
-                                value != null
-                                  ? `$${Number(value).toLocaleString()}`
-                                  : "$0",
-                                "Revenue",
-                              ]}
+                              formatter={(value, name) => {
+                                const labels: Record<string, string> = {
+                                  totalValue: "Total Revenue",
+                                  wmsValue: "WMS Revenue",
+                                  shopeeValue: "Shopee Revenue",
+                                };
+                                return [
+                                  value != null
+                                    ? `$${Number(value).toLocaleString()}`
+                                    : "$0",
+                                  labels[name as string] || name,
+                                ];
+                              }}
                             />
                             <Area
                               type="monotone"
-                              dataKey="totalValue"
-                              stroke="#00C49F"
-                              fill="#00C49F"
+                              dataKey="wmsValue"
+                              stackId="revenue"
+                              stroke={SOURCE_COLORS.wms}
+                              fill={SOURCE_COLORS.wms}
+                              name="wmsValue"
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="shopeeValue"
+                              stackId="revenue"
+                              stroke={SOURCE_COLORS.shopee}
+                              fill={SOURCE_COLORS.shopee}
+                              name="shopeeValue"
                             />
                           </AreaChart>
                         </ResponsiveChartContainer>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="inline-block w-3 h-3 rounded-sm"
+                              style={{ backgroundColor: SOURCE_COLORS.wms }}
+                            />
+                            WMS
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="inline-block w-3 h-3 rounded-sm"
+                              style={{ backgroundColor: SOURCE_COLORS.shopee }}
+                            />
+                            Shopee
+                          </span>
+                        </div>
                       </ChartCard>
                       <ChartCard
                         title="Order Count by Month"
@@ -1108,10 +1191,49 @@ export default function BusinessInsightPage({
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="month" />
                             <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="orderCount" fill="#8884D8" />
+                            <Tooltip
+                              formatter={(value, name) => {
+                                const labels: Record<string, string> = {
+                                  orderCount: "Total Orders",
+                                  wmsCount: "WMS Orders",
+                                  shopeeCount: "Shopee Orders",
+                                };
+                                return [
+                                  value,
+                                  labels[name as string] || name,
+                                ];
+                              }}
+                            />
+                            <Bar
+                              dataKey="wmsCount"
+                              stackId="orders"
+                              fill={SOURCE_COLORS.wms}
+                              name="wmsCount"
+                            />
+                            <Bar
+                              dataKey="shopeeCount"
+                              stackId="orders"
+                              fill={SOURCE_COLORS.shopee}
+                              name="shopeeCount"
+                            />
                           </BarChart>
                         </ResponsiveChartContainer>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="inline-block w-3 h-3 rounded-sm"
+                              style={{ backgroundColor: SOURCE_COLORS.wms }}
+                            />
+                            WMS
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="inline-block w-3 h-3 rounded-sm"
+                              style={{ backgroundColor: SOURCE_COLORS.shopee }}
+                            />
+                            Shopee
+                          </span>
+                        </div>
                       </ChartCard>
                     </div>
                   )}

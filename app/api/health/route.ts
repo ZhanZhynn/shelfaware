@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { prisma } from "@/prisma/client";
 import { getRedis, isRedisConfigured } from "@/lib/cache/redis";
 import { isBrevoConfigured } from "@/lib/email/brevo";
@@ -311,6 +312,29 @@ async function initializeUptimeTracking(): Promise<void> {
  */
 export async function GET(request: NextRequest) {
   try {
+    // Authenticate via CRON_SECRET
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+      return NextResponse.json(
+        { error: "Health check not configured" },
+        { status: 500 },
+      );
+    }
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const token = authHeader.slice(7);
+    if (
+      token.length !== cronSecret.length ||
+      !crypto.timingSafeEqual(
+        Buffer.from(token),
+        Buffer.from(cronSecret),
+      )
+    ) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Initialize uptime tracking (non-blocking)
     await initializeUptimeTracking();
 

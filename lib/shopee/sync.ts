@@ -1010,18 +1010,28 @@ export async function syncShopeeAll(
     updated: number;
     errors: string[];
   };
+  ads: {
+    synced: number;
+    campaigns: number;
+    errors: string[];
+  };
 }> {
   if (!acquireSyncLock(shopId)) {
     throw new Error(`Sync already in progress for shop ${shopId}`);
   }
 
   try {
-    const [products, orders] = await Promise.all([
+    const [products, orders, ads] = await Promise.all([
       syncShopeeProducts(shopId, userId),
       syncShopeeOrders(shopId, userId),
+      syncShopeeAds(shopId, userId).catch((err) => {
+        // Ads sync failure must not block products/orders sync
+        logger.error(`[Shopee Sync] Ads sync failed for shop ${shopId}:`, err);
+        return { synced: 0, campaigns: 0, errors: [String(err)] };
+      }),
     ]);
 
-    return { products, orders };
+    return { products, orders, ads };
   } finally {
     releaseSyncLock(shopId);
   }

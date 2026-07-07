@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart,
   Area,
@@ -13,6 +14,7 @@ import {
   Bar,
 } from "recharts";
 import { useShopeeAds } from "@/hooks/queries/use-shopee-ads";
+import { apiClient } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,8 +37,11 @@ import {
   ShoppingCart,
   Wallet,
   Megaphone,
+  RefreshCw,
+  Loader2,
 } from "lucide-react";
 import type { KpiMetric } from "@/types/executive-kpi";
+import { useToast } from "@/hooks/use-toast";
 
 function formatCurrency(value: number): string {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -92,6 +97,49 @@ function KpiCard({
 
 export default function ShopeeAdsDashboard() {
   const [preset, setPreset] = useState(30);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Fetch connected shops for the sync button
+  const { data: shops } = useQuery({
+    queryKey: ["shopee", "shops"],
+    queryFn: async () => {
+      const res = await apiClient.shopee.getShops();
+      return res.data;
+    },
+  });
+  const firstShop = shops?.[0];
+
+  // Ads sync mutation
+  const adsSyncMutation = useMutation({
+    mutationFn: async (shopId: number) => {
+      return apiClient.shopee.triggerSync({ shopId, syncType: "ads" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shopee"] });
+      queryClient.invalidateQueries({ queryKey: ["shopee-ads"] });
+      toast({ title: "Ads sync complete", description: "Shopee ads data has been updated." });
+    },
+    onError: () => {
+      toast({ title: "Ads sync failed", description: "Could not sync Shopee ads data.", variant: "destructive" });
+    },
+  });
+
+  // Backfill mutation (6 months)
+  const backfillMutation = useMutation({
+    mutationFn: async (shopId: number) => {
+      return apiClient.shopee.triggerSync({ shopId, syncType: "ads", daysBack: 180 });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shopee"] });
+      queryClient.invalidateQueries({ queryKey: ["shopee-ads"] });
+      toast({ title: "Backfill complete", description: "6 months of ads data has been synced." });
+    },
+    onError: () => {
+      toast({ title: "Backfill failed", description: "Could not backfill Shopee ads data.", variant: "destructive" });
+    },
+  });
+
   const { fromDate, toDate } = useMemo(() => {
     const now = new Date();
     return {
@@ -122,19 +170,51 @@ export default function ShopeeAdsDashboard() {
           <h1 className="text-2xl font-bold">Shopee Ads Dashboard</h1>
           <p className="text-muted-foreground">CPC ads performance tracking</p>
         </div>
-        {totalBalance !== undefined && (
-          <Card className="border-pink-200 dark:border-pink-900">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="rounded-lg p-2 bg-pink-100 dark:bg-pink-950">
-                <Wallet className="h-5 w-5 text-pink-600" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Ads Credit Balance</p>
-                <p className="text-lg font-bold">{formatCurrency(totalBalance)}</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <div className="flex items-center gap-3">
+          {firstShop && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => adsSyncMutation.mutate(firstShop.shopId)}
+                disabled={adsSyncMutation.isPending || backfillMutation.isPending}
+              >
+                {adsSyncMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Sync Ads
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => backfillMutation.mutate(firstShop.shopId)}
+                disabled={adsSyncMutation.isPending || backfillMutation.isPending}
+              >
+                {backfillMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Backfill 6M
+              </Button>
+            </>
+          )}
+          {totalBalance !== undefined && (
+            <Card className="border-pink-200 dark:border-pink-900">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="rounded-lg p-2 bg-pink-100 dark:bg-pink-950">
+                  <Wallet className="h-5 w-5 text-pink-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Ads Credit Balance</p>
+                  <p className="text-lg font-bold">{formatCurrency(totalBalance)}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">

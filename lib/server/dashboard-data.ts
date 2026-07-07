@@ -346,6 +346,56 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     }),
   ]);
 
+  // ── Shopee order analytics ─────────────────────────────────────────────────
+  const shopeeShops = await prisma.shopeeShop.findMany({
+    where: { userId },
+    select: { id: true },
+  });
+  const shopeeShopIds = shopeeShops.map((s) => s.id);
+
+  let shopeeOrderAnalytics: import("@/types").DashboardShopeeOrderAnalytics | undefined;
+  if (shopeeShopIds.length > 0) {
+    const now = new Date();
+    const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    const [shopeeOrderCount, shopeeOrderSum, shopeeStatusGroups, shopeeNearSlaCount] =
+      await Promise.all([
+        prisma.shopeeOrder.count({
+          where: { shopId: { in: shopeeShopIds } },
+        }),
+        prisma.shopeeOrder.aggregate({
+          where: { shopId: { in: shopeeShopIds } },
+          _sum: { totalAmount: true },
+          _avg: { totalAmount: true },
+        }),
+        prisma.shopeeOrder.groupBy({
+          by: ["orderStatus"],
+          where: { shopId: { in: shopeeShopIds } },
+          _count: true,
+        }),
+        prisma.shopeeOrder.count({
+          where: {
+            shopId: { in: shopeeShopIds },
+            orderStatus: { in: ["confirmed", "processing"] },
+            shipByDate: { not: null, lte: deadline },
+          },
+        }),
+      ]);
+
+    const shopeeStatusMap: Record<string, number> = {};
+    for (const s of shopeeStatusGroups) {
+      shopeeStatusMap[s.orderStatus] = s._count;
+    }
+
+    shopeeOrderAnalytics = {
+      totalOrders: shopeeOrderCount,
+      totalRevenue: shopeeOrderSum._sum.totalAmount || 0,
+      averageOrderValue: shopeeOrderSum._avg.totalAmount || 0,
+      ordersByStatus: shopeeStatusMap,
+      nearSlaCount: shopeeNearSlaCount,
+    };
+  }
+
   const productStatusBreakdown: DashboardProductStatusBreakdown = {
     available: 0,
     stockLow: 0,
@@ -658,6 +708,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     ticketStatusBreakdown,
     reviewStatusBreakdown,
     selfOthersBreakdown,
+    shopeeOrderAnalytics,
   };
   await setCache(cacheKey, result, 300);
   return result;

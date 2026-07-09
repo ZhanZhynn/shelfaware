@@ -40,10 +40,6 @@ Dockerfile
 .dockerignore
 .github
 .nvmrc
-.eslintrc*
-eslint.config.*
-tailwind.config.*
-postcss.config.*
 next-env.d.ts
 tsconfig.tsbuildinfo
 

@@ -35,6 +35,10 @@ ENV NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT=$NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV NEXT_PUBLIC_DISABLE_BROWSER_TRANSLATE=$NEXT_PUBLIC_DISABLE_BROWSER_TRANSLATE
 
+# Build-time placeholder only — real secret is provided at runtime via .env on NAS
+ARG JWT_SECRET=placeholder
+ENV JWT_SECRET=$JWT_SECRET
+
 # Build Next.js (output: "standalone" generates a self-contained .next/standalone dir)
 RUN npm run build
 

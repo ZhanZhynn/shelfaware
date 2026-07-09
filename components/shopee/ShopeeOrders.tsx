@@ -8,14 +8,10 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
-  flexRender,
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -25,7 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { ShoppingCart } from "lucide-react";
+import { MarketplaceDataTable } from "@/components/shared";
 
 interface ShopeeOrderRow {
   id: string;
@@ -137,7 +134,7 @@ export default function ShopeeOrders() {
         header: "Tracking",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
-            {row.original.trackingNumber || "—"}
+            {row.original.trackingNumber || "\u2014"}
           </span>
         ),
       },
@@ -185,103 +182,31 @@ export default function ShopeeOrders() {
         <h1 className="text-2xl font-bold">Shopee Orders</h1>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2">
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="All Statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {Object.entries(STATUS_LABELS).map(([value, label]) => (
-              <SelectItem key={value} value={value}>{label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-sm text-muted-foreground">
-          {data?.total || 0} orders
-        </span>
-      </div>
-
-      {/* Table */}
-      <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12" />
+      <MarketplaceDataTable
+        table={table}
+        isLoading={isLoading}
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalCount={data?.total}
+        countLabel="orders"
+        emptyStateTitle="No orders found"
+        emptyStateIcon={ShoppingCart}
+        columnCount={columns.length}
+        headerActions={
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>{label}</SelectItem>
               ))}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="border-b">
-                      {headerGroup.headers.map((header) => (
-                        <th
-                          key={header.id}
-                          className="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={columns.length} className="px-4 py-8 text-center text-muted-foreground">
-                        No orders found
-                      </td>
-                    </tr>
-                  ) : (
-                    table.getRowModel().rows.map((row) => (
-                      <tr key={row.id} className="border-b last:border-0 hover:bg-muted/50">
-                        {row.getVisibleCells().map((cell) => (
-                          <td key={cell.id} className="px-4 py-3 text-sm">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
+            </SelectContent>
+          </Select>
+        }
+      />
     </div>
   );
 }

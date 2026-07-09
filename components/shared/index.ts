@@ -55,3 +55,5 @@ export type {
   ClientDateTimeProps,
   ClientDateProps,
 } from "./ClientDateDisplay";
+export { default as MarketplaceDataTable } from "./MarketplaceDataTable";
+export { default as MarketplacePagination } from "./MarketplacePagination";

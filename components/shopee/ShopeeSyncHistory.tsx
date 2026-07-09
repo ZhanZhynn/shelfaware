@@ -6,15 +6,13 @@ import {
   useReactTable,
   getCoreRowModel,
   getPaginationRowModel,
-  flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronLeft, ChevronRight, CheckCircle, XCircle, Clock } from "lucide-react";
+import { CheckCircle, XCircle, Clock, History } from "lucide-react";
+import { MarketplaceDataTable } from "@/components/shared";
 
 interface SyncLogRow {
   id: string;
@@ -130,7 +128,7 @@ export default function ShopeeSyncHistory() {
         accessorKey: "completedAt",
         header: "Duration",
         cell: ({ row }) => {
-          if (!row.original.completedAt) return <span className="text-muted-foreground">—</span>;
+          if (!row.original.completedAt) return <span className="text-muted-foreground">{"\u2014"}</span>;
           const duration = Math.round(
             (new Date(row.original.completedAt).getTime() - new Date(row.original.startedAt).getTime()) / 1000,
           );
@@ -142,7 +140,7 @@ export default function ShopeeSyncHistory() {
         header: "Errors",
         cell: ({ row }) => {
           if (!row.original.errors || row.original.errors.length === 0) {
-            return <span className="text-muted-foreground">—</span>;
+            return <span className="text-muted-foreground">{"\u2014"}</span>;
           }
           return (
             <Badge variant="destructive">
@@ -185,83 +183,16 @@ export default function ShopeeSyncHistory() {
         <h1 className="text-2xl font-bold">Sync History</h1>
       </div>
 
-      <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12" />
-              ))}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="border-b">
-                      {headerGroup.headers.map((header) => (
-                        <th
-                          key={header.id}
-                          className="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={columns.length} className="px-4 py-8 text-center text-muted-foreground">
-                        No sync history found
-                      </td>
-                    </tr>
-                  ) : (
-                    table.getRowModel().rows.map((row) => (
-                      <tr key={row.id} className="border-b last:border-0 hover:bg-muted/50">
-                        {row.getVisibleCells().map((cell) => (
-                          <td key={cell.id} className="px-4 py-3 text-sm">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
+      <MarketplaceDataTable
+        table={table}
+        isLoading={isLoading}
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        emptyStateTitle="No sync history found"
+        emptyStateIcon={History}
+        columnCount={columns.length}
+      />
     </div>
   );
 }

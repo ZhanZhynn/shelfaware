@@ -161,6 +161,17 @@ export const API_ENDPOINTS = {
     base: "/audit-logs",
   },
 
+  // Lazada Integration
+  lazada: {
+    auth: "/lazada/auth",
+    callback: "/lazada/callback",
+    shops: "/lazada/shops",
+    sync: "/lazada/sync",
+    syncLogs: "/lazada/sync/logs",
+    products: "/lazada/products",
+    orders: "/lazada/orders",
+  },
+
   // Shopee Integration
   shopee: {
     auth: "/shopee/auth",

@@ -1,23 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  useReactTable,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  type ColumnDef,
+  type SortingState,
+} from "@tanstack/react-table";
+import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ShoppingCart, ArrowLeft, Package } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ShoppingCart, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { MarketplaceDataTable } from "@/components/shared";
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
-  confirmed: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  processing: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
-  shipped: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
-  delivered: "bg-green-500/15 text-green-700 dark:text-green-400",
-  cancelled: "bg-red-500/15 text-red-700 dark:text-red-400",
-  returned: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+interface LazadaOrderRow {
+  id: string;
+  lazadaOrderId: string;
+  orderNumber: string | null;
+  orderStatus: string;
+  totalAmount: number;
+  customerFirstName: string | null;
+  lazadaCreatedAt: string | null;
+  items: Array<{ productName: string; quantity: number; price: number }>;
+}
+
+const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "outline" | "success" | "warning"> = {
+  pending: "warning",
+  confirmed: "outline",
+  processing: "outline",
+  shipped: "outline",
+  delivered: "success",
+  cancelled: "destructive",
+  returned: "warning",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  confirmed: "Confirmed",
+  processing: "Processing",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
+  returned: "Returned",
 };
 
 export default function LazadaOrders() {
@@ -25,24 +62,103 @@ export default function LazadaOrders() {
   const sellerIdParam = searchParams.get("sellerId") || undefined;
 
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sorting, setSorting] = useState<SortingState>([]);
   const limit = 20;
 
   const { data, isLoading } = useQuery({
     queryKey: ["lazada", "orders", sellerIdParam, page, statusFilter],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit),
+      const response = await apiClient.lazada.getOrders({
+        sellerId: sellerIdParam,
+        page,
+        limit,
+        status: statusFilter === "all" ? undefined : statusFilter,
       });
-      if (sellerIdParam) params.set("sellerId", sellerIdParam);
-      if (statusFilter) params.set("status", statusFilter);
-
-      const res = await fetch(`/api/lazada/orders?${params}`);
-      if (!res.ok) throw new Error("Failed to fetch orders");
-      return res.json();
+      return response.data;
     },
   });
+
+  const columns = useMemo<ColumnDef<LazadaOrderRow>[]>(
+    () => [
+      {
+        accessorKey: "orderNumber",
+        header: "Order #",
+        cell: ({ row }) => (
+          <span className="font-mono text-sm">
+            {row.original.orderNumber || row.original.lazadaOrderId}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "customerFirstName",
+        header: "Customer",
+        cell: ({ row }) => (
+          <span>{row.original.customerFirstName || "N/A"}</span>
+        ),
+      },
+      {
+        accessorKey: "orderStatus",
+        header: "Status",
+        cell: ({ row }) => (
+          <Badge variant={STATUS_COLORS[row.original.orderStatus] || "default"}>
+            {STATUS_LABELS[row.original.orderStatus] || row.original.orderStatus}
+          </Badge>
+        ),
+      },
+      {
+        accessorKey: "totalAmount",
+        header: "Total",
+        cell: ({ row }) => (
+          <span className="font-medium">RM {row.original.totalAmount.toFixed(2)}</span>
+        ),
+      },
+      {
+        accessorKey: "items",
+        header: "Items",
+        cell: ({ row }) => {
+          const items = row.original.items || [];
+          return (
+            <div className="text-sm">
+              <span>{items.length} item{items.length !== 1 ? "s" : ""}</span>
+              {items.length > 0 && (
+                <span className="text-muted-foreground ml-1">
+                  ({items.slice(0, 2).map((i) => i.productName).join(", ")}
+                  {items.length > 2 ? ` +${items.length - 2} more` : ""})
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "lazadaCreatedAt",
+        header: "Date",
+        cell: ({ row }) => (
+          <span className="text-sm text-muted-foreground">
+            {row.original.lazadaCreatedAt
+              ? new Date(row.original.lazadaCreatedAt).toLocaleDateString()
+              : "N/A"}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const tableData = useMemo(() => (data?.orders || []) as LazadaOrderRow[], [data]);
+
+  const table = useReactTable({
+    data: tableData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: { sorting },
+  });
+
+  const totalPages = data ? Math.ceil(data.total / limit) : 0;
 
   return (
     <div className="space-y-6">
@@ -55,117 +171,35 @@ export default function LazadaOrders() {
         </Button>
         <div>
           <h1 className="text-2xl font-bold">Lazada Orders</h1>
-          <p className="text-muted-foreground">
-            {data ? `${data.total} orders` : "Loading..."}
-          </p>
         </div>
       </div>
 
-      {/* Status Filter */}
-      <div className="flex gap-2 flex-wrap">
-        {["", "pending", "confirmed", "processing", "shipped", "delivered", "cancelled"].map(
-          (status) => (
-            <Button
-              key={status}
-              variant={statusFilter === status ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setStatusFilter(status);
-                setPage(1);
-              }}
-            >
-              {status || "All"}
-            </Button>
-          ),
-        )}
-      </div>
-
-      {/* Order List */}
-      {isLoading ? (
-        <div className="space-y-4">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-      ) : data?.orders?.length > 0 ? (
-        <div className="space-y-4">
-          {data.orders.map((order: { id: string; lazadaOrderId: string; orderNumber: string | null; orderStatus: string; totalAmount: number; customerFirstName: string | null; lazadaCreatedAt: string | null; items: Array<{ productName: string; quantity: number; price: number }> }) => (
-            <Card key={order.id}>
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="font-medium">
-                      Order #{order.orderNumber || order.lazadaOrderId}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {order.customerFirstName || "Customer"} |{" "}
-                      {order.lazadaCreatedAt
-                        ? new Date(order.lazadaCreatedAt).toLocaleDateString()
-                        : "N/A"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <p className="font-medium">RM {order.totalAmount.toFixed(2)}</p>
-                    <Badge
-                      className={STATUS_COLORS[order.orderStatus] || ""}
-                      variant="secondary"
-                    >
-                      {order.orderStatus}
-                    </Badge>
-                  </div>
-                </div>
-                {order.items?.length > 0 && (
-                  <div className="text-sm text-muted-foreground">
-                    {order.items.length} item{order.items.length > 1 ? "s" : ""}:{" "}
-                    {order.items
-                      .slice(0, 3)
-                      .map((i) => i.productName)
-                      .join(", ")}
-                    {order.items.length > 3 && ` +${order.items.length - 3} more`}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-
-          {/* Pagination */}
-          {data.totalPages > 1 && (
-            <div className="flex justify-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-              >
-                Previous
-              </Button>
-              <span className="flex items-center px-3 text-sm text-muted-foreground">
-                Page {page} of {data.totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
-                disabled={page === data.totalPages}
-              >
-                Next
-              </Button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <ShoppingCart className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium mb-2">No Orders Found</h3>
-            <p className="text-muted-foreground text-center">
-              {statusFilter
-                ? `No orders with status "${statusFilter}"`
-                : "Sync your Lazada seller to see orders here"}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      <MarketplaceDataTable
+        table={table}
+        isLoading={isLoading}
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalCount={data?.total}
+        countLabel="orders"
+        emptyStateTitle="No orders found"
+        emptyStateDescription={statusFilter !== "all" ? `No orders with status "${statusFilter}"` : "Sync your Lazada seller to see orders here"}
+        emptyStateIcon={ShoppingCart}
+        columnCount={columns.length}
+        headerActions={
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+      />
     </div>
   );
 }

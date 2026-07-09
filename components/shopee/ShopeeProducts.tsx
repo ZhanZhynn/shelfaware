@@ -8,19 +8,17 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
-  flexRender,
   type ColumnDef,
   type SortingState,
   type RowSelectionState,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, ChevronLeft, ChevronRight, Package, Plus, Trash2 } from "lucide-react";
+import { Package, Plus, Trash2 } from "lucide-react";
 import { useShopeeProductMappingStatus } from "@/hooks/queries";
+import { MarketplaceDataTable } from "@/components/shared";
 import CreateWmsProductDialog from "./CreateWmsProductDialog";
 import BulkCreateWmsProductsDialog from "./BulkCreateWmsProductsDialog";
 
@@ -269,123 +267,37 @@ export default function ShopeeProducts() {
         <h1 className="text-2xl font-bold">Shopee Products</h1>
       </div>
 
-      {/* Search + Bulk Actions */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search products..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); setRowSelection({}); }}
-            className="pl-9"
-          />
-        </div>
-        <span className="text-sm text-muted-foreground">
-          {data?.total || 0} products
-        </span>
-        {selectedRowIds.length > 0 && (
-          <div className="flex items-center gap-2 ml-auto">
-            <Badge variant="secondary">{selectedRowIds.length} selected</Badge>
-            <Button
-              size="sm"
-              onClick={() => setBulkDialogOpen(true)}
-            >
-              <Plus className="h-3 w-3 mr-1" />
-              Create WMS Products
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRowSelection({})}
-            >
-              <Trash2 className="h-3 w-3 mr-1" />
-              Clear
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* Table */}
-      <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="space-y-2 p-4">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12" />
-              ))}
+      <MarketplaceDataTable
+        table={table}
+        isLoading={isLoading}
+        searchPlaceholder="Search products..."
+        searchValue={search}
+        onSearchChange={(v) => { setSearch(v); setPage(1); setRowSelection({}); }}
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalCount={data?.total}
+        countLabel="products"
+        emptyStateTitle="No products found"
+        emptyStateIcon={Package}
+        columnCount={columns.length}
+        headerActions={
+          selectedRowIds.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{selectedRowIds.length} selected</Badge>
+              <Button size="sm" onClick={() => setBulkDialogOpen(true)}>
+                <Plus className="h-3 w-3 mr-1" />
+                Create WMS Products
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setRowSelection({})}>
+                <Trash2 className="h-3 w-3 mr-1" />
+                Clear
+              </Button>
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <tr key={headerGroup.id} className="border-b">
-                      {headerGroup.headers.map((header) => (
-                        <th
-                          key={header.id}
-                          className="px-4 py-3 text-left text-sm font-medium text-muted-foreground"
-                        >
-                          {header.isPlaceholder
-                            ? null
-                            : flexRender(header.column.columnDef.header, header.getContext())}
-                        </th>
-                      ))}
-                    </tr>
-                  ))}
-                </thead>
-                <tbody>
-                  {table.getRowModel().rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={columns.length} className="px-4 py-8 text-center text-muted-foreground">
-                        No products found
-                      </td>
-                    </tr>
-                  ) : (
-                    table.getRowModel().rows.map((row) => (
-                      <tr key={row.id} className="border-b last:border-0 hover:bg-muted/50">
-                        {row.getVisibleCells().map((cell) => (
-                          <td key={cell.id} className="px-4 py-3 text-sm">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          ) : undefined
+        }
+      />
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Single Create Dialog */}
       {selectedProduct && (
         <CreateWmsProductDialog
           open={dialogOpen}
@@ -404,7 +316,6 @@ export default function ShopeeProducts() {
         />
       )}
 
-      {/* Bulk Create Dialog */}
       {bulkDialogOpen && (
         <BulkCreateWmsProductsDialog
           open={bulkDialogOpen}

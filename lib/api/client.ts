@@ -1140,6 +1140,155 @@ class ApiClient {
   };
 
   /**
+    * Lazada API methods
+    */
+  lazada = {
+    getAuthUrl: async (): Promise<ApiResponse<{ url: string }>> => {
+      const response = await this.client.get<{ url: string }>(
+        API_ENDPOINTS.lazada.auth,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getShops: async (): Promise<ApiResponse<Array<{
+      id: string;
+      sellerId: string;
+      sellerName: string;
+      countryCode: string | null;
+      lastSyncedAt: string | null;
+      createdAt: string;
+    }>>> => {
+      const response = await this.client.get(
+        API_ENDPOINTS.lazada.shops,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getProducts: async (params?: {
+      sellerId?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+    }): Promise<ApiResponse<{
+      products: Array<{
+        id: string;
+        lazadaItemId: number;
+        itemName: string;
+        sellerSku: string | null;
+        status: string;
+        price: number;
+        stock: number;
+        imageUrl: string | null;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>> => {
+      const searchParams = new URLSearchParams();
+      if (params?.sellerId) searchParams.set("sellerId", params.sellerId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.search) searchParams.set("search", params.search);
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.lazada.products}?${qs}`
+        : API_ENDPOINTS.lazada.products;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getOrders: async (params?: {
+      sellerId?: string;
+      page?: number;
+      limit?: number;
+      status?: string;
+    }): Promise<ApiResponse<{
+      orders: Array<{
+        id: string;
+        lazadaOrderId: string;
+        orderNumber: string | null;
+        orderStatus: string;
+        totalAmount: number;
+        customerFirstName: string | null;
+        lazadaCreatedAt: string | null;
+        items: Array<{ productName: string; quantity: number; price: number }>;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>> => {
+      const searchParams = new URLSearchParams();
+      if (params?.sellerId) searchParams.set("sellerId", params.sellerId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.lazada.orders}?${qs}`
+        : API_ENDPOINTS.lazada.orders;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    triggerSync: async (data: {
+      sellerId: string;
+      syncType: "products" | "orders" | "all";
+    }): Promise<ApiResponse<{ success: boolean; message?: string }>> => {
+      const response = await this.client.post(API_ENDPOINTS.lazada.sync, data);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getSyncLogs: async (
+      sellerId?: string,
+    ): Promise<ApiResponse<Array<{
+      id: string;
+      syncType: string;
+      status: string;
+      itemsSynced: number;
+      itemsCreated: number;
+      itemsUpdated: number;
+      errors: string[] | null;
+      triggeredBy: string;
+      startedAt: string;
+      completedAt: string | null;
+    }>>> => {
+      const url = sellerId
+        ? `${API_ENDPOINTS.lazada.syncLogs}?sellerId=${sellerId}`
+        : API_ENDPOINTS.lazada.syncLogs;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+  };
+
+  /**
     * Shopee Ads API methods
     */
   shopeeAds = {

@@ -105,7 +105,7 @@ function createAxiosInstance(): AxiosInstance {
     baseURL:
       process.env.NODE_ENV === "production"
         ? "https://console.shelfaware.my/api"
-        : "http://localhost:3000/api",
+        : `${process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000"}/api`,
     headers: {
       "Content-Type": "application/json",
     },
@@ -1279,6 +1279,156 @@ class ApiClient {
       const url = sellerId
         ? `${API_ENDPOINTS.lazada.syncLogs}?sellerId=${sellerId}`
         : API_ENDPOINTS.lazada.syncLogs;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+  };
+
+  /**
+    * TikTok Shop API methods
+    */
+  tiktok = {
+    getAuthUrl: async (): Promise<ApiResponse<{ url: string }>> => {
+      const response = await this.client.get<{ url: string }>(
+        API_ENDPOINTS.tiktok.auth,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getShops: async (): Promise<ApiResponse<Array<{
+      id: string;
+      shopId: string;
+      shopName: string;
+      region: string | null;
+      sellerType: string | null;
+      lastSyncedAt: string | null;
+      createdAt: string;
+    }>>> => {
+      const response = await this.client.get(
+        API_ENDPOINTS.tiktok.shops,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getProducts: async (params?: {
+      shopId?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+    }): Promise<ApiResponse<{
+      products: Array<{
+        id: string;
+        tiktokProductId: string;
+        title: string;
+        status: string;
+        mainImageUrl: string | null;
+        auditStatus: string | null;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>> => {
+      const searchParams = new URLSearchParams();
+      if (params?.shopId) searchParams.set("shopId", params.shopId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.search) searchParams.set("search", params.search);
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.tiktok.products}?${qs}`
+        : API_ENDPOINTS.tiktok.products;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getOrders: async (params?: {
+      shopId?: string;
+      page?: number;
+      limit?: number;
+      status?: string;
+    }): Promise<ApiResponse<{
+      orders: Array<{
+        id: string;
+        tiktokOrderId: string;
+        orderStatus: string;
+        buyerNickname: string | null;
+        totalAmount?: number;
+        payment?: Record<string, unknown>;
+        tiktokCreatedAt: string | null;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>> => {
+      const searchParams = new URLSearchParams();
+      if (params?.shopId) searchParams.set("shopId", params.shopId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.tiktok.orders}?${qs}`
+        : API_ENDPOINTS.tiktok.orders;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    triggerSync: async (data: {
+      shopId: string;
+      syncType?: "products" | "orders" | "all";
+    }): Promise<ApiResponse<unknown>> => {
+      const response = await this.client.post(
+        API_ENDPOINTS.tiktok.sync,
+        data,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getSyncLogs: async (
+      shopId?: string,
+    ): Promise<ApiResponse<Array<{
+      id: string;
+      syncType: string;
+      status: string;
+      itemsSynced: number;
+      itemsCreated: number;
+      itemsUpdated: number;
+      errors: string[] | null;
+      triggeredBy: string;
+      startedAt: string;
+      completedAt: string | null;
+    }>>> => {
+      const url = shopId
+        ? `${API_ENDPOINTS.tiktok.syncLogs}?shopId=${shopId}`
+        : API_ENDPOINTS.tiktok.syncLogs;
       const response = await this.client.get(url);
       return {
         data: response.data,

@@ -30,6 +30,7 @@ import {
   Gauge,
   Receipt,
   Megaphone,
+  Tv,
   ScanLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -237,6 +238,29 @@ const LAZADA_ITEMS: NavItem[] = [
   },
 ];
 
+const TIKTOK_ITEMS: NavItem[] = [
+  {
+    href: "/admin/tiktok",
+    label: "TikTok Overview",
+    icon: Tv,
+  },
+  {
+    href: "/admin/tiktok/products",
+    label: "TikTok Products",
+    icon: Package,
+  },
+  {
+    href: "/admin/tiktok/orders",
+    label: "TikTok Orders",
+    icon: ShoppingCart,
+  },
+  {
+    href: "/admin/tiktok/sync-history",
+    label: "Sync History",
+    icon: History,
+  },
+];
+
 export default function AdminSidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
@@ -302,6 +326,8 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(LAZADA_ITEMS)}
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
+        {renderNavItems(TIKTOK_ITEMS)}
+        <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(FINANCIALS_ITEMS)}
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(MY_ACTIVITY_ITEMS)}
@@ -342,6 +368,12 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
         Lazada
       </p>
       {renderNavItems(LAZADA_ITEMS)}
+
+      {/* TikTok Shop */}
+      <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        TikTok Shop
+      </p>
+      {renderNavItems(TIKTOK_ITEMS)}
 
       {/* Financials */}
       <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">

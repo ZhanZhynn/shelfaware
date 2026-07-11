@@ -5,7 +5,7 @@ import { buildNextProductionHeaderRules } from "./lib/vercel/production-headers"
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  allowedDevOrigins: ["100.72.140.36", "100.78.46.77"],
+  allowedDevOrigins: ["100.72.140.36", "100.78.46.77", "192.168.50.101"],
   reactStrictMode: true,
   serverExternalPackages: ["lazada-api-client"],
 

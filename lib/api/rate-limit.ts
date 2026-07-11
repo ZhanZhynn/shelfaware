@@ -47,7 +47,7 @@ export const defaultRateLimits = {
    * Strict rate limit (10 requests per minute)
    */
   strict: {
-    limit: 10,
+    limit: 30,
     window: 60,
     getIdentifier: (request: NextRequest) => {
       const userId = request.headers.get("x-user-id");

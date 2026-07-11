@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     const { type, id, successUrl, cancelUrl } = validationResult.data;
 
     const stripe = getStripe();
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000";
 
     let lineItems: {
       price_data: {

@@ -13,6 +13,7 @@ const requiredEnvVars = [
 
 /** Optional: when set, enable ImageKit, OAuth, email, cache, payments, shipping, etc. */
 const optionalEnvVars = [
+  "NEXT_PUBLIC_LOCAL_API_URL",
   "IMAGEKIT_PUBLIC_KEY",
   "IMAGEKIT_PRIVATE_KEY",
   "IMAGEKIT_URL_ENDPOINT",
@@ -59,6 +60,11 @@ const optionalEnvVars = [
   "LAZADA_APP_KEY",
   "LAZADA_APP_SECRET",
   "LAZADA_REDIRECT_URL",
+  // --- TikTok Shop (marketplace sync) - https://partner.tiktokshop.com ---
+  "TIKTOK_APP_KEY",
+  "TIKTOK_APP_SECRET",
+  "TIKTOK_REDIRECT_URL",
+  "TIKTOK_SERVICE_ID",
 ] as const;
 
 type RequiredEnvVar = (typeof requiredEnvVars)[number];

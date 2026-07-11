@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
           amountDue: invoice.amountDue,
           paymentLink: invoice.paymentLink || undefined,
           invoiceUrl: `${
-            process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"
+            process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000"
           }/invoices/${invoice.id}`,
           status: isOverdue
             ? "overdue"

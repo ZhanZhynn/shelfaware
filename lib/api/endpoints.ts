@@ -172,6 +172,20 @@ export const API_ENDPOINTS = {
     orders: "/lazada/orders",
   },
 
+  // TikTok Shop Integration
+  tiktok: {
+    auth: "/tiktok/auth",
+    callback: "/tiktok/callback",
+    shops: "/tiktok/shops",
+    shopDetail: (id: string) => `/tiktok/shops/${id}`,
+    sync: "/tiktok/sync",
+    syncLogs: "/tiktok/sync/logs",
+    products: "/tiktok/products",
+    productDetail: (id: string) => `/tiktok/products/${id}`,
+    orders: "/tiktok/orders",
+    orderDetail: (id: string) => `/tiktok/orders/${id}`,
+  },
+
   // Shopee Integration
   shopee: {
     auth: "/shopee/auth",

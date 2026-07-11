@@ -79,7 +79,7 @@ export async function queueEmailNotification(
     }
 
     // Get base URL for webhook endpoint
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000";
     const webhookUrl = `${baseUrl}/api/email/queue/process`;
 
     // Queue the email job via QStash

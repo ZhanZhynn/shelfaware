@@ -451,6 +451,27 @@ export const cacheKeys = {
     syncLogs: (sellerId: string) => `lazada:sync-logs:${sellerId}`,
     pattern: "lazada:*",
   },
+
+  /**
+   * TikTok Shop integration cache keys
+   */
+  tiktok: {
+    all: "tiktok:all",
+    shops: (userId: string) => `tiktok:shops:${userId}`,
+    shopDetail: (id: string) => `tiktok:shop:${id}`,
+    products: (shopId: string, filters?: Record<string, unknown>) => {
+      const filterStr = filters ? JSON.stringify(filters) : "default";
+      return `tiktok:products:${shopId}:${filterStr}`;
+    },
+    productDetail: (id: string) => `tiktok:product:${id}`,
+    orders: (shopId: string, filters?: Record<string, unknown>) => {
+      const filterStr = filters ? JSON.stringify(filters) : "default";
+      return `tiktok:orders:${shopId}:${filterStr}`;
+    },
+    orderDetail: (id: string) => `tiktok:order:${id}`,
+    syncLogs: (shopId: string) => `tiktok:sync-logs:${shopId}`,
+    pattern: "tiktok:*",
+  },
 } as const;
 
 /**
@@ -482,6 +503,7 @@ export async function invalidateAllServerCaches(): Promise<void> {
     invalidateCache(cacheKeys.sessions.pattern),
     invalidateCache(cacheKeys.shopee.pattern),
     invalidateCache(cacheKeys.lazada.pattern),
+    invalidateCache(cacheKeys.tiktok.pattern),
     invalidateCache("forecasting:*"),
     invalidateCache("system-config:*"),
     invalidateCache(cacheKeys.abcAnalysis.pattern),

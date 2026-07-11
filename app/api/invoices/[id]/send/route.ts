@@ -98,7 +98,7 @@ export async function POST(
       try {
         const stripe = getStripe();
         const baseUrl =
-          process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+          process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000";
 
         const checkoutSession = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
@@ -176,7 +176,7 @@ export async function POST(
       amountDue: invoice.amountDue,
       paymentLink: paymentLink || undefined,
       invoiceUrl: `${
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"
+        process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000"
       }/invoices/${invoice.id}`,
       status: invoice.status as InvoiceEmailData["status"],
     };

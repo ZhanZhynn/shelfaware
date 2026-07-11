@@ -150,7 +150,7 @@ model Product {
 model ProductChannelMapping {
   id              String   @id @default(auto()) @map("_id") @db.ObjectId
   wmsProductId    String   @db.ObjectId
-  channel         String // "shopee", "lazada", etc.
+  channel         String // "shopee", "lazada", "tiktok", etc.
   channelProductId String  @db.ObjectId // FK to ShopeeProduct or ShopeeProductVariant
   channelType     String // "product" or "variant"
   createdAt       DateTime @default(now())
@@ -289,6 +289,7 @@ model User {
   notifications Notification[] // In-app notifications (one-to-many relationship)
   shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
   lazadaShops   LazadaShop[]   // Lazada connected sellers (one-to-many relationship)
+  tiktokShops   TikTokShop[]   // TikTok Shop connected shops (one-to-many relationship)
   notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
   stockMovements StockMovement[] // Stock movements performed by this user
 }
@@ -911,7 +912,7 @@ model SyncLog {
   id               String    @id @default(auto()) @map("_id") @db.ObjectId
   shopId           String    @db.ObjectId // FK to ShopeeShop or LazadaShop
   userId           String    @db.ObjectId
-  channel          String    @default("shopee") // "shopee" | "lazada"
+  channel          String    @default("shopee") // "shopee" | "lazada" | "tiktok"
   syncType         String    // "products", "orders", "all"
   status           String    @default("running") // "running", "completed", "completed_with_errors", "failed"
   itemsSynced      Int       @default(0)
@@ -927,4 +928,158 @@ model SyncLog {
   @@index([channel])
   @@index([status])
   @@index([startedAt])
+}
+
+// ─── TikTok Shop Integration ────────────────────────────────────────────────
+
+model TikTokShop {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String    @db.ObjectId
+  shopId            String    // TikTok shop ID (string from API)
+  shopCipher        String    // Required for shop-level API calls
+  shopName          String
+  region            String?   // GB, US, ID, etc.
+  sellerType        String?   // CROSS_BORDER, LOCAL
+  shopCode          String?   // Shop code from authorization
+  openId            String?   // TikTok open_id for the seller
+  accessToken       String
+  refreshToken      String
+  tokenExpiry       DateTime? // When access_token expires (7-day window)
+  refreshExpiry     DateTime? // When refresh_token expires
+  lastSyncedAt      DateTime?
+  lowStockThreshold Int       @default(10)
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime? @db.Date
+  createdBy         String    @db.ObjectId
+  updatedBy         String?   @db.ObjectId
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products          TikTokProduct[]
+  orders            TikTokOrder[]
+
+  @@unique([userId, shopId])
+  @@index([userId])
+  @@index([shopId])
+}
+
+model TikTokProduct {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId            String    @db.ObjectId
+  userId            String    @db.ObjectId
+  tiktokProductId   String    // TikTok product ID
+  title             String
+  description       String?
+  categoryId        String?
+  mainImageUrl      String?
+  status            String    // ACTIVATE, DRAFT, UNDER_REVIEW, FAILED, FROZEN, DEACTIVATE
+  auditStatus       String?   // PASS, PENDING, FAILED
+  hasDraft          Boolean?  @default(false)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime? @db.Date
+  createdBy         String    @db.ObjectId
+  updatedBy         String?   @db.ObjectId
+  shop              TikTokShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants          TikTokProductVariant[]
+
+  @@unique([shopId, tiktokProductId])
+  @@index([shopId])
+  @@index([tiktokProductId])
+  @@index([userId])
+  @@index([status])
+}
+
+model TikTokProductVariant {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  productId         String    @db.ObjectId
+  shopId            String    @db.ObjectId
+  userId            String    @db.ObjectId
+  tiktokSkuId       String    // TikTok SKU ID
+  sellerSku         String?
+  price             Float
+  originalPrice     Float?
+  currency          String?
+  totalQuantity     Int       @default(0)
+  imageUrl          String?
+  status            String    // NORMAL, DELETED, NOT_SALE
+  salesAttrs        Json?     // Array of {attribute_id, attribute_name, attribute_value_id, attribute_value_name}
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime? @db.Date
+  createdBy         String    @db.ObjectId
+  updatedBy         String?   @db.ObjectId
+  product           TikTokProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems        TikTokOrderItem[]
+
+  @@unique([productId, tiktokSkuId])
+  @@index([shopId])
+  @@index([productId])
+  @@index([tiktokSkuId])
+  @@index([sellerSku])
+}
+
+model TikTokOrder {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId              String    @db.ObjectId
+  userId              String    @db.ObjectId
+  tiktokOrderId       String    @unique // TikTok order ID
+  orderStatus         String    // UNPAID, ON_HOLD, AWAITING_SHIPMENT, PARTIALLY_SHIPPING, AWAITING_COLLECTION, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED
+  cancelReason        String?
+  trackingNumber      String?
+  shippingProvider    String?
+  fulfillmentType     String?   // FULFILLMENT_BY_SELLER, FULFILLMENT_BY_TIKTOK
+  shippingType        String?   // TIKTOK_SHIPPING, SELLER_SHIPPING
+  payment             Json?     // Flattened payment object {currency, total_product_price, total_shipping_fee, platform_fee, seller_income, buyer_payment, tax, etc.}
+  recipientAddress    Json?     // {name, phone, email, address_detail, region_code, state, city, district, postal_code}
+  isCod               Boolean?  @default(false)
+  buyerUserId         String?
+  buyerEmail          String?
+  buyerNickname       String?
+  sellerNote          String?
+  buyerMessage        String?
+  tiktokCreatedAt     DateTime?
+  tiktokUpdatedAt     DateTime?
+  paidTime            DateTime?
+  cancelTime          DateTime?
+  deliveryTime        DateTime?
+  createdAt           DateTime  @default(now()) @db.Date
+  updatedAt           DateTime? @db.Date
+  shop                TikTokShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items               TikTokOrderItem[]
+
+  @@index([shopId])
+  @@index([userId])
+  @@index([orderStatus])
+  @@index([tiktokCreatedAt])
+  @@index([createdAt])
+}
+
+model TikTokOrderItem {
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  orderId               String    @db.ObjectId
+  shopId                String    @db.ObjectId
+  variantId             String?   @db.ObjectId // Optional FK to TikTokProductVariant
+  tiktokOrderLineItemId String    // TikTok order line item ID
+  productId             String?   // TikTok product ID (not our local ID)
+  skuId                 String?   // TikTok SKU ID
+  productName           String
+  skuName               String?
+  sellerSku             String?
+  productImageUrl       String?
+  quantity              Int
+  originalPrice         Float     // Pre-discount unit price
+  price                 Float     // Actual unit price after discount
+  discount              Float?    @default(0)
+  subtotalAmount        Float
+  taxAmount             Float?    @default(0)
+  refundAmount          Float?    @default(0)
+  isGift                Boolean?  @default(false)
+  saleAttrs             Json?     // Array of {attribute_id, attribute_name, attribute_value_name}
+  createdAt             DateTime  @default(now()) @db.Date
+  order                 TikTokOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant               TikTokProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@index([shopId])
+  @@index([variantId])
+  @@index([skuId])
 }

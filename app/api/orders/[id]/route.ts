@@ -427,7 +427,7 @@ export async function PUT(
             previousStatus: existingOrder.status,
             newStatus: updateData.status ?? order.status,
             orderUrl: `${
-              process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"
+              process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000"
             }/orders/${order.id}`,
             estimatedDelivery: order.estimatedDelivery?.toISOString(),
           },

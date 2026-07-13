@@ -290,6 +290,7 @@ model User {
   shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
   lazadaShops   LazadaShop[]   // Lazada connected sellers (one-to-many relationship)
   tiktokShops   TikTokShop[]   // TikTok Shop connected shops (one-to-many relationship)
+  shopifyShops  ShopifyShop[]  // Shopify connected shops (one-to-many relationship)
   notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
   stockMovements StockMovement[] // Stock movements performed by this user
 }
@@ -1082,4 +1083,136 @@ model TikTokOrderItem {
   @@index([shopId])
   @@index([variantId])
   @@index([skuId])
+}
+
+// ─── Shopify Integration ───────────────────────────────────────────────────
+
+model ShopifyShop {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String    @db.ObjectId
+  shopDomain        String    @unique
+  shopName          String
+  accessToken       String
+  scopes            String
+  lastSyncedAt      DateTime?
+  lowStockThreshold Int       @default(10)
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime? @db.Date
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products          ShopifyProduct[]
+  orders            ShopifyOrder[]
+
+  @@index([userId])
+}
+
+model ShopifyProduct {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId           String    @db.ObjectId
+  userId           String    @db.ObjectId
+  shopifyProductId String
+  title            String
+  handle           String
+  description      String?
+  vendor           String?
+  productType      String?
+  status           String
+  tags             String[]  @default([])
+  totalInventory   Int       @default(0)
+  tracksInventory  Boolean   @default(true)
+  featuredImageUrl String?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime  @default(now()) @db.Date
+  updatedAt        DateTime? @db.Date
+  shop             ShopifyShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants         ShopifyProductVariant[]
+
+  @@unique([shopId, shopifyProductId])
+  @@index([shopId])
+  @@index([userId])
+  @@index([status])
+}
+
+model ShopifyProductVariant {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  productId          String    @db.ObjectId
+  shopifyVariantId   String
+  title              String
+  displayName        String?
+  sku                String?
+  barcode            String?
+  price              Float
+  compareAtPrice     Float?
+  inventoryQuantity  Int       @default(0)
+  inventoryPolicy    String?
+  position           Int?
+  availableForSale   Boolean   @default(false)
+  createdAt          DateTime  @default(now()) @db.Date
+  updatedAt          DateTime? @db.Date
+  product            ShopifyProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, shopifyVariantId])
+  @@index([productId])
+  @@index([sku])
+}
+
+model ShopifyOrder {
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId                String    @db.ObjectId
+  userId                String    @db.ObjectId
+  shopifyOrderId        String    @unique
+  orderName             String
+  orderStatus           String
+  financialStatus       String?
+  fulfillmentStatus     String
+  totalAmount           Float
+  subtotalAmount        Float
+  shippingAmount        Float     @default(0)
+  taxAmount             Float?
+  currency              String
+  test                  Boolean   @default(false)
+  confirmed             Boolean   @default(false)
+  note                  String?
+  tags                  String[]  @default([])
+  customerEmail         String?
+  customerFirstName     String?
+  customerLastName      String?
+  shippingAddress       Json?
+  cancelReason          String?
+  shopifyCreatedAt      DateTime?
+  shopifyUpdatedAt      DateTime?
+  processedAt           DateTime?
+  closedAt              DateTime?
+  cancelledAt           DateTime?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime  @default(now()) @db.Date
+  updatedAt             DateTime? @db.Date
+  shop                  ShopifyShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items                 ShopifyOrderItem[]
+
+  @@index([shopId])
+  @@index([userId])
+  @@index([orderStatus])
+  @@index([shopifyCreatedAt])
+}
+
+model ShopifyOrderItem {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  orderId             String    @db.ObjectId
+  shopId              String    @db.ObjectId
+  variantId           String?   @db.ObjectId
+  shopifyLineId       String
+  name                String
+  title               String
+  quantity            Int
+  currentQuantity     Int
+  unfulfilledQuantity Int
+  sku                 String?
+  price               Float
+  discountedPrice     Float?
+  createdAt           DateTime  @default(now()) @db.Date
+  order               ShopifyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([shopId])
+  @@index([variantId])
 }

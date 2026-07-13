@@ -11,7 +11,7 @@ import { logger } from "@/lib/logger";
 interface SyncLogInput {
   shopId: string;       // ObjectId of the marketplace shop
   userId: string;
-  channel: "shopee" | "lazada" | "tiktok";
+  channel: "shopee" | "lazada" | "tiktok" | "shopify";
   syncType: string;     // "products" | "orders" | "all" | etc.
   triggeredBy?: "manual" | "cron" | "webhook";
 }

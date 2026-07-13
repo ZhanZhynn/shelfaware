@@ -4,7 +4,7 @@
  */
 
 /** Discriminated source for combined orders / business insights */
-export type MarketSource = "wms" | "shopee" | "lazada";
+export type MarketSource = "wms" | "shopee" | "lazada" | "tiktok" | "shopify";
 
 /** Channel identifier used in ProductChannelMapping and SyncLog */
-export type MarketplaceChannel = "shopee" | "lazada";
+export type MarketplaceChannel = "shopee" | "lazada" | "tiktok" | "shopify";

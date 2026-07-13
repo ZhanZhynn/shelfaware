@@ -261,6 +261,13 @@ const TIKTOK_ITEMS: NavItem[] = [
   },
 ];
 
+const SHOPIFY_ITEMS: NavItem[] = [
+  { href: "/admin/shopify", label: "Overview", icon: Store },
+  { href: "/admin/shopify/products", label: "Products", icon: Package },
+  { href: "/admin/shopify/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/admin/shopify/sync-history", label: "Sync History", icon: History },
+];
+
 export default function AdminSidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
@@ -328,6 +335,8 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(TIKTOK_ITEMS)}
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
+        {renderNavItems(SHOPIFY_ITEMS)}
+        <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(FINANCIALS_ITEMS)}
         <div className="w-6 border-t border-gray-200/50 dark:border-white/10 my-1" />
         {renderNavItems(MY_ACTIVITY_ITEMS)}
@@ -374,6 +383,12 @@ export default function AdminSidebar({ collapsed = false }: { collapsed?: boolea
         TikTok Shop
       </p>
       {renderNavItems(TIKTOK_ITEMS)}
+
+      {/* Shopify */}
+      <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Shopify
+      </p>
+      {renderNavItems(SHOPIFY_ITEMS)}
 
       {/* Financials */}
       <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">

@@ -1439,6 +1439,156 @@ class ApiClient {
   };
 
   /**
+   * Shopify API methods
+   */
+  shopify = {
+    getAuthUrl: async (shop: string): Promise<ApiResponse<{ url: string; state: string }>> => {
+      const response = await this.client.get<{ url: string; state: string }>(
+        `${API_ENDPOINTS.shopify.auth}?shop=${encodeURIComponent(shop)}`,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getShops: async (): Promise<ApiResponse<Array<{
+      id: string;
+      shopDomain: string;
+      shopName: string;
+      scopes: string;
+      lastSyncedAt: string | null;
+      createdAt: string;
+    }>>> => {
+      const response = await this.client.get(
+        API_ENDPOINTS.shopify.shops,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getProducts: async (params?: {
+      shopId?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+    }): Promise<ApiResponse<{
+      products: Array<{
+        id: string;
+        shopifyProductId: string;
+        title: string;
+        status: string;
+        featuredImageUrl: string | null;
+        variants: Array<{ price: number; inventoryQuantity: number }>;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>> => {
+      const searchParams = new URLSearchParams();
+      if (params?.shopId) searchParams.set("shopId", params.shopId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.search) searchParams.set("search", params.search);
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.shopify.products}?${qs}`
+        : API_ENDPOINTS.shopify.products;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getOrders: async (params?: {
+      shopId?: string;
+      page?: number;
+      limit?: number;
+      status?: string;
+    }): Promise<ApiResponse<{
+      orders: Array<{
+        id: string;
+        shopifyOrderId: string;
+        orderName: string;
+        orderStatus: string;
+        financialStatus: string | null;
+        totalAmount: number;
+        currency: string;
+        createdAt: string | null;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+      totalPages: number;
+    }>> => {
+      const searchParams = new URLSearchParams();
+      if (params?.shopId) searchParams.set("shopId", params.shopId);
+      if (params?.page) searchParams.set("page", String(params.page));
+      if (params?.limit) searchParams.set("limit", String(params.limit));
+      if (params?.status) searchParams.set("status", params.status);
+      const qs = searchParams.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.shopify.orders}?${qs}`
+        : API_ENDPOINTS.shopify.orders;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    triggerSync: async (data: {
+      shopId: string;
+      syncType?: "products" | "orders" | "all";
+    }): Promise<ApiResponse<unknown>> => {
+      const response = await this.client.post(
+        API_ENDPOINTS.shopify.sync,
+        data,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getSyncLogs: async (
+      shopId?: string,
+    ): Promise<ApiResponse<Array<{
+      id: string;
+      syncType: string;
+      status: string;
+      itemsSynced: number;
+      itemsCreated: number;
+      itemsUpdated: number;
+      errors: string[] | null;
+      triggeredBy: string;
+      startedAt: string;
+      completedAt: string | null;
+    }>>> => {
+      const url = shopId
+        ? `${API_ENDPOINTS.shopify.syncLogs}?shopId=${shopId}`
+        : API_ENDPOINTS.shopify.syncLogs;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+  };
+
+  /**
     * Shopee Ads API methods
     */
   shopeeAds = {

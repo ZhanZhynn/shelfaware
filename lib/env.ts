@@ -65,6 +65,11 @@ const optionalEnvVars = [
   "TIKTOK_APP_SECRET",
   "TIKTOK_REDIRECT_URL",
   "TIKTOK_SERVICE_ID",
+  // --- Shopify (marketplace sync) - https://partners.shopify.com ---
+  "SHOPIFY_API_KEY",
+  "SHOPIFY_API_SECRET",
+  "SHOPIFY_SCOPES",
+  "SHOPIFY_REDIRECT_URL",
 ] as const;
 
 type RequiredEnvVar = (typeof requiredEnvVars)[number];

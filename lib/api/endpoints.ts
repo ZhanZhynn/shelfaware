@@ -186,6 +186,20 @@ export const API_ENDPOINTS = {
     orderDetail: (id: string) => `/tiktok/orders/${id}`,
   },
 
+  // Shopify Integration
+  shopify: {
+    auth: "/shopify/auth",
+    callback: "/shopify/callback",
+    shops: "/shopify/shops",
+    shopDetail: (id: string) => `/shopify/shops/${id}`,
+    sync: "/shopify/sync",
+    syncLogs: "/shopify/sync/logs",
+    products: "/shopify/products",
+    productDetail: (id: string) => `/shopify/products/${id}`,
+    orders: "/shopify/orders",
+    orderDetail: (id: string) => `/shopify/orders/${id}`,
+  },
+
   // Shopee Integration
   shopee: {
     auth: "/shopee/auth",

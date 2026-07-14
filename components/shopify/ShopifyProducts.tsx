@@ -6,17 +6,19 @@ import { useQuery } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
+  getExpandedRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   type ColumnDef,
   type SortingState,
+  type Row,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Package, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { MarketplaceDataTable } from "@/components/shared";
+import { MarketplaceDataTable, VariantSubTable, type Marketplace } from "@/components/shared";
 
 interface ShopifyProductRow {
   id: string;
@@ -24,7 +26,19 @@ interface ShopifyProductRow {
   title: string;
   status: string;
   featuredImageUrl: string | null;
-  variants: Array<{ price: number; inventoryQuantity: number }>;
+  variants: Array<{
+    id?: string;
+    title?: string;
+    displayName?: string | null;
+    sku?: string | null;
+    barcode?: string | null;
+    price: number;
+    compareAtPrice?: number | null;
+    inventoryQuantity: number;
+    inventoryPolicy?: string | null;
+    position?: number | null;
+    availableForSale?: boolean;
+  }>;
 }
 
 const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "success" | "warning" | "outline"> = {
@@ -33,6 +47,10 @@ const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "s
   ARCHIVED: "outline",
   UNLISTED: "warning",
 };
+
+function renderShopifyVariants(row: Row<ShopifyProductRow>) {
+  return <VariantSubTable variants={row.original.variants || []} marketplace="shopify" />;
+}
 
 export default function ShopifyProducts() {
   const searchParams = useSearchParams();
@@ -139,6 +157,7 @@ export default function ShopifyProducts() {
     data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     onSortingChange: setSorting,
@@ -176,6 +195,7 @@ export default function ShopifyProducts() {
         emptyStateDescription={search ? "No products match your search" : "Sync your Shopify store to see products here"}
         emptyStateIcon={Package}
         columnCount={columns.length}
+        renderExpandedRow={renderShopifyVariants}
       />
     </div>
   );

@@ -75,7 +75,21 @@ export async function GET(request: NextRequest) {
         orderBy: { lastSyncedAt: "desc" },
         skip,
         take: limit,
-        include: { _count: { select: { variants: true } } },
+        include: {
+          variants: {
+            select: {
+              id: true,
+              modelId: true,
+              modelName: true,
+              modelSku: true,
+              price: true,
+              originalPrice: true,
+              stock: true,
+              status: true,
+              tierIndex: true,
+            },
+          },
+        },
       }),
       prisma.shopeeProduct.count({ where }),
     ]);

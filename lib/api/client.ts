@@ -1336,6 +1336,7 @@ class ApiClient {
         status: string;
         mainImageUrl: string | null;
         auditStatus: string | null;
+        variants: Array<{ price: number; totalQuantity: number }>;
       }>;
       total: number;
       page: number;

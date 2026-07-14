@@ -65,6 +65,23 @@ export async function GET(request: NextRequest) {
         skip,
         take: limit,
         orderBy: { createdAt: "desc" },
+        include: {
+          variants: {
+            select: {
+              id: true,
+              skuId: true,
+              sellerSku: true,
+              shopSku: true,
+              variation: true,
+              price: true,
+              specialPrice: true,
+              stock: true,
+              available: true,
+              status: true,
+              images: true,
+            },
+          },
+        },
       }),
       prisma.lazadaProduct.count({ where }),
     ]);

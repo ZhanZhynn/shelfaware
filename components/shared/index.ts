@@ -57,3 +57,5 @@ export type {
 } from "./ClientDateDisplay";
 export { default as MarketplaceDataTable } from "./MarketplaceDataTable";
 export { default as MarketplacePagination } from "./MarketplacePagination";
+export { default as VariantSubTable } from "./VariantSubTable";
+export type { MarketplaceVariant, Marketplace } from "./VariantSubTable";

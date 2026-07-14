@@ -194,6 +194,53 @@ export async function syncLazadaProducts(
             created++;
           }
           synced++;
+
+          // Sync SKUs as variants
+          if (product.skus && product.skus.length > 0) {
+            const dbProduct = existing || (await prisma.lazadaProduct.findFirst({
+              where: { shopId: shop.id, lazadaItemId: Number(itemId) },
+            }));
+
+            if (dbProduct) {
+              for (const sku of product.skus) {
+                if (!sku.SkuId) continue;
+
+                const existingVariant = await prisma.lazadaProductVariant.findFirst({
+                  where: { productId: dbProduct.id, skuId: sku.SkuId },
+                });
+
+                const variantData = {
+                  sellerSku: sku.SellerSku || null,
+                  shopSku: sku.ShopSku || null,
+                  price: parseFloat(String(sku.price ?? 0)),
+                  specialPrice: sku.special_price ? parseFloat(String(sku.special_price)) : null,
+                  stock: sku.quantity ?? 0,
+                  available: sku.Available ?? null,
+                  status: sku.Status || "active",
+                  images: sku.Images || undefined,
+                  lastSyncedAt: new Date(),
+                };
+
+                if (existingVariant) {
+                  await prisma.lazadaProductVariant.update({
+                    where: { id: existingVariant.id },
+                    data: variantData,
+                  });
+                } else {
+                  await prisma.lazadaProductVariant.create({
+                    data: {
+                      productId: dbProduct.id,
+                      shopId: shop.id,
+                      userId,
+                      lazadaItemId: Number(itemId),
+                      skuId: sku.SkuId,
+                      ...variantData,
+                    },
+                  });
+                }
+              }
+            }
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`Product ${product.item_id}: ${msg}`);

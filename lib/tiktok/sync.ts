@@ -133,6 +133,7 @@ export async function syncTikTokProducts(
       const cipher = await getActiveShopCipher();
 
       // Fetch all products using pagination
+      const syncedProductIds: string[] = [];
       let pageToken: string | undefined;
 
       while (true) {
@@ -236,6 +237,7 @@ export async function syncTikTokProducts(
               }
             }
 
+            syncedProductIds.push(productId);
             synced++;
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -247,6 +249,88 @@ export async function syncTikTokProducts(
 
         pageToken = data.next_page_token || undefined;
         if (!pageToken) break;
+      }
+
+      // ─── Second pass: Fetch full SKU details for each product ───────
+      // The search API does not return sku_price or inventory.
+      // We need to call getProductDetail() for each product to get variant data.
+      logger.info(`[TikTok Sync] Fetching details for ${syncedProductIds.length} products...`);
+
+      let detailSynced = 0;
+      let detailCreated = 0;
+      let detailUpdated = 0;
+
+      for (const productId of syncedProductIds) {
+        try {
+          const detail = await withTikTokRetry(() =>
+            getProductDetail(accessToken, cipher, productId),
+          );
+
+          const productDetail = detail.product;
+          if (!productDetail?.skus || productDetail.skus.length === 0) {
+            continue;
+          }
+
+          const dbProduct = await prisma.tikTokProduct.findFirst({
+            where: { shopId: shop.id, tiktokProductId: productId },
+          });
+
+          if (!dbProduct) continue;
+
+          for (const sku of productDetail.skus) {
+            if (!sku.id) continue;
+
+            const existingVariant = await prisma.tikTokProductVariant.findFirst({
+              where: { productId: dbProduct.id, tiktokSkuId: sku.id },
+            });
+
+            const variantData = {
+              sellerSku: sku.seller_sku || null,
+              price: parseFloat(sku.sku_price?.price || "0"),
+              originalPrice: sku.sku_price?.original_price
+                ? parseFloat(sku.sku_price.original_price)
+                : null,
+              currency: sku.sku_price?.currency || null,
+              totalQuantity: sku.inventory?.total_quantity ?? 0,
+              imageUrl: sku.image_url || null,
+              status: sku.status || "NORMAL",
+              salesAttrs: sku.sales_attrs ? JSON.parse(JSON.stringify(sku.sales_attrs)) : undefined,
+              lastSyncedAt: new Date(),
+            };
+
+            if (existingVariant) {
+              await prisma.tikTokProductVariant.update({
+                where: { id: existingVariant.id },
+                data: variantData,
+              });
+              detailUpdated++;
+            } else {
+              await prisma.tikTokProductVariant.create({
+                data: {
+                  productId: dbProduct.id,
+                  shopId: shop.id,
+                  userId,
+                  tiktokSkuId: sku.id,
+                  createdBy: userId,
+                  ...variantData,
+                },
+              });
+              detailCreated++;
+            }
+            detailSynced++;
+          }
+
+          // Small delay between detail requests to avoid rate limiting
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`Product detail ${productId}: ${msg}`);
+          logger.warn(`[TikTok Sync] Failed to fetch detail for ${productId}: ${msg}`);
+        }
+      }
+
+      if (detailSynced > 0) {
+        logger.info(`[TikTok Sync] Detail pass: ${detailSynced} variants (${detailCreated} created, ${detailUpdated} updated)`);
       }
 
       // Update shop last synced

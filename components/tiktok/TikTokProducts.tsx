@@ -6,17 +6,19 @@ import { useQuery } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
+  getExpandedRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   type ColumnDef,
   type SortingState,
+  type Row,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Package, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { MarketplaceDataTable } from "@/components/shared";
+import { MarketplaceDataTable, VariantSubTable } from "@/components/shared";
 
 interface TikTokProductRow {
   id: string;
@@ -25,7 +27,16 @@ interface TikTokProductRow {
   status: string;
   auditStatus: string | null;
   mainImageUrl: string | null;
-  variants: Array<{ price: number; totalQuantity: number }>;
+  variants: Array<{
+    price: number;
+    totalQuantity: number;
+    sellerSku?: string | null;
+    originalPrice?: number | null;
+    currency?: string | null;
+    imageUrl?: string | null;
+    status?: string;
+    salesAttrs?: unknown;
+  }>;
 }
 
 const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "success" | "warning"> = {
@@ -35,6 +46,10 @@ const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive" | "s
   inactive: "secondary",
   rejected: "destructive",
 };
+
+function renderTikTokVariants(row: Row<TikTokProductRow>) {
+  return <VariantSubTable variants={row.original.variants || []} marketplace="tiktok" />;
+}
 
 export default function TikTokProducts() {
   const searchParams = useSearchParams();
@@ -97,7 +112,7 @@ export default function TikTokProducts() {
           const firstVariant = row.original.variants?.[0];
           return (
             <span className="font-medium">
-              {firstVariant?.price ? `${firstVariant.price.toFixed(2)}` : "N/A"}
+              {firstVariant?.price != null ? `${firstVariant.price.toFixed(2)}` : "N/A"}
             </span>
           );
         },
@@ -141,6 +156,7 @@ export default function TikTokProducts() {
     data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     onSortingChange: setSorting,
@@ -178,6 +194,7 @@ export default function TikTokProducts() {
         emptyStateDescription={search ? "No products match your search" : "Sync your TikTok Shop to see products here"}
         emptyStateIcon={Package}
         columnCount={columns.length}
+        renderExpandedRow={renderTikTokVariants}
       />
     </div>
   );

@@ -6,10 +6,12 @@ import { useQuery } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
+  getExpandedRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   type ColumnDef,
   type SortingState,
+  type Row,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Package, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { MarketplaceDataTable } from "@/components/shared";
+import { MarketplaceDataTable, VariantSubTable } from "@/components/shared";
 
 interface LazadaProductRow {
   id: string;
@@ -28,6 +30,23 @@ interface LazadaProductRow {
   price: number;
   stock: number;
   imageUrl: string | null;
+  variants?: Array<{
+    id?: string;
+    skuId?: number;
+    sellerSku?: string | null;
+    shopSku?: string | null;
+    variation?: string | null;
+    price: number;
+    specialPrice?: number | null;
+    stock: number;
+    available?: number | null;
+    status?: string;
+    images?: unknown;
+  }>;
+}
+
+function renderLazadaVariants(row: Row<LazadaProductRow>) {
+  return <VariantSubTable variants={row.original.variants || []} marketplace="lazada" />;
 }
 
 export default function LazadaProducts() {
@@ -136,6 +155,7 @@ export default function LazadaProducts() {
     data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     onSortingChange: setSorting,
@@ -173,6 +193,7 @@ export default function LazadaProducts() {
         emptyStateDescription={search ? "No products match your search" : "Sync your Lazada seller to see products here"}
         emptyStateIcon={Package}
         columnCount={columns.length}
+        renderExpandedRow={renderLazadaVariants}
       />
     </div>
   );

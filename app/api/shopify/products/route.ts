@@ -64,7 +64,19 @@ export async function GET(request: NextRequest) {
         where,
         include: {
           variants: {
-            select: { id: true, title: true, sku: true, price: true, inventoryQuantity: true },
+            select: {
+              id: true,
+              title: true,
+              displayName: true,
+              sku: true,
+              barcode: true,
+              price: true,
+              compareAtPrice: true,
+              inventoryQuantity: true,
+              inventoryPolicy: true,
+              position: true,
+              availableForSale: true,
+            },
           },
         },
         orderBy: { updatedAt: "desc" },

@@ -6,11 +6,13 @@ import { useQuery } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
+  getExpandedRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   type ColumnDef,
   type SortingState,
   type RowSelectionState,
+  type Row,
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -18,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Package, Plus, Trash2 } from "lucide-react";
 import { useShopeeProductMappingStatus } from "@/hooks/queries";
-import { MarketplaceDataTable } from "@/components/shared";
+import { MarketplaceDataTable, VariantSubTable, type Marketplace } from "@/components/shared";
 import CreateWmsProductDialog from "./CreateWmsProductDialog";
 import BulkCreateWmsProductsDialog from "./BulkCreateWmsProductsDialog";
 
@@ -33,7 +35,21 @@ interface ShopeeProductRow {
   status: string;
   imageUrl: string | null;
   lastSyncedAt: string | null;
-  _count?: { variants: number };
+  variants?: Array<{
+    id?: string;
+    modelId?: number;
+    modelName?: string;
+    modelSku?: string | null;
+    price: number;
+    originalPrice?: number | null;
+    stock: number;
+    status?: string;
+    tierIndex?: unknown;
+  }>;
+}
+
+function renderShopeeVariants(row: Row<ShopeeProductRow>) {
+  return <VariantSubTable variants={row.original.variants || []} marketplace="shopee" />;
 }
 
 export default function ShopeeProducts() {
@@ -242,6 +258,7 @@ export default function ShopeeProducts() {
     data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     onSortingChange: setSorting,
@@ -281,6 +298,7 @@ export default function ShopeeProducts() {
         emptyStateTitle="No products found"
         emptyStateIcon={Package}
         columnCount={columns.length}
+        renderExpandedRow={renderShopeeVariants}
         headerActions={
           selectedRowIds.length > 0 ? (
             <div className="flex items-center gap-2">
@@ -310,7 +328,7 @@ export default function ShopeeProducts() {
             price: selectedProduct.price,
             stock: selectedProduct.stock,
             imageUrl: selectedProduct.imageUrl,
-            variantCount: selectedProduct._count?.variants,
+            variantCount: selectedProduct.variants?.length,
           }}
           existingWmsProductId={mappingMap[selectedProduct.id]?.wmsProductId}
         />

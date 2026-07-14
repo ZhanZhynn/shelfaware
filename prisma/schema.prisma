@@ -834,12 +834,40 @@ model LazadaProduct {
   createdAt      DateTime  @default(now()) @db.Date
   updatedAt      DateTime? @db.Date
   shop           LazadaShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants       LazadaProductVariant[]
 
   @@unique([shopId, lazadaItemId])
   @@index([shopId])
   @@index([lazadaItemId])
   @@index([userId])
   @@index([sellerSku])
+}
+
+model LazadaProductVariant {
+  id              String          @id @default(auto()) @map("_id") @db.ObjectId
+  productId       String          @db.ObjectId
+  shopId          String          @db.ObjectId
+  userId          String          @db.ObjectId
+  lazadaItemId    Int
+  skuId           Int
+  sellerSku       String?
+  shopSku         String?
+  variation       String?
+  price           Float
+  specialPrice    Float?
+  stock           Int             @default(0)
+  available       Int?
+  status          String
+  images          Json?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime        @default(now()) @db.Date
+  updatedAt       DateTime?
+  product         LazadaProduct   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, skuId])
+  @@index([sellerSku])
+  @@index([shopId])
+  @@index([productId])
 }
 
 model LazadaOrder {

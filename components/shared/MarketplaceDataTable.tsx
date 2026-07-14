@@ -1,8 +1,9 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   type Table as TanStackTable,
+  type Row,
   flexRender,
 } from "@tanstack/react-table";
 import { Card, CardContent } from "@/components/ui/card";
@@ -35,6 +36,7 @@ interface MarketplaceDataTableProps<TData> {
   emptyStateIcon?: LucideIcon;
   headerActions?: ReactNode;
   columnCount: number;
+  renderExpandedRow?: (row: Row<TData>) => React.ReactNode;
 }
 
 function MarketplaceDataTableSkeleton({ columnCount }: { columnCount: number }) {
@@ -89,6 +91,7 @@ export default function MarketplaceDataTable<TData>({
   emptyStateIcon,
   headerActions,
   columnCount,
+  renderExpandedRow,
 }: MarketplaceDataTableProps<TData>) {
   return (
     <div className="space-y-4">
@@ -146,16 +149,28 @@ export default function MarketplaceDataTable<TData>({
                   />
                 ) : (
                   table.getRowModel().rows.map((row) => (
-                    <TableRow key={row.id}>
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext(),
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
+                    <Fragment key={row.id}>
+                      <TableRow
+                        className={renderExpandedRow ? "cursor-pointer" : ""}
+                        onClick={renderExpandedRow ? () => row.toggleExpanded() : undefined}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id}>
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext(),
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                      {renderExpandedRow && row.getIsExpanded() && (
+                        <TableRow>
+                          <TableCell colSpan={row.getVisibleCells().length} className="p-0">
+                            {renderExpandedRow(row)}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
                   ))
                 )}
               </TableBody>

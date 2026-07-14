@@ -95,15 +95,6 @@ export default function LazadaProducts() {
         ),
       },
       {
-        accessorKey: "sellerSku",
-        header: "SKU",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground font-mono text-sm">
-            {row.original.sellerSku || "N/A"}
-          </span>
-        ),
-      },
-      {
         accessorKey: "lazadaItemId",
         header: "Item ID",
         cell: ({ row }) => (

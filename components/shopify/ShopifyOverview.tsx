@@ -17,18 +17,23 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Store,
   LinkIcon,
   RefreshCw,
   Package,
   ShoppingCart,
   History,
-  KeyRound,
   ShoppingBag,
   ExternalLink,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import Link from "next/link";
+import {
+  MarketplaceStatsCards,
+  MarketplaceDateRangeFilter,
+  MarketplaceRevenueTrendChart,
+  MarketplaceOrderStatusChart,
+  MarketplaceTopProductsTable,
+} from "@/components/shared";
 
 interface ShopifyShop {
   id: string;
@@ -47,6 +52,13 @@ export default function ShopifyOverview() {
   const [shopDomainError, setShopDomainError] = useState("");
   const queryClient = useQueryClient();
 
+  const now = new Date();
+  const defaultFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const defaultTo = now.toISOString().split("T")[0] || "";
+
+  const [dateFrom, setDateFrom] = useState<string | null>(defaultFrom);
+  const [dateTo, setDateTo] = useState<string | null>(defaultTo);
+
   useEffect(() => {
     queueMicrotask(() => {
       mounted.current = true;
@@ -62,20 +74,11 @@ export default function ShopifyOverview() {
     },
   });
 
-  const { data: productsData } = useQuery({
-    queryKey: ["shopify", "products", "count"],
+  const { data: stats } = useQuery({
+    queryKey: ["shopify", "stats", dateFrom, dateTo],
     queryFn: async () => {
-      const response = await apiClient.shopify.getProducts({ limit: 1 });
-      return response.data ?? { total: 0 };
-    },
-    enabled: !!shops && shops.length > 0,
-  });
-
-  const { data: ordersData } = useQuery({
-    queryKey: ["shopify", "orders", "count"],
-    queryFn: async () => {
-      const response = await apiClient.shopify.getOrders({ limit: 1 });
-      return response.data ?? { total: 0 };
+      const response = await apiClient.shopify.getStats(undefined, dateFrom || undefined, dateTo || undefined);
+      return response.data;
     },
     enabled: !!shops && shops.length > 0,
   });
@@ -177,7 +180,6 @@ export default function ShopifyOverview() {
         </Dialog>
       </div>
 
-      {/* Connected Shops */}
       {shopsLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(3)].map((_, i) => (
@@ -256,49 +258,53 @@ export default function ShopifyOverview() {
         </Card>
       )}
 
-      {/* Stats Cards */}
       {shops && shops.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Connected Stores</CardTitle>
-              <Store className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{shops.length}</div>
-            </CardContent>
-          </Card>
-          <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Products</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{productsData?.total ?? 0}</div>
-            </CardContent>
-          </Card>
-          <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Orders</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{ordersData?.total ?? 0}</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        <>
+          <MarketplaceDateRangeFilter
+            onDateRangeChange={(from, to) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+            initialFrom={dateFrom}
+            initialTo={dateTo}
+          />
 
-      {/* Quick Links */}
-      {shops && shops.length > 0 && (
-        <div className="flex gap-4">
-          <Button variant="outline" asChild>
-            <Link href="/admin/shopify/sync-history">
-              <History className="mr-2 h-4 w-4" />
-              View Sync History
-            </Link>
-          </Button>
-        </div>
+          {stats && (
+            <MarketplaceStatsCards stats={stats} titlePrefix="Shopify" />
+          )}
+
+          <MarketplaceRevenueTrendChart
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            accentColor="#22c55e"
+            queryKey={["shopify", "revenue-trend"]}
+            fetchFunction={async (granularity, from, to) => {
+              const response = await apiClient.shopify.getRevenueTrend(
+                granularity,
+                undefined,
+                from,
+                to,
+              );
+              return { data: response.data.data };
+            }}
+          />
+
+          {stats && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <MarketplaceOrderStatusChart data={stats.ordersByStatus} />
+              <MarketplaceTopProductsTable data={stats.topProducts} />
+            </div>
+          )}
+
+          <div className="flex gap-4">
+            <Button variant="outline" asChild>
+              <Link href="/admin/shopify/sync-history">
+                <History className="mr-2 h-4 w-4" />
+                View Sync History
+              </Link>
+            </Button>
+          </div>
+        </>
       )}
     </div>
   );

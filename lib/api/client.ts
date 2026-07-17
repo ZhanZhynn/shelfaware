@@ -1286,6 +1286,60 @@ class ApiClient {
         statusText: response.statusText,
       };
     },
+
+    getStats: async (
+      sellerId?: string,
+      dateFrom?: string,
+      dateTo?: string,
+    ): Promise<ApiResponse<{
+      totalProducts: number;
+      totalOrders: number;
+      totalRevenue: number;
+      averageOrderValue: number;
+      ordersByStatus: Record<string, number>;
+      topProducts: { name: string; revenue: number; quantity: number }[];
+      lastSyncedAt: string | null;
+    }>> => {
+      const params = new URLSearchParams();
+      if (sellerId) params.set("sellerId", sellerId);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      const qs = params.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.lazada.stats}?${qs}`
+        : API_ENDPOINTS.lazada.stats;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getRevenueTrend: async (
+      granularity: "daily" | "weekly" | "monthly" = "daily",
+      sellerId?: string,
+      dateFrom?: string,
+      dateTo?: string,
+    ): Promise<
+      ApiResponse<{
+        data: { period: string; revenue: number; orders: number }[];
+        granularity: string;
+      }>
+    > => {
+      const searchParams = new URLSearchParams();
+      searchParams.set("granularity", granularity);
+      if (sellerId) searchParams.set("sellerId", sellerId);
+      if (dateFrom) searchParams.set("dateFrom", dateFrom);
+      if (dateTo) searchParams.set("dateTo", dateTo);
+      const url = `${API_ENDPOINTS.lazada.revenueTrend}?${searchParams.toString()}`;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
   };
 
   /**
@@ -1580,6 +1634,60 @@ class ApiClient {
       const url = shopId
         ? `${API_ENDPOINTS.shopify.syncLogs}?shopId=${shopId}`
         : API_ENDPOINTS.shopify.syncLogs;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getStats: async (
+      shopId?: string,
+      dateFrom?: string,
+      dateTo?: string,
+    ): Promise<ApiResponse<{
+      totalProducts: number;
+      totalOrders: number;
+      totalRevenue: number;
+      averageOrderValue: number;
+      ordersByStatus: Record<string, number>;
+      topProducts: { name: string; revenue: number; quantity: number }[];
+      lastSyncedAt: string | null;
+    }>> => {
+      const params = new URLSearchParams();
+      if (shopId) params.set("shopId", shopId);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      const qs = params.toString();
+      const url = qs
+        ? `${API_ENDPOINTS.shopify.stats}?${qs}`
+        : API_ENDPOINTS.shopify.stats;
+      const response = await this.client.get(url);
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    getRevenueTrend: async (
+      granularity: "daily" | "weekly" | "monthly" = "daily",
+      shopId?: string,
+      dateFrom?: string,
+      dateTo?: string,
+    ): Promise<
+      ApiResponse<{
+        data: { period: string; revenue: number; orders: number }[];
+        granularity: string;
+      }>
+    > => {
+      const searchParams = new URLSearchParams();
+      searchParams.set("granularity", granularity);
+      if (shopId) searchParams.set("shopId", shopId);
+      if (dateFrom) searchParams.set("dateFrom", dateFrom);
+      if (dateTo) searchParams.set("dateTo", dateTo);
+      const url = `${API_ENDPOINTS.shopify.revenueTrend}?${searchParams.toString()}`;
       const response = await this.client.get(url);
       return {
         data: response.data,

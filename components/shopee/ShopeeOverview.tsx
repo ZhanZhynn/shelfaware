@@ -14,13 +14,15 @@ import {
   Package,
   ShoppingCart,
 } from "lucide-react";
-import ShopeeStatsCards from "./ShopeeStatsCards";
-import ShopeeOrderStatusChart from "./ShopeeOrderStatusChart";
-import ShopeeTopProductsTable from "./ShopeeTopProductsTable";
-import ShopeeRevenueTrendChart from "./ShopeeRevenueTrendChart";
+import {
+  MarketplaceStatsCards,
+  MarketplaceDateRangeFilter,
+  MarketplaceRevenueTrendChart,
+  MarketplaceOrderStatusChart,
+  MarketplaceTopProductsTable,
+} from "@/components/shared";
 import ShopeeSlaAlertWidget from "./ShopeeSlaAlertWidget";
 import ShopeeLowStockAlertWidget from "./ShopeeLowStockAlertWidget";
-import ShopeeDateRangeFilter from "./ShopeeDateRangeFilter";
 
 export default function ShopeeOverview() {
   const mounted = useRef(false);
@@ -198,7 +200,7 @@ export default function ShopeeOverview() {
       {/* Date Range Filter + Stats */}
       {shops && shops.length > 0 && (
         <>
-          <ShopeeDateRangeFilter
+          <MarketplaceDateRangeFilter
             onDateRangeChange={(from, to) => {
               setDateFrom(from);
               setDateTo(to);
@@ -208,11 +210,25 @@ export default function ShopeeOverview() {
           />
           {stats && (
             <>
-              <ShopeeStatsCards stats={stats} />
-              <ShopeeRevenueTrendChart dateFrom={dateFrom} dateTo={dateTo} />
+              <MarketplaceStatsCards stats={stats} titlePrefix="Shopee" />
+              <MarketplaceRevenueTrendChart
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                accentColor="#f97316"
+                queryKey={["shopee", "revenue-trend"]}
+                fetchFunction={async (granularity, from, to) => {
+                  const response = await apiClient.shopee.getRevenueTrend(
+                    granularity,
+                    undefined,
+                    from,
+                    to,
+                  );
+                  return { data: response.data.data };
+                }}
+              />
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <ShopeeOrderStatusChart data={stats.ordersByStatus} />
-                <ShopeeTopProductsTable data={stats.topProducts} />
+                <MarketplaceOrderStatusChart data={stats.ordersByStatus} />
+                <MarketplaceTopProductsTable data={stats.topProducts} />
               </div>
             </>
           )}

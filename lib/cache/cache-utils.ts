@@ -448,6 +448,7 @@ export const cacheKeys = {
     },
     orderDetail: (id: string) => `lazada:order:${id}`,
     stats: (sellerId: string, dateRange?: string) => `lazada:stats:${sellerId}:${dateRange || "all"}`,
+    revenueTrend: (sellerId: string, granularity: string) => `lazada:revenue-trend:${sellerId}:${granularity}`,
     syncLogs: (sellerId: string) => `lazada:sync-logs:${sellerId}`,
     pattern: "lazada:*",
   },
@@ -471,6 +472,26 @@ export const cacheKeys = {
     orderDetail: (id: string) => `tiktok:order:${id}`,
     syncLogs: (shopId: string) => `tiktok:sync-logs:${shopId}`,
     pattern: "tiktok:*",
+  },
+
+  shopify: {
+    all: "shopify:all",
+    shops: (userId: string) => `shopify:shops:${userId}`,
+    shopDetail: (id: string) => `shopify:shop:${id}`,
+    products: (shopId: string, filters?: Record<string, unknown>) => {
+      const filterStr = filters ? JSON.stringify(filters) : "default";
+      return `shopify:products:${shopId}:${filterStr}`;
+    },
+    productDetail: (id: string) => `shopify:product:${id}`,
+    orders: (shopId: string, filters?: Record<string, unknown>) => {
+      const filterStr = filters ? JSON.stringify(filters) : "default";
+      return `shopify:orders:${shopId}:${filterStr}`;
+    },
+    orderDetail: (id: string) => `shopify:order:${id}`,
+    stats: (shopId: string, dateRange?: string) => `shopify:stats:${shopId}:${dateRange || "all"}`,
+    revenueTrend: (shopId: string, granularity: string) => `shopify:revenue-trend:${shopId}:${granularity}`,
+    syncLogs: (shopId: string) => `shopify:sync-logs:${shopId}`,
+    pattern: "shopify:*",
   },
 } as const;
 
@@ -504,6 +525,7 @@ export async function invalidateAllServerCaches(): Promise<void> {
     invalidateCache(cacheKeys.shopee.pattern),
     invalidateCache(cacheKeys.lazada.pattern),
     invalidateCache(cacheKeys.tiktok.pattern),
+    invalidateCache(cacheKeys.shopify.pattern),
     invalidateCache("forecasting:*"),
     invalidateCache("system-config:*"),
     invalidateCache(cacheKeys.abcAnalysis.pattern),

@@ -170,6 +170,8 @@ export const API_ENDPOINTS = {
     syncLogs: "/lazada/sync/logs",
     products: "/lazada/products",
     orders: "/lazada/orders",
+    stats: "/lazada/stats",
+    revenueTrend: "/lazada/stats/revenue-trend",
   },
 
   // TikTok Shop Integration
@@ -198,6 +200,8 @@ export const API_ENDPOINTS = {
     productDetail: (id: string) => `/shopify/products/${id}`,
     orders: "/shopify/orders",
     orderDetail: (id: string) => `/shopify/orders/${id}`,
+    stats: "/shopify/stats",
+    revenueTrend: "/shopify/stats/revenue-trend",
   },
 
   // Shopee Integration

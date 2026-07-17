@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,11 +17,25 @@ import {
   KeyRound,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  MarketplaceStatsCards,
+  MarketplaceDateRangeFilter,
+  MarketplaceRevenueTrendChart,
+  MarketplaceOrderStatusChart,
+  MarketplaceTopProductsTable,
+} from "@/components/shared";
 
 export default function LazadaOverview() {
   const mounted = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const queryClient = useQueryClient();
+
+  const now = new Date();
+  const defaultFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const defaultTo = now.toISOString().split("T")[0] || "";
+
+  const [dateFrom, setDateFrom] = useState<string | null>(defaultFrom);
+  const [dateTo, setDateTo] = useState<string | null>(defaultTo);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -32,41 +47,31 @@ export default function LazadaOverview() {
   const { data: shops, isLoading: shopsLoading } = useQuery({
     queryKey: ["lazada", "shops"],
     queryFn: async () => {
-      const res = await fetch("/api/lazada/shops");
-      if (!res.ok) throw new Error("Failed to fetch shops");
-      return res.json();
+      const response = await apiClient.lazada.getShops();
+      return response.data;
     },
   });
 
-  const { data: productsData } = useQuery({
-    queryKey: ["lazada", "products", "count"],
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ["lazada", "stats", dateFrom, dateTo],
     queryFn: async () => {
-      const res = await fetch("/api/lazada/products?limit=1");
-      if (!res.ok) return { total: 0 };
-      return res.json();
-    },
-    enabled: !!shops && shops.length > 0,
-  });
-
-  const { data: ordersData } = useQuery({
-    queryKey: ["lazada", "orders", "count"],
-    queryFn: async () => {
-      const res = await fetch("/api/lazada/orders?limit=1");
-      if (!res.ok) return { total: 0 };
-      return res.json();
+      const response = await apiClient.lazada.getStats(
+        undefined,
+        dateFrom || undefined,
+        dateTo || undefined,
+      );
+      return response.data;
     },
     enabled: !!shops && shops.length > 0,
   });
 
   const syncMutation = useMutation({
     mutationFn: async (sellerId: string) => {
-      const res = await fetch("/api/lazada/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sellerId, syncType: "all" }),
+      const response = await apiClient.lazada.triggerSync({
+        sellerId,
+        syncType: "all",
       });
-      if (!res.ok) throw new Error("Sync failed");
-      return res.json();
+      return response.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lazada"] });
@@ -75,11 +80,9 @@ export default function LazadaOverview() {
 
   const handleConnect = async () => {
     try {
-      const res = await fetch("/api/lazada/auth");
-      if (!res.ok) throw new Error("Failed to get auth URL");
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
+      const response = await apiClient.lazada.getAuthUrl();
+      if (response.data.url) {
+        window.location.href = response.data.url;
       }
     } catch (error) {
       console.error("Failed to get auth URL:", error);
@@ -114,7 +117,6 @@ export default function LazadaOverview() {
         </Button>
       </div>
 
-      {/* Connected Sellers */}
       {shopsLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(3)].map((_, i) => (
@@ -123,7 +125,7 @@ export default function LazadaOverview() {
         </div>
       ) : shops && shops.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {shops.map((shop: { id: string; sellerId: string; sellerName: string; countryCode: string; lastSyncedAt: string | null }) => (
+          {shops.map((shop: { id: string; sellerId: string; sellerName: string; countryCode: string | null; lastSyncedAt: string | null }) => (
             <Card key={shop.id} className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -192,40 +194,46 @@ export default function LazadaOverview() {
         </Card>
       )}
 
-      {/* Stats Cards */}
       {shops && shops.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Connected Sellers</CardTitle>
-              <Store className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{shops.length}</div>
-            </CardContent>
-          </Card>
-          <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Products</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{productsData?.total ?? 0}</div>
-            </CardContent>
-          </Card>
-          <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Orders</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{ordersData?.total ?? 0}</div>
-            </CardContent>
-          </Card>
-        </div>
+        <>
+          <MarketplaceDateRangeFilter
+            onDateRangeChange={(from, to) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+            initialFrom={dateFrom}
+            initialTo={dateTo}
+          />
+
+          {stats && (
+            <MarketplaceStatsCards stats={stats} titlePrefix="Lazada" />
+          )}
+
+          <MarketplaceRevenueTrendChart
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            accentColor="#10b981"
+            queryKey={["lazada", "revenue-trend"]}
+            fetchFunction={async (granularity, from, to) => {
+              const response = await apiClient.lazada.getRevenueTrend(
+                granularity,
+                undefined,
+                from,
+                to,
+              );
+              return { data: response.data.data };
+            }}
+          />
+
+          {stats && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <MarketplaceOrderStatusChart data={stats.ordersByStatus} />
+              <MarketplaceTopProductsTable data={stats.topProducts} />
+            </div>
+          )}
+        </>
       )}
 
-      {/* Quick Links */}
       {shops && shops.length > 0 && (
         <div className="flex gap-4">
           <Button variant="outline" asChild>

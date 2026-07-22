@@ -12,6 +12,20 @@ export interface Supplier {
   status: boolean; // Active/Inactive status (default: true)
   description?: string | null; // Optional description field
   notes?: string | null; // Optional notes field
+  normalizedName?: string | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  defaultCurrency?: string | null;
+  paymentTerms?: string | null;
+  leadTimeDays?: number | null;
+  riskLevel?: "low" | "medium" | "high" | "critical" | null;
+  preferred?: boolean;
   createdAt: Date;
   updatedAt?: Date | null;
   createdBy: string; // User ID who created the supplier
@@ -62,6 +76,19 @@ export interface CreateSupplierInput {
   status?: boolean; // Optional, defaults to true
   description?: string | null; // Optional description
   notes?: string | null; // Optional notes
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  defaultCurrency?: string | null;
+  paymentTerms?: string | null;
+  leadTimeDays?: number | null;
+  riskLevel?: "low" | "medium" | "high" | "critical" | null;
+  preferred?: boolean;
 }
 
 /**
@@ -73,5 +100,17 @@ export interface UpdateSupplierInput {
   status?: boolean; // Optional status update
   description?: string | null; // Optional description update
   notes?: string | null; // Optional notes update
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  defaultCurrency?: string | null;
+  paymentTerms?: string | null;
+  leadTimeDays?: number | null;
+  riskLevel?: "low" | "medium" | "high" | "critical" | null;
+  preferred?: boolean;
 }
-

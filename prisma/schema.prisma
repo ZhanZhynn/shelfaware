@@ -273,6 +273,20 @@ model Supplier {
   status        Boolean   @default(true) // Active/Inactive status (default: active)
   description   String? // Optional description field
   notes         String? // Optional notes field
+  normalizedName String? // Lowercase, punctuation-normalized name for duplicate detection
+  contactName   String?
+  contactEmail  String?
+  contactPhone  String?
+  address       String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String?
+  defaultCurrency String?
+  paymentTerms  String?
+  leadTimeDays  Int?
+  riskLevel     String?
+  preferred     Boolean   @default(false)
   createdAt     DateTime  @default(now()) @db.Date
   updatedAt     DateTime? @db.Date // Manually managed - null on create, set on update
   createdBy     String    @db.ObjectId // Same as userId, for clarity
@@ -282,6 +296,8 @@ model Supplier {
   workspace     Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@index([workspaceId])
+  @@index([workspaceId, normalizedName])
+  @@index([userId, normalizedName])
 }
 
 model User {

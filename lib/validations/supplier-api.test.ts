@@ -18,6 +18,26 @@ describe("createSupplierBodySchema", () => {
   it("accepts a workspace scope", () => {
     expect(createSupplierBodySchema.safeParse({ name: "Acme Corp", workspaceId: "507f1f77bcf86cd799439011" }).success).toBe(true);
   });
+
+  it("accepts supplier master data", () => {
+    const result = createSupplierBodySchema.safeParse({
+      name: "Acme Corp",
+      contactEmail: "purchasing@acme.test",
+      country: "Malaysia",
+      defaultCurrency: "myr",
+      paymentTerms: "Net 30",
+      leadTimeDays: 14,
+      riskLevel: "low",
+      preferred: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.defaultCurrency).toBe("MYR");
+  });
+
+  it("rejects invalid master data", () => {
+    expect(createSupplierBodySchema.safeParse({ name: "Acme", defaultCurrency: "RINGGIT" }).success).toBe(false);
+    expect(createSupplierBodySchema.safeParse({ name: "Acme", leadTimeDays: -1 }).success).toBe(false);
+  });
 });
 
 describe("updateSupplierBodySchema", () => {

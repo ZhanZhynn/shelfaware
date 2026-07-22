@@ -87,6 +87,12 @@ export default function AddSupplierDialog({
   const [supplierDescription, setSupplierDescription] = useState("");
   const [supplierNotes, setSupplierNotes] = useState("");
   const [supplierStatus, setSupplierStatus] = useState(true); // Default to active
+  const [supplierContactEmail, setSupplierContactEmail] = useState("");
+  const [supplierCountry, setSupplierCountry] = useState("");
+  const [supplierCurrency, setSupplierCurrency] = useState("");
+  const [supplierPaymentTerms, setSupplierPaymentTerms] = useState("");
+  const [supplierLeadTimeDays, setSupplierLeadTimeDays] = useState("");
+  const [supplierDuplicates, setSupplierDuplicates] = useState<Array<{ id: string; name: string }>>([]);
   const [internalEditingSupplier, setInternalEditingSupplier] = useState<Supplier | null>(null);
   
   // Use external or internal editing supplier
@@ -143,6 +149,27 @@ export default function AddSupplierDialog({
   const isSubmitting = createSupplierMutation.isPending;
   const isEditing = updateSupplierMutation.isPending;
 
+  useEffect(() => {
+    const name = editingSupplier ? newSupplierName : supplierName;
+    const excludeId = editingSupplier?.id;
+    if (name.trim().length < 2) {
+      setSupplierDuplicates([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ name: name.trim() });
+        if (excludeId) params.set("excludeId", excludeId);
+        const response = await fetch(`/api/suppliers/duplicates?${params}`, { signal: controller.signal });
+        if (response.ok) setSupplierDuplicates(await response.json());
+      } catch (error) {
+        if ((error as DOMException).name !== "AbortError") logger.warn("Supplier duplicate check failed", error);
+      }
+    }, 300);
+    return () => { controller.abort(); window.clearTimeout(timeout); };
+  }, [supplierName, newSupplierName, editingSupplier]);
+
   const handleAddSupplier = async () => {
     if (supplierName.trim() === "") {
       toast({
@@ -169,6 +196,11 @@ export default function AddSupplierDialog({
         status: supplierStatus,
         description: supplierDescription.trim() || null,
         notes: supplierNotes.trim() || null,
+        contactEmail: supplierContactEmail.trim() || null,
+        country: supplierCountry.trim() || null,
+        defaultCurrency: supplierCurrency.trim() || null,
+        paymentTerms: supplierPaymentTerms.trim() || null,
+        leadTimeDays: supplierLeadTimeDays === "" ? null : Number(supplierLeadTimeDays),
       });
 
       // Clear inputs on success (toast is handled by mutation hook)
@@ -176,6 +208,11 @@ export default function AddSupplierDialog({
       setSupplierDescription("");
       setSupplierNotes("");
       setSupplierStatus(true);
+      setSupplierContactEmail("");
+      setSupplierCountry("");
+      setSupplierCurrency("");
+      setSupplierPaymentTerms("");
+      setSupplierLeadTimeDays("");
     } catch (error) {
       // Error toast is handled by the mutation hook
       logger.error("Error adding supplier:", error);
@@ -322,6 +359,9 @@ export default function AddSupplierDialog({
                 placeholder="Supplier Name"
                 className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)}
               />
+              {supplierDuplicates.length > 0 && (
+                <p className="mt-2 text-sm text-amber-200">Possible duplicate: {supplierDuplicates.map((supplier) => supplier.name).join(", ")}. Review before saving.</p>
+              )}
             </div>
             <div className="pb-4">
               <Label className="text-sm font-medium mb-2 block text-white/80 dark:text-white/80">
@@ -336,6 +376,13 @@ export default function AddSupplierDialog({
                 className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)}
               />
             </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="pb-4"><Label className="text-sm font-medium text-white/80">Contact email</Label><Input value={supplierContactEmail} onChange={(e) => setSupplierContactEmail(e.target.value)} type="email" className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)} /></div>
+              <div className="pb-4"><Label className="text-sm font-medium text-white/80">Country</Label><Input value={supplierCountry} onChange={(e) => setSupplierCountry(e.target.value)} className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)} /></div>
+              <div className="pb-4"><Label className="text-sm font-medium text-white/80">Default currency</Label><Input value={supplierCurrency} onChange={(e) => setSupplierCurrency(e.target.value.toUpperCase())} maxLength={3} placeholder="MYR" className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)} /></div>
+              <div className="pb-4"><Label className="text-sm font-medium text-white/80">Lead time (days)</Label><Input value={supplierLeadTimeDays} onChange={(e) => setSupplierLeadTimeDays(e.target.value)} type="number" min="0" className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)} /></div>
+            </div>
+            <div className="pb-4"><Label className="text-sm font-medium text-white/80">Payment terms</Label><Input value={supplierPaymentTerms} onChange={(e) => setSupplierPaymentTerms(e.target.value)} placeholder="Net 30" className={cn("mt-2 w-full", DIALOG_FORM_FIELD_EMERALD)} /></div>
             <div className="pb-4">
               <Label className="text-sm font-medium mb-2 block text-white/80 dark:text-white/80">
                 Notes (Optional)

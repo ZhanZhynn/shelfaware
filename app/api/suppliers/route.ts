@@ -15,6 +15,7 @@ import {
   updateSupplierBodySchema,
 } from "@/lib/validations/supplier";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
+import { normalizeSupplierName } from "@/lib/suppliers/normalization";
 
 /**
  * GET /api/suppliers
@@ -87,13 +88,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, status, description, notes, workspaceId } = validationResult.data;
+    const { name, status, description, notes, workspaceId, ...masterData } = validationResult.data;
     if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer"]);
 
     // Create supplier with audit fields and new optional fields
     const supplier = await prisma.supplier.create({
       data: {
         name,
+        normalizedName: normalizeSupplierName(name),
         userId,
         workspaceId,
         status: status ?? true,
@@ -106,6 +108,7 @@ export async function POST(request: NextRequest) {
         createdBy: userId, // Set createdBy same as userId
         createdAt: new Date(),
         updatedAt: null, // Set to null on creation - will be set when updated
+        ...masterData,
       },
     });
 
@@ -161,7 +164,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const { id, name, status, description, notes } = validationResult.data;
+    const { id, name, status, description, notes, ...masterData } = validationResult.data;
 
     const existingSupplier = await prisma.supplier.findUnique({ where: { id } });
 
@@ -185,8 +188,23 @@ export async function PUT(request: NextRequest) {
       status?: boolean;
       description?: string | null;
       notes?: string | null;
+      normalizedName: string;
+      contactName?: string | null;
+      contactEmail?: string | null;
+      contactPhone?: string | null;
+      address?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      defaultCurrency?: string | null;
+      paymentTerms?: string | null;
+      leadTimeDays?: number | null;
+      riskLevel?: "low" | "medium" | "high" | "critical" | null;
+      preferred?: boolean;
     } = {
       name,
+      normalizedName: normalizeSupplierName(name),
       updatedBy: userId, // Track who updated the supplier
       updatedAt: new Date(), // Update timestamp
     };
@@ -200,6 +218,9 @@ export async function PUT(request: NextRequest) {
     }
     if (notes !== undefined) {
       updateData.notes = notes && typeof notes === "string" ? notes.trim() || null : null;
+    }
+    for (const [key, value] of Object.entries(masterData)) {
+      if (value !== undefined) Object.assign(updateData, { [key]: value });
     }
 
     // Update supplier with audit fields and new optional fields
@@ -268,9 +289,24 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
     }
 
-    await prisma.supplier.delete({
-      where: { id },
-    });
+    const [products, purchaseOrders, sourcingQuotes, tickets, evaluations] = await Promise.all([
+      prisma.product.count({ where: { supplierId: id } }),
+      prisma.purchaseOrder.count({ where: { supplierId: id } }),
+      prisma.sourcingQuote.count({ where: { supplierId: id } }),
+      prisma.supportTicket.count({ where: { supplierId: id } }),
+      prisma.supplierEvaluation.count({ where: { supplierId: id } }),
+    ]);
+    const references = products + purchaseOrders + sourcingQuotes + tickets + evaluations;
+    if (references > 0) {
+      await prisma.supplier.update({
+        where: { id },
+        data: { status: false, updatedBy: userId, updatedAt: new Date() },
+      });
+      createAuditLog({ userId, action: "update", entityType: "supplier", entityId: id, details: { operation: "deactivate", name: existingSupplier.name, references } }).catch(() => {});
+      return NextResponse.json({ success: true, deactivated: true, references });
+    }
+
+    await prisma.supplier.delete({ where: { id } });
 
     createAuditLog({
       userId,

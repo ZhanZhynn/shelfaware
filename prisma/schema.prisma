@@ -957,9 +957,15 @@ model PurchaseOrder {
   supplierId    String    @db.ObjectId
   userId        String    @db.ObjectId
   workspaceId   String?   @db.ObjectId
-  status        String    @default("draft") // draft, pending_approval, approved, rejected, ordered, received, cancelled
+  status        String    @default("draft") // draft, pending_approval, approved, rejected, ordered, shipped, received, cancelled
   totalAmount   Float     @default(0)
   notes         String?
+  trackingNumber  String?
+  trackingCarrier String?
+  trackingUrl     String?
+  estimatedDelivery DateTime? @db.Date
+  shippingNotes   String?
+  shippedAt     DateTime? @db.Date
   approvedBy    String?   @db.ObjectId
   approvedAt    DateTime? @db.Date
   orderedAt     DateTime? @db.Date

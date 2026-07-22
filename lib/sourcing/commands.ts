@@ -481,18 +481,24 @@ export async function runSourcingCommand(
       });
       if (!quote) throw new SourcingAccessError("No approved quote found", 409);
       const lines = quote.items as unknown as QuoteItem[];
-      const supplier = quote.supplierId
+      let supplier = quote.supplierId
         ? await tx.supplier.findFirst({
             where: { id: quote.supplierId, workspaceId: item.workspaceId },
           })
         : await tx.supplier.findFirst({
             where: { name: quote.supplierName, workspaceId: item.workspaceId },
           });
-      if (!supplier)
-        throw new SourcingAccessError(
-          "Quote supplier must be a workspace supplier before ordering",
-          400,
-        );
+      if (!supplier) {
+        supplier = await tx.supplier.create({
+          data: {
+            name: quote.supplierName,
+            workspaceId: item.workspaceId,
+            userId: actor.id,
+            createdBy: actor.id,
+            status: true,
+          },
+        });
+      }
       const products = [] as {
         id: string;
         name: string;
@@ -509,7 +515,7 @@ export async function runSourcingCommand(
               where: { sku: line.sku, workspaceId: item.workspaceId },
             });
         if (!product) {
-          const category = line.categoryId
+          let category = line.categoryId
             ? await tx.category.findFirst({
                 where: {
                   id: line.categoryId,
@@ -521,11 +527,17 @@ export async function runSourcingCommand(
                 where: { workspaceId: item.workspaceId, status: true },
                 orderBy: { createdAt: "asc" },
               });
-          if (!category)
-            throw new SourcingAccessError(
-              "Create an active workspace category before ordering a new sourced product",
-              400,
-            );
+          if (!category) {
+            category = await tx.category.create({
+              data: {
+                name: "Sourced",
+                workspaceId: item.workspaceId,
+                userId: actor.id,
+                createdBy: actor.id,
+                status: true,
+              },
+            });
+          }
           product = await tx.product.create({
             data: {
               name: line.name,

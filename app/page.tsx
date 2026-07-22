@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth-server";
+import { hasSourcingAccess } from "@/lib/sourcing/portal";
 import HomePage from "@/components/Pages/HomePage";
 import {
   getProductsForUser,
@@ -26,6 +27,9 @@ export default async function HomeRoute({
   }
   if (user.role === "supplier") {
     redirect("/supplier");
+  }
+  if (user.role !== "admin" && (await hasSourcingAccess(user))) {
+    redirect("/sourcing");
   }
 
   const params = await searchParams;

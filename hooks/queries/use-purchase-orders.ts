@@ -116,3 +116,60 @@ export function useGeneratePurchaseOrders() {
     },
   });
 }
+
+export function useShipPurchaseOrder() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, ...data }: Record<string, unknown> & { id: string }) => {
+      const response = await apiClient.purchaseOrders.ship(id, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
+      toast({ title: "Purchase order marked as shipped" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateShippingInfo() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, ...data }: Record<string, unknown> & { id: string }) => {
+      const response = await apiClient.purchaseOrders.updateShipping(id, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
+      toast({ title: "Shipping info updated" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdatePONotes() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, notes }: { id: string; notes: string }) => {
+      const response = await apiClient.purchaseOrders.updateNotes(id, { notes });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
+      toast({ title: "Notes updated" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+}

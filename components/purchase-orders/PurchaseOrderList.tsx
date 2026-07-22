@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { usePurchaseOrders, useDeletePurchaseOrder, useApprovePurchaseOrder } from "@/hooks/queries/use-purchase-orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,7 @@ const STATUS_COLORS: Record<string, string> = {
   approved: "bg-emerald-500/15 text-emerald-700",
   rejected: "bg-red-500/15 text-red-700",
   ordered: "bg-blue-500/15 text-blue-700",
+  shipped: "bg-violet-500/15 text-violet-700",
   received: "bg-violet-500/15 text-violet-700",
   cancelled: "bg-gray-500/15 text-gray-500",
 };
@@ -30,6 +32,7 @@ const STATUS_LABELS: Record<string, string> = {
   approved: "Approved",
   rejected: "Rejected",
   ordered: "Ordered",
+  shipped: "Shipped",
   received: "Received",
   cancelled: "Cancelled",
 };
@@ -113,6 +116,7 @@ export default function PurchaseOrderList() {
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
           <option value="ordered">Ordered</option>
+          <option value="shipped">Shipped</option>
           <option value="received">Received</option>
           <option value="cancelled">Cancelled</option>
         </select>
@@ -147,8 +151,8 @@ export default function PurchaseOrderList() {
                   <div className="flex items-center gap-3">
                     <p className="font-bold">{formatCurrency(order.totalAmount as number)}</p>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" title="View">
-                        <Eye className="h-4 w-4" />
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="View" asChild>
+                        <Link href={`/admin/purchase-orders/${order.id}`}><Eye className="h-4 w-4" /></Link>
                       </Button>
                       {order.status === "pending_approval" && (
                         <>

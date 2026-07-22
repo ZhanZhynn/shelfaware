@@ -34,6 +34,18 @@ export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) 
           : user?.role === "supplier"
             ? "/supplier"
             : "/";
+      // For regular users, check sourcing access to avoid flash of homepage
+      if (dest === "/" && user?.role !== "admin") {
+        fetch("/api/sourcing/access", { credentials: "include" })
+          .then((r) => r.json())
+          .then((access) => {
+            window.location.href = access.allowed ? (access.destination || "/sourcing") : "/";
+          })
+          .catch(() => {
+            window.location.href = "/";
+          });
+        return;
+      }
       window.location.href = dest;
     }
   }, [isLoggedIn, user]);
@@ -160,12 +172,23 @@ export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) 
       // Full-page navigation to the correct dashboard for the user's role.
       // window.location.href bypasses the Next.js RSC cache which can contain
       // stale 307 redirects from before login, causing infinite redirect loops.
-       const dest =
+      let dest =
         userData.role === "client"
           ? "/client"
           : userData.role === "supplier"
             ? "/supplier"
             : "/";
+
+      // Sourcers without admin role go to the sourcing portal
+      if (dest === "/" && userData.role !== "admin") {
+        try {
+          const access = await fetch("/api/sourcing/access", { credentials: "include" }).then((r) => r.json());
+          if (access.allowed) dest = access.destination || "/sourcing";
+        } catch {
+          // If sourcing check fails, fall through to default "/"
+        }
+      }
+
       window.location.href = dest;
     } catch (error: unknown) {
       const axiosErr = error as {

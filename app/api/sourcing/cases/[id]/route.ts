@@ -8,7 +8,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const user = await getSessionFromRequest(request);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const item = await prisma.sourcingCase.findUnique({ where: { id: (await params).id }, include: { quotes: { orderBy: { revision: "desc" } }, orders: { include: { purchaseOrder: { include: { items: true } } } }, events: { orderBy: { createdAt: "desc" } } } });
+    const item = await prisma.sourcingCase.findUnique({ where: { id: (await params).id }, include: { quotes: { orderBy: { revision: "desc" } }, orders: { include: { purchaseOrder: { include: { items: true, supplier: { select: { id: true, name: true } } } } } }, events: { orderBy: { createdAt: "desc" } } } });
     if (!item) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
     const access = await requireWorkspaceRole(user, item.workspaceId, ["admin", "sourcer"]);
     const canAdmin = access.globalAdmin || access.role === "admin";

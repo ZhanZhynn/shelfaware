@@ -4,6 +4,7 @@ export type PurchaseOrderStatus =
   | "approved"
   | "rejected"
   | "ordered"
+  | "shipped"
   | "received"
   | "cancelled";
 
@@ -29,6 +30,12 @@ export interface PurchaseOrder {
   status: PurchaseOrderStatus;
   totalAmount: number;
   notes?: string;
+  trackingNumber?: string;
+  trackingCarrier?: string;
+  trackingUrl?: string;
+  estimatedDelivery?: string;
+  shippingNotes?: string;
+  shippedAt?: string;
   approvedBy?: string;
   approvedAt?: string;
   orderedAt?: string;
@@ -63,4 +70,12 @@ export interface UpdatePurchaseOrderInput {
     quantity: number;
     unitCost: number;
   }[];
+}
+
+export interface ShipPurchaseOrderInput {
+  trackingNumber?: string;
+  trackingCarrier?: string;
+  trackingUrl?: string;
+  estimatedDelivery?: string;
+  shippingNotes?: string;
 }

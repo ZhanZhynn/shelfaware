@@ -77,7 +77,13 @@ export async function POST(request: NextRequest) {
         for (const [poItemId, quantity] of pendingByPoItem) await tx.purchaseOrderItem.update({ where: { id: poItemId }, data: { quantityReceived: { increment: quantity } } });
         const updatedLines = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: po.id }, select: { quantity: true, quantityReceived: true } });
         const complete = updatedLines.every((line) => line.quantityReceived >= line.quantity);
-        if (complete) await tx.purchaseOrder.update({ where: { id: po.id }, data: { status: "received", receivedAt: new Date(), updatedBy: user.id } });
+        if (complete) {
+          await tx.purchaseOrder.update({ where: { id: po.id }, data: { status: "received", receivedAt: new Date(), updatedBy: user.id } });
+          if (po.sourcingOrder?.caseId) {
+            await tx.sourcingCase.update({ where: { id: po.sourcingOrder.caseId }, data: { stage: "received", version: { increment: 1 }, updatedAt: new Date() } });
+            await tx.sourcingEvent.create({ data: { caseId: po.sourcingOrder.caseId, workspaceId: po.workspaceId!, actorId: user.id, type: "received", payload: { purchaseOrderId: po.id, poNumber: po.poNumber } } });
+          }
+        }
         if (po.workspaceId) {
           await tx.purchaseReceipt.create({ data: { workspaceId: po.workspaceId, purchaseOrderId: po.id, sourcingOrderId: po.sourcingOrder?.id, sourcingCaseId: po.sourcingOrder?.caseId, warehouseId, receivedById: user.id, notes, items: { create: receiptItems } } });
         }

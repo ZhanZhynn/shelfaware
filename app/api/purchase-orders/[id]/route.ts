@@ -23,7 +23,7 @@ export async function GET(
     }
 
     const { id } = await params;
-    const authorized = await authorizePurchaseOrder(session, id, ["admin", "warehouse"]);
+    const authorized = await authorizePurchaseOrder(session, id, ["admin", "sourcer", "warehouse"]);
     const data = authorized && await getPurchaseOrderById(id);
     if (!data) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 });

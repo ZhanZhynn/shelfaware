@@ -124,6 +124,8 @@ export const API_ENDPOINTS = {
     base: "/purchase-orders",
     detail: (id: string) => `/purchase-orders/${id}`,
     approve: (id: string) => `/purchase-orders/${id}/approve`,
+    ship: (id: string) => `/purchase-orders/${id}/ship`,
+    notes: (id: string) => `/purchase-orders/${id}/ship`,
     generate: "/purchase-orders/generate",
   },
   sourcing: {

@@ -1098,6 +1098,42 @@ class ApiClient {
         statusText: response.statusText,
       };
     },
+
+    ship: async (id: string, data: Record<string, unknown>) => {
+      const response = await this.client.post(
+        API_ENDPOINTS.purchaseOrders.ship(id),
+        data,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    updateShipping: async (id: string, data: Record<string, unknown>) => {
+      const response = await this.client.put(
+        API_ENDPOINTS.purchaseOrders.ship(id),
+        data,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
+    updateNotes: async (id: string, data: Record<string, unknown>) => {
+      const response = await this.client.patch(
+        API_ENDPOINTS.purchaseOrders.notes(id),
+        data,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
   };
 
   sourcing = {

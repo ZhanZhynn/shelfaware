@@ -7,7 +7,7 @@ type PurchaseOrderActor = { id: string; role: string | null };
 export async function authorizePurchaseOrder(
   actor: PurchaseOrderActor,
   id: string,
-  allowedWorkspaceRoles: readonly ("admin" | "warehouse")[],
+  allowedWorkspaceRoles: readonly ("admin" | "sourcer" | "warehouse")[],
 ) {
   const order = await prisma.purchaseOrder.findUnique({ where: { id }, select: { id: true, userId: true, workspaceId: true } });
   if (!order) return null;

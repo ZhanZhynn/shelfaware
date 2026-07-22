@@ -8,5 +8,5 @@ export const activeAssignedCasesWhere = (
   workspaceId,
   assignedToId,
   archivedAt: null,
-  stage: { notIn: ["ordered", "rejected", "cannot_source"] },
+  stage: { notIn: ["ordered", "shipped", "received", "rejected", "cannot_source"] },
 });

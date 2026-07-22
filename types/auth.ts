@@ -64,7 +64,8 @@ export type EmailNotificationType =
   | "orderConfirmations"
   | "invoiceEmails"
   | "shippingNotifications"
-  | "orderStatusUpdates";
+  | "orderStatusUpdates"
+  | "sourcingNotifications";
 
 /**
  * Email preferences interface
@@ -79,6 +80,7 @@ export interface EmailPreferences {
   invoiceEmails: boolean;
   shippingNotifications: boolean;
   orderStatusUpdates: boolean;
+  sourcingNotifications: boolean;
 }
 
 /**
@@ -93,6 +95,7 @@ export const DEFAULT_EMAIL_PREFERENCES: EmailPreferences = {
   invoiceEmails: true,
   shippingNotifications: true,
   orderStatusUpdates: true,
+  sourcingNotifications: true,
 };
 
 /**

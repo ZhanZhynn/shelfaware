@@ -307,7 +307,8 @@ model User {
   //   orderConfirmations: boolean,
   //   invoiceEmails: boolean,
   //   shippingNotifications: boolean,
-  //   orderStatusUpdates: boolean
+  //   orderStatusUpdates: boolean,
+  //   sourcingNotifications: boolean
   // }
   notifications Notification[] // In-app notifications (one-to-many relationship)
   shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
@@ -320,6 +321,7 @@ model User {
   sentWorkspaceInvitations WorkspaceInvitation[] @relation("WorkspaceInvitationSender")
   ownedWorkspaces Workspace[] @relation("WorkspaceOwner")
   sourcingComments SourcingComment[]
+  sourcingAttachments SourcingAttachment[]
 }
 
 model UserAction {
@@ -348,6 +350,7 @@ model Workspace {
   sourcingOrders SourcingOrder[]
   sourcingEvents SourcingEvent[]
   sourcingComments SourcingComment[]
+  sourcingAttachments SourcingAttachment[]
   purchaseReceipts PurchaseReceipt[]
   invitations WorkspaceInvitation[]
 
@@ -418,6 +421,7 @@ model SourcingCase {
   orders SourcingOrder[]
   events SourcingEvent[]
   comments SourcingComment[]
+  attachments SourcingAttachment[]
   receipts PurchaseReceipt[]
 
   @@index([workspaceId, stage])
@@ -523,6 +527,26 @@ model SourcingComment {
 
   @@index([caseId, createdAt])
   @@index([workspaceId, createdAt])
+}
+
+model SourcingAttachment {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  caseId String @db.ObjectId
+  uploadedById String @db.ObjectId
+  fileName String
+  mimeType String
+  fileSize Int
+  url String
+  fileId String
+  createdAt DateTime @default(now()) @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([caseId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([uploadedById])
 }
 
 model PurchaseReceipt {

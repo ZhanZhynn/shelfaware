@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/prisma/client";
-import { createNotification } from "@/prisma/notification";
 import { logger } from "@/lib/logger";
+import { deliverSourcingNotification } from "@/lib/sourcing/notifications";
 
 export const runtime = "nodejs";
 
@@ -57,13 +57,15 @@ export async function POST(request: NextRequest) {
           if ((error as { code?: string }).code === "P2002") continue;
           throw error;
         }
-        await createNotification({
-          userId,
-          type: "system_alert",
+        await deliverSourcingNotification({
+          workspaceId: item.workspaceId,
+          caseId: item.id,
+          recipientIds: [userId],
+          kind: "sla",
           title: overdueSla ? "Sourcing SLA due" : "Sourcing next action due",
           message,
-          link: `/sourcing/${item.id}`,
-          metadata: { workspaceId: item.workspaceId, sourcingCaseId: item.id, reminderDate: reminderDate.toISOString() },
+          dedupeKey: `reminder:${item.id}:${userId}:${reminderDate.toISOString()}`,
+          metadata: { reminderDate: reminderDate.toISOString() },
         });
         sent++;
       }

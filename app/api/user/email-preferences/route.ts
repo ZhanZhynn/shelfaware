@@ -26,6 +26,7 @@ const updateEmailPreferencesSchema = z.object({
     invoiceEmails: z.boolean().optional(),
     shippingNotifications: z.boolean().optional(),
     orderStatusUpdates: z.boolean().optional(),
+    sourcingNotifications: z.boolean().optional(),
   }),
 });
 

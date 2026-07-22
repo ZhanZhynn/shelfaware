@@ -20,7 +20,12 @@ export type NotificationType =
   | "system_alert"
   | "import_complete"
   | "import_failed"
-  | "user_registration_pending";
+  | "user_registration_pending"
+  | "sourcing_assignment"
+  | "sourcing_quote"
+  | "sourcing_decision"
+  | "sourcing_comment"
+  | "sourcing_sla_reminder";
 
 /**
  * Notification metadata interface

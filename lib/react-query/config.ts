@@ -311,6 +311,7 @@ export const queryKeys = {
     members: (workspaceId: string) => [...queryKeys.sourcing.all, "members", workspaceId] as const,
     cases: (workspaceId: string) => [...queryKeys.sourcing.all, "cases", workspaceId] as const,
     case: (id: string) => [...queryKeys.sourcing.all, "case", id] as const,
+    attachments: (id: string) => [...queryKeys.sourcing.all, "attachments", id] as const,
   },
 
   // Executive KPI queries

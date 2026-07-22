@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
-import { createNotification } from "@/prisma/notification";
 import { invalidateAllServerCaches } from "@/lib/cache";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
 import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 import { sourcingCommentSchema } from "@/lib/validations/sourcing";
+import { deliverSourcingNotification } from "@/lib/sourcing/notifications";
 
 const commentInclude = { author: { select: { id: true, name: true, email: true, image: true } } };
 
@@ -47,7 +47,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return created;
     });
     const recipients = [...new Set([...input.mentionedUserIds, sourcingCase.assignedToId].filter((id): id is string => !!id && id !== user.id))];
-    void Promise.all(recipients.map((userId) => createNotification({ userId, type: "system_alert", title: `New comment on ${sourcingCase.title}`, message: `${comment.author.name || comment.author.email} commented on this sourcing case.`, link: `/sourcing/${sourcingCase.id}`, metadata: { workspaceId: sourcingCase.workspaceId, sourcingCaseId: sourcingCase.id, commentId: comment.id } }))).catch((error) => logger.error("[Sourcing] Comment notification delivery failed", error));
+    void deliverSourcingNotification({
+      workspaceId: sourcingCase.workspaceId,
+      caseId: sourcingCase.id,
+      recipientIds: recipients,
+      excludeUserId: user.id,
+      kind: "comment",
+      title: `New comment on ${sourcingCase.title}`,
+      message: `${comment.author.name || comment.author.email} commented on this sourcing case.`,
+      dedupeKey: `comment:${comment.id}`,
+      metadata: { commentId: comment.id, mentionedUserIds: input.mentionedUserIds },
+    }).catch((error) => logger.error("[Sourcing] Comment notification delivery failed", error));
     void invalidateAllServerCaches();
     return NextResponse.json(comment, { status: 201 });
   } catch (error) { return failure(error); }

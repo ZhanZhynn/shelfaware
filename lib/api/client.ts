@@ -1147,6 +1147,13 @@ class ApiClient {
     create: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.cases, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
     updateNextAction: async (id: string, data: Record<string, unknown>) => this.client.patch(API_ENDPOINTS.sourcing.case(id), data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
     command: async (id: string, data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.commands(id), data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    attachments: async (id: string) => this.client.get(API_ENDPOINTS.sourcing.attachments(id)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    uploadAttachment: async (id: string, file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return this.client.post(API_ENDPOINTS.sourcing.attachments(id), formData).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText }));
+    },
+    deleteAttachment: async (id: string, attachmentId: string) => this.client.delete(API_ENDPOINTS.sourcing.attachment(id, attachmentId)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
     templates: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.templates}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
     createTemplate: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.templates, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
     duplicates: async (workspaceId: string, title: string) => this.client.get(`${API_ENDPOINTS.sourcing.duplicates}?workspaceId=${encodeURIComponent(workspaceId)}&title=${encodeURIComponent(title)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),

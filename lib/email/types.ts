@@ -68,7 +68,8 @@ export type EmailNotificationType =
   | "order_confirmation"
   | "invoice_email"
   | "shipping_notification"
-  | "order_status_update";
+  | "order_status_update"
+  | "sourcing_notification";
 
 /**
  * Low stock alert data
@@ -199,6 +200,12 @@ export interface OrderStatusUpdateData {
   estimatedDelivery?: string;
 }
 
+export interface SourcingNotificationData {
+  title: string;
+  message: string;
+  link: string;
+}
+
 /**
  * Email notification options
  */
@@ -214,6 +221,7 @@ export interface EmailNotificationOptions {
     | InvoiceEmailData
     | ShippingNotificationData
     | OrderStatusUpdateData
+    | SourcingNotificationData
     | Record<string, unknown>;
   adminEmail?: string;
 }

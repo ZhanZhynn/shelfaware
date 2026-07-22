@@ -22,8 +22,13 @@ import type {
   InvoiceEmailData,
   ShippingNotificationData,
   OrderStatusUpdateData,
+  SourcingNotificationData,
 } from "./types";
 import { isEmailNotificationEnabled } from "./preferences";
+
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[character]!));
 
 /**
  * Email queue job types
@@ -34,7 +39,8 @@ export type EmailQueueJobType =
   | "order_confirmation"
   | "invoice_email"
   | "shipping_notification"
-  | "order_status_update";
+  | "order_status_update"
+  | "sourcing_notification";
 
 /**
  * Email queue job payload
@@ -47,7 +53,8 @@ export interface EmailQueueJob {
     | OrderConfirmationData
     | InvoiceEmailData
     | ShippingNotificationData
-    | OrderStatusUpdateData;
+    | OrderStatusUpdateData
+    | SourcingNotificationData;
   recipientEmail: string;
   recipientName?: string;
   userId?: string;
@@ -291,6 +298,22 @@ export async function sendEmailDirectly(
             recipientEmail: job.recipientEmail,
           });
         }
+        break;
+      }
+      case "sourcing_notification": {
+        const data = job.data as SourcingNotificationData;
+        if (job.userId && !(await isEmailNotificationEnabled(job.userId, "sourcingNotifications"))) {
+          logger.info("Sourcing notification email disabled by user preferences", { userId: job.userId });
+          return;
+        }
+        const result = await sendEmailViaBrevo({
+          to: { email: job.recipientEmail, name: job.recipientName || "Sourcing team member" },
+          subject: data.title,
+          htmlContent: `<p>${escapeHtml(data.message)}</p><p><a href="${escapeHtml(data.link)}">Open sourcing case</a></p>`,
+          textContent: `${data.message}\n${data.link}`,
+          tags: ["sourcing", "notification"],
+        });
+        if (result.success) logger.info("Sourcing notification email sent successfully", { messageId: result.messageId, recipientEmail: job.recipientEmail });
         break;
       }
       default: {

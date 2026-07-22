@@ -30,6 +30,7 @@ import {
   ShoppingCart,
   AlertTriangle,
   BarChart3,
+  ClipboardList,
 } from "lucide-react";
 import { HelpTooltip } from "@/components/shared";
 
@@ -121,6 +122,7 @@ export default function EmailPreferencesPage({
       invoiceEmails: true,
       shippingNotifications: true,
       orderStatusUpdates: true,
+      sourcingNotifications: true,
     };
     setLocalPreferences(defaults);
     updateMutation.mutate({
@@ -182,6 +184,12 @@ export default function EmailPreferencesPage({
       label: "Order Status Updates",
       description: "Notifications when order status changes",
       icon: Mail,
+    },
+    {
+      key: "sourcingNotifications",
+      label: "Sourcing Notifications",
+      description: "Assignments, quote decisions, comments, and SLA reminders",
+      icon: ClipboardList,
     },
   ];
 

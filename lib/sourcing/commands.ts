@@ -1,8 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/prisma/client";
-import { createNotification } from "@/prisma/notification";
 import { logger } from "@/lib/logger";
-import { isBrevoConfigured, sendEmailViaBrevo } from "@/lib/email/brevo";
+import { deliverSourcingNotification, sourcingAdmins } from "./notifications";
 import { requireWorkspaceRole, SourcingAccessError } from "./auth";
 import type {
   SourcingCaseInput,
@@ -80,56 +79,6 @@ const listInclude = {
   orders: true,
 };
 
-async function notify(
-  workspaceId: string,
-  excludeUserId: string,
-  title: string,
-  message: string,
-  link: string,
-) {
-  try {
-    const members = await prisma.workspaceMember.findMany({
-      where: { workspaceId, role: { in: ["admin", "sourcer"] } },
-      select: { userId: true },
-    });
-    const recipients = members.filter(
-      (member) => member.userId !== excludeUserId,
-    );
-    await Promise.all(
-      recipients.map((member) =>
-        createNotification({
-          userId: member.userId,
-          type: "system_alert",
-          title,
-          message,
-          link,
-          metadata: { workspaceId },
-        }),
-      ),
-    );
-    if (isBrevoConfigured() && recipients.length) {
-      const users = await prisma.user.findMany({
-        where: { id: { in: recipients.map((member) => member.userId) } },
-        select: { email: true, name: true },
-      });
-      await Promise.all(
-        users.map((recipient) =>
-          sendEmailViaBrevo({
-            to: { email: recipient.email, name: recipient.name },
-            subject: title,
-            htmlContent: `<p>${message}</p><p><a href="${link}">Open sourcing case</a></p>`,
-            textContent: `${message}\n${link}`,
-            tags: ["sourcing", "transactional"],
-          }),
-        ),
-      );
-    }
-  } catch (error) {
-    // Notifications are post-commit convenience, never a reason to roll back procurement.
-    logger.error("[Sourcing] Notification delivery failed", error);
-  }
-}
-
 export async function createSourcingCase(
   actor: Actor,
   input: SourcingCaseInput,
@@ -185,13 +134,18 @@ export async function createSourcingCase(
     });
     return created;
   });
-  void notify(
-    input.workspaceId,
-    actor.id,
-    "New sourcing case",
-    sourcingCase.title,
-    `/sourcing/${sourcingCase.id}`,
-  );
+  if (assignedToId) {
+    void deliverSourcingNotification({
+      workspaceId: input.workspaceId,
+      caseId: sourcingCase.id,
+      recipientIds: [assignedToId],
+      excludeUserId: actor.id,
+      kind: "assignment",
+      title: "Sourcing case assigned",
+      message: `${actor.name} assigned you to ${sourcingCase.title}.`,
+      dedupeKey: `case_created:${sourcingCase.id}:${assignedToId}`,
+    }).catch((error) => logger.error("[Sourcing] Assignment notification delivery failed", error));
+  }
   return sourcingCase;
 }
 
@@ -693,12 +647,37 @@ export async function runSourcingCommand(
     }
     throw new SourcingAccessError("Unknown sourcing command", 400);
   });
-  void notify(
-    current.workspaceId,
-    actor.id,
-    "Sourcing case updated",
-    `${current.title}: ${command.action}`,
-    `/sourcing/${caseId}`,
-  );
+  const notification = async () => {
+    if (command.action === "assign" && command.assigneeId) {
+      await deliverSourcingNotification({
+        workspaceId: current.workspaceId, caseId, recipientIds: [command.assigneeId], excludeUserId: actor.id,
+        kind: "assignment", title: "Sourcing case assigned", message: `${actor.name} assigned you to ${current.title}.`,
+        dedupeKey: `assigned:${caseId}:${result.version}:${command.assigneeId}`,
+      });
+      return;
+    }
+    if (command.action === "submit_quote") {
+      await deliverSourcingNotification({
+        workspaceId: current.workspaceId, caseId, recipientIds: await sourcingAdmins(current.workspaceId), excludeUserId: actor.id,
+        kind: "quote", title: "Sourcing quote submitted", message: `${actor.name} submitted a quote for ${current.title}.`,
+        dedupeKey: `submit_quote:${caseId}:${result.version}`,
+      });
+      return;
+    }
+    if (["request_changes", "approve", "reject", "cannot_source"].includes(command.action) && current.assignedToId) {
+      const messages: Record<string, string> = {
+        request_changes: `${actor.name} requested changes to the quote for ${current.title}.`,
+        approve: `${actor.name} approved the quote for ${current.title}.`,
+        reject: `${actor.name} rejected the quote for ${current.title}.`,
+        cannot_source: `${actor.name} marked ${current.title} as cannot source.`,
+      };
+      await deliverSourcingNotification({
+        workspaceId: current.workspaceId, caseId, recipientIds: [current.assignedToId], excludeUserId: actor.id,
+        kind: "decision", title: "Sourcing quote decision", message: messages[command.action]!,
+        dedupeKey: `${command.action}:${caseId}:${result.version}`,
+      });
+    }
+  };
+  void notification().catch((error) => logger.error("[Sourcing] Command notification delivery failed", error));
   return result;
 }

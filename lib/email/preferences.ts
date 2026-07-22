@@ -137,6 +137,7 @@ export function mapNotificationTypeToPreference(
     invoice_email: "invoiceEmails",
     shipping_notification: "shippingNotifications",
     order_status_update: "orderStatusUpdates",
+    sourcing_notification: "sourcingNotifications",
   };
 
   return mapping[notificationType] || null;

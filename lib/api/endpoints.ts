@@ -133,6 +133,8 @@ export const API_ENDPOINTS = {
     case: (id: string) => `/sourcing/cases/${id}`,
     comments: (id: string) => `/sourcing/cases/${id}/comments`,
     commands: (id: string) => `/sourcing/cases/${id}/commands`,
+    attachments: (id: string) => `/sourcing/cases/${id}/attachments`,
+    attachment: (id: string, attachmentId: string) => `/sourcing/cases/${id}/attachments/${attachmentId}`,
     workspaces: "/workspaces",
     members: (id: string) => `/workspaces/${id}/members`,
     templates: "/sourcing/templates",

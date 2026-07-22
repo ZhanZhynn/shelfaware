@@ -219,6 +219,39 @@ export async function deleteProductImageFromImageKit(
   }
 }
 
+/** Upload a sourcing case attachment, preserving its validated file extension. */
+export async function uploadSourcingAttachmentToImageKit(
+  file: Buffer,
+  fileName: string,
+  folder: string,
+): Promise<{ url: string; fileId: string }> {
+  try {
+    const imagekit = getImageKitInstance();
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9-_.]/g, "_");
+    const result = await imagekit.files.upload({
+      file: await toFile(file, safeFileName),
+      fileName: safeFileName,
+      folder,
+      useUniqueFileName: true,
+      overwriteFile: false,
+    });
+    if (!result.url || !result.fileId) throw new Error("ImageKit upload failed: Missing URL or fileId");
+    return { url: result.url, fileId: result.fileId };
+  } catch (error) {
+    throw new Error(`Failed to upload sourcing attachment to ImageKit: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
+}
+
+/** Delete a sourcing case attachment, ignoring files already removed from ImageKit. */
+export async function deleteSourcingAttachmentFromImageKit(fileId: string): Promise<void> {
+  try {
+    await getImageKitInstance().files.delete(fileId);
+  } catch (error) {
+    if (isImageKitNotFoundError(error)) return;
+    throw new Error(`Failed to delete sourcing attachment from ImageKit: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
+}
+
 /**
  * Best-effort ImageKit cleanup before hard-deleting a product row.
  * 404 (already deleted) is ignored; other errors are thrown to the caller.

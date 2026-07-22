@@ -15,5 +15,8 @@ export default async function AdminRouteLayout({
   if (!user) {
     redirect("/login");
   }
+  if (user.role !== "admin") {
+    redirect("/");
+  }
   return <AdminLayout>{children}</AdminLayout>;
 }

@@ -5,7 +5,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { User as PrismaUser } from "@prisma/client";
-import Cookies from "js-cookie"; // Import js-cookie
 import { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/prisma/client";
 
@@ -100,35 +99,6 @@ export const getSessionFromRequest = async (request: {
   const userStatus = user.status ?? "approved";
   if (userStatus === "pending" || userStatus === "rejected") return null;
   return user;
-};
-
-/** Client-side: fetches /api/auth/session with cookies to get current user (avoids using JWT on client). */
-export const getSessionClient = async (): Promise<User | null> => {
-  try {
-    const token = Cookies.get("session_id");
-    if (!token) {
-      return null;
-    }
-
-    // On client side, we'll make an API call to verify the token
-    // This avoids using the JWT library on the client side
-    const response = await fetch("/api/auth/session", {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include", // Include cookies
-    });
-
-    if (response.ok) {
-      const user = await response.json();
-      return user;
-    }
-
-    return null;
-  } catch (error) {
-    return null;
-  }
 };
 
 /** Hashes a plain password with bcrypt for safe storage (used on registration). */

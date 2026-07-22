@@ -25,6 +25,7 @@ export const createWarehouseBodySchema = z.object({
   address: optionalWarehouseTextSchema,
   type: optionalWarehouseTextSchema,
   status: z.boolean().optional().default(true),
+  workspaceId: z.string().min(1).optional(),
 });
 
 /**

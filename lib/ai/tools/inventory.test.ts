@@ -6,6 +6,7 @@ const { prismaMock, getCache, setCache } = vi.hoisted(() => {
   const prismaMock = {
     product: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
     },
     category: { findMany: vi.fn() },
@@ -44,6 +45,7 @@ function getHandler(name: string) {
 
 beforeEach(() => {
   prismaMock.product.findMany.mockReset();
+  prismaMock.product.findFirst.mockReset();
   prismaMock.product.findUnique.mockReset();
   prismaMock.category.findMany.mockReset();
   prismaMock.supplier.findMany.mockReset();
@@ -111,7 +113,7 @@ describe("listProducts handler", () => {
 
 describe("getProductBySku handler", () => {
   it("returns the product when it belongs to the user and is not deleted", async () => {
-    prismaMock.product.findUnique.mockResolvedValue({
+    prismaMock.product.findFirst.mockResolvedValue({
       id: "p1",
       name: "Widget",
       sku: "W-1",
@@ -127,19 +129,19 @@ describe("getProductBySku handler", () => {
     });
     const result = await getHandler("getProductBySku")({ sku: "W-1" }, session);
     expect(result.ok).toBe(true);
-    expect(prismaMock.product.findUnique).toHaveBeenCalledWith({ where: { sku: "W-1" } });
+    expect(prismaMock.product.findFirst).toHaveBeenCalledWith({ where: { sku: "W-1", userId: "user-1" } });
     expect(result.data).toMatchObject({ sku: "W-1", quantity: 3 });
   });
 
   it("errors when product missing", async () => {
-    prismaMock.product.findUnique.mockResolvedValue(null);
+    prismaMock.product.findFirst.mockResolvedValue(null);
     const result = await getHandler("getProductBySku")({ sku: "NOPE" }, session);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/No product found/);
   });
 
   it("errors when product belongs to a different user", async () => {
-    prismaMock.product.findUnique.mockResolvedValue({
+    prismaMock.product.findFirst.mockResolvedValue({
       id: "p2",
       name: "X",
       sku: "W-2",
@@ -162,7 +164,7 @@ describe("getProductBySku handler", () => {
     const result = await getHandler("getProductBySku")({ sku: "  " }, session);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/sku is required/);
-    expect(prismaMock.product.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.product.findFirst).not.toHaveBeenCalled();
   });
 });
 

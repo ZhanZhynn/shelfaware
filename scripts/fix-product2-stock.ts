@@ -25,7 +25,7 @@ async function fixProduct2Stock() {
     logger.info(`Fixing stock for Product2 (SKU: ${productSku})...`);
 
     // Find Product2
-    const product = await prisma.product.findUnique({
+    const product = await prisma.product.findFirst({
       where: { sku: productSku },
       select: {
         id: true,

@@ -55,12 +55,14 @@ export function useStockMovements(filters?: {
   });
 }
 
-export function useProductLookup(q: string | null) {
-  return useQuery({
-    queryKey: queryKeys.productLookup(q ?? ""),
-    queryFn: async () => {
-      const response = await apiClient.products.lookup(q!);
-      return response.data as {
+export function useProductLookup(workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (lookupText: string) => queryClient.fetchQuery({
+      queryKey: queryKeys.productLookup(lookupText, workspaceId),
+      queryFn: async () => {
+        const response = await apiClient.products.lookup(lookupText, workspaceId);
+        return response.data as {
         productId: string;
         sku: string;
         name: string;
@@ -68,9 +70,9 @@ export function useProductLookup(q: string | null) {
         quantity: number;
         imageUrl?: string;
       };
-    },
-    enabled: !!q && q.length > 0,
+      },
+      staleTime: 1000 * 30,
+    }),
     retry: false,
-    staleTime: 1000 * 30,
   });
 }

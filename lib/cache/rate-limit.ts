@@ -22,6 +22,39 @@ interface RateLimitConfig {
    * Identifier for the rate limit (e.g., user ID, IP address)
    */
   identifier: string;
+  /** Use the bounded local limiter when Redis is unavailable or errors. */
+  strict?: boolean;
+}
+
+const MAX_FALLBACK_IDENTIFIERS = 10_000;
+const strictFallbackRequests = new Map<string, number[]>();
+
+function checkStrictFallback(config: RateLimitConfig): RateLimitResult {
+  const now = Date.now();
+  const windowStart = now - config.window * 1000;
+  const requests = (strictFallbackRequests.get(config.identifier) ?? []).filter((time) => time > windowStart);
+
+  if (!strictFallbackRequests.has(config.identifier) && strictFallbackRequests.size >= MAX_FALLBACK_IDENTIFIERS) {
+    for (const [identifier, entries] of strictFallbackRequests) {
+      if (!entries.some((time) => time > windowStart)) strictFallbackRequests.delete(identifier);
+    }
+    if (strictFallbackRequests.size >= MAX_FALLBACK_IDENTIFIERS) {
+      strictFallbackRequests.delete(strictFallbackRequests.keys().next().value!);
+    }
+  }
+
+  if (requests.length >= config.limit) {
+    strictFallbackRequests.set(config.identifier, requests);
+    return { allowed: false, current: requests.length, limit: config.limit, reset: Math.max(1, Math.ceil(((requests[0] ?? now) + config.window * 1000 - now) / 1000)) };
+  }
+
+  requests.push(now);
+  strictFallbackRequests.set(config.identifier, requests);
+  return { allowed: true, current: requests.length, limit: config.limit, reset: config.window };
+}
+
+export function resetStrictRateLimitFallbackForTests() {
+  strictFallbackRequests.clear();
 }
 
 /**
@@ -57,7 +90,8 @@ export async function checkRateLimit(
 ): Promise<RateLimitResult> {
   const redis = getRedis();
   if (!redis) {
-    // Graceful degradation: allow all requests if Redis not available
+    if (config.strict) return checkStrictFallback(config);
+    // Non-sensitive endpoints retain graceful degradation when Redis is unavailable.
     logger.warn("Redis not available, rate limiting disabled");
     return {
       allowed: true,
@@ -109,6 +143,7 @@ export async function checkRateLimit(
     };
   } catch (error) {
     logger.error("Rate limit check failed:", error);
+    if (config.strict) return checkStrictFallback(config);
     // Graceful degradation: allow request on error
     return {
       allowed: true,

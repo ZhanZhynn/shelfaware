@@ -12,7 +12,7 @@ import { Loader2 } from "lucide-react";
 /**
  * Login page client component (production-ready, no test accounts or OAuth).
  */
-export default function LoginPage() {
+export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -28,7 +28,7 @@ export default function LoginPage() {
   // Redirect if already logged in (e.g. landed on /login with cookie).
   useEffect(() => {
     if (isLoggedIn && !navigatingFromSubmitRef.current) {
-      const dest =
+      const dest = sourcing ? "/sourcing" :
         user?.role === "client"
           ? "/client"
           : user?.role === "supplier"
@@ -82,6 +82,9 @@ export default function LoginPage() {
         case "rejected":
           errorMessage = "Your account has not been approved. Contact an admin.";
           break;
+        case "no_sourcing_access":
+          errorMessage = "These credentials are valid, but this account has not been granted sourcing access.";
+          break;
         case "oauth_processing_failed":
         case "oauth_error":
           errorMessage =
@@ -98,7 +101,7 @@ export default function LoginPage() {
       });
 
       // Clean up URL
-      router.replace("/login");
+      router.replace(sourcing ? "/login/sourcing" : "/login");
     }
   }, [searchParams, router, toast]);
 
@@ -108,7 +111,7 @@ export default function LoginPage() {
    */
   const handleGoogleSignIn = async () => {
     try {
-      const redirectUrl = searchParams.get("redirect") || "/";
+      const redirectUrl = sourcing ? "/sourcing" : searchParams.get("redirect") || "/";
 
       const oauthUrl = `/api/auth/oauth/google?callback=${encodeURIComponent(
         redirectUrl,
@@ -134,6 +137,12 @@ export default function LoginPage() {
 
     try {
       const userData = await login(email, password);
+      if (sourcing) {
+        const access = await fetch("/api/sourcing/access", { credentials: "include" }).then((response) => response.json());
+        if (!access.allowed) { window.location.href = "/login/sourcing?error=no_sourcing_access"; return; }
+        window.location.href = access.destination;
+        return;
+      }
 
       const userName = userData.name || userData.email.split("@")[0] || "User";
 
@@ -151,7 +160,7 @@ export default function LoginPage() {
       // Full-page navigation to the correct dashboard for the user's role.
       // window.location.href bypasses the Next.js RSC cache which can contain
       // stale 307 redirects from before login, causing infinite redirect loops.
-      const dest =
+       const dest =
         userData.role === "client"
           ? "/client"
           : userData.role === "supplier"
@@ -190,7 +199,7 @@ export default function LoginPage() {
                   Welcome Back
                 </h2>
                 <p className="text-sm sm:text-base text-gray-600 dark:text-white/70 text-center">
-                  Sign in to your account to continue
+                   {sourcing ? "Sign in to the sourcing workspace" : "Sign in to your account to continue"}
                 </p>
               </div>
 

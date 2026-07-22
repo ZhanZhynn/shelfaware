@@ -13,6 +13,7 @@ import {
   createCategoryBodySchema,
   updateCategoryBodySchema,
 } from "@/lib/validations/category";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 /**
  * GET /api/categories
@@ -26,9 +27,11 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = session.id;
+    const workspaceId = new URL(request.url).searchParams.get("workspaceId") || undefined;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
 
     const categories = await prisma.category.findMany({
-      where: { userId },
+      where: workspaceId ? { workspaceId } : { userId },
     });
 
     return NextResponse.json(categories);
@@ -69,7 +72,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, status, description, notes } = validationResult.data;
+    const { name, status, description, notes, workspaceId } = validationResult.data;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer"]);
 
     // Create category with audit fields and new optional fields
     const category = await prisma.category.create({
@@ -86,6 +90,7 @@ export async function POST(request: NextRequest) {
         createdBy: userId, // Set createdBy same as userId
         createdAt: new Date(),
         updatedAt: null, // Set to null on creation - will be set when updated
+        workspaceId,
       },
     });
 
@@ -143,16 +148,18 @@ export async function PUT(request: NextRequest) {
 
     const { id, name, status, description, notes } = validationResult.data;
 
-    // Verify category belongs to user
-    const existingCategory = await prisma.category.findFirst({
-      where: { id, userId },
-    });
+    const existingCategory = await prisma.category.findUnique({ where: { id } });
 
     if (!existingCategory) {
       return NextResponse.json(
         { error: "Category not found or unauthorized" },
         { status: 404 }
       );
+    }
+    if (existingCategory.workspaceId) {
+      await requireWorkspaceRole(session, existingCategory.workspaceId, ["admin", "sourcer"]);
+    } else if (existingCategory.userId !== userId && session.role !== "admin") {
+      return NextResponse.json({ error: "Category not found or unauthorized" }, { status: 404 });
     }
 
     // Prepare update data with new optional fields
@@ -232,16 +239,18 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Verify category belongs to user
-    const existingCategory = await prisma.category.findFirst({
-      where: { id, userId },
-    });
+    const existingCategory = await prisma.category.findUnique({ where: { id } });
 
     if (!existingCategory) {
       return NextResponse.json(
         { error: "Category not found or unauthorized" },
         { status: 404 }
       );
+    }
+    if (existingCategory.workspaceId) {
+      await requireWorkspaceRole(session, existingCategory.workspaceId, ["admin", "sourcer"]);
+    } else if (existingCategory.userId !== userId && session.role !== "admin") {
+      return NextResponse.json({ error: "Category not found or unauthorized" }, { status: 404 });
     }
 
     await prisma.category.delete({

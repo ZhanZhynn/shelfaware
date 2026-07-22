@@ -21,6 +21,10 @@ describe("createProductBodySchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts an optional workspace scope", () => {
+    expect(createProductBodySchema.safeParse({ ...validCreatePayload, workspaceId: "507f1f77bcf86cd799439013" }).success).toBe(true);
+  });
+
   it("rejects empty categoryId", () => {
     const result = createProductBodySchema.safeParse({
       ...validCreatePayload,

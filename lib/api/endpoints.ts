@@ -126,6 +126,13 @@ export const API_ENDPOINTS = {
     approve: (id: string) => `/purchase-orders/${id}/approve`,
     generate: "/purchase-orders/generate",
   },
+  sourcing: {
+    cases: "/sourcing/cases",
+    case: (id: string) => `/sourcing/cases/${id}`,
+    commands: (id: string) => `/sourcing/cases/${id}/commands`,
+    workspaces: "/workspaces",
+    members: (id: string) => `/workspaces/${id}/members`,
+  },
 
   // Executive KPI
   executiveKpi: {

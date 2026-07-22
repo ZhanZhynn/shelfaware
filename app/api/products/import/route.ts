@@ -21,6 +21,7 @@ import {
   updateImportHistory,
 } from "@/prisma/import-history";
 import { checkAndSendStockAlerts } from "@/lib/email/notifications";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 /**
  * POST /api/products/import
@@ -47,6 +48,11 @@ export async function POST(request: NextRequest) {
     // Parse multipart form data
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const workspaceValue = formData.get("workspaceId");
+    const workspaceId = typeof workspaceValue === "string" && workspaceValue ? workspaceValue : undefined;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "warehouse"]);
+    const ownership = workspaceId ? { workspaceId } : { userId };
+    const skuScopeId = workspaceId ?? userId;
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -224,10 +230,10 @@ export async function POST(request: NextRequest) {
 
       // Get all categories and suppliers for lookup
       const categories = await prisma.category.findMany({
-        where: { userId },
+        where: ownership,
       });
       const suppliers = await prisma.supplier.findMany({
-        where: { userId },
+        where: ownership,
       });
 
       const categoryMap = new Map(
@@ -272,8 +278,8 @@ export async function POST(request: NextRequest) {
           }
 
           // Check if SKU already exists
-          const existingProduct = await prisma.product.findUnique({
-            where: { sku: String(rowData.sku) },
+          const existingProduct = await prisma.product.findFirst({
+            where: { sku: String(rowData.sku), skuScopeId },
           });
 
           if (existingProduct) {
@@ -297,6 +303,8 @@ export async function POST(request: NextRequest) {
               categoryId,
               supplierId,
               userId,
+              workspaceId,
+              skuScopeId,
               createdBy: userId,
             },
           });

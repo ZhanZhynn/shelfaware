@@ -5,6 +5,7 @@ import {
   getPurchaseOrderById,
   updatePurchaseOrder,
   deletePurchaseOrder,
+  authorizePurchaseOrder,
 } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
 
@@ -22,7 +23,8 @@ export async function GET(
     }
 
     const { id } = await params;
-    const data = await getPurchaseOrderById(session.id, id);
+    const authorized = await authorizePurchaseOrder(session, id, ["admin", "warehouse"]);
+    const data = authorized && await getPurchaseOrderById(id);
     if (!data) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 });
     }
@@ -52,6 +54,9 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
+    if (!await authorizePurchaseOrder(session, id, ["admin"])) {
+      return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
+    }
     const data = await updatePurchaseOrder(session.id, id, body);
 
     if (!data) {
@@ -85,6 +90,9 @@ export async function DELETE(
     }
 
     const { id } = await params;
+    if (!await authorizePurchaseOrder(session, id, ["admin"])) {
+      return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
+    }
     const success = await deletePurchaseOrder(session.id, id);
 
     if (!success) {

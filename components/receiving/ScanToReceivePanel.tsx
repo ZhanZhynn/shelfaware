@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import dynamic from "next/dynamic";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,7 @@ interface PendingItem {
 
 export default function ScanToReceivePanel() {
   const { data: warehouses } = useWarehouses();
-  const { data: purchaseOrders } = usePurchaseOrders({ status: "approved" });
+  const { data: purchaseOrders } = usePurchaseOrders();
   const receiveMutation = useReceiveItems();
 
   const [warehouseId, setWarehouseId] = useState("");
@@ -50,8 +50,13 @@ export default function ScanToReceivePanel() {
   const [manualSku, setManualSku] = useState("");
   const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
 
-  const lookup = useProductLookup(null);
-  const [lookupQuery, setLookupQuery] = useState<string | null>(null);
+  const selectedWarehouse = warehouses?.find((warehouse) => warehouse.id === warehouseId);
+  const receivablePurchaseOrders = purchaseOrders?.filter((po) => ["approved", "ordered"].includes(po.status));
+  const selectedPo = receivablePurchaseOrders?.find((po) => po.id === poId);
+  const activePoId = selectedPo ? poId : "";
+  // An order can become ineligible while this panel is open; do not retain its PO rows or link it on receipt.
+  const activePendingItems = poId && !activePoId ? pendingItems.filter((item) => item.source !== "po") : pendingItems;
+  const lookup = useProductLookup(selectedPo?.workspaceId ?? selectedWarehouse?.workspaceId ?? undefined);
 
   const addToPending = (item: PendingItem) => {
     setPendingItems((prev) => {
@@ -65,25 +70,16 @@ export default function ScanToReceivePanel() {
     });
   };
 
-  const handleDetected = useCallback(
-    (text: string) => {
-      setLookupQuery(text);
-      lookup.refetch().then((res) => {
-        if (res.data) {
-          addToPending({
-            productId: res.data.productId,
-            sku: res.data.sku,
-            name: res.data.name,
-            quantity: 1,
-            imageUrl: res.data.imageUrl,
-            source: "scan",
-          });
-        }
-        setLookupQuery(null);
-      }).catch(() => setLookupQuery(null));
-    },
-    [lookup],
-  );
+  const handleDetected = async (text: string) => {
+    const lookupText = text.trim();
+    if (!lookupText) return;
+    try {
+      const item = await lookup.mutateAsync(lookupText);
+      addToPending({ productId: item.productId, sku: item.sku, name: item.name, quantity: 1, imageUrl: item.imageUrl, source: "scan" });
+    } catch {
+      // The lookup hook surfaces no stale result after a failed scan.
+    }
+  };
 
   const handleManualLookup = () => {
     if (!manualSku.trim()) return;
@@ -91,14 +87,14 @@ export default function ScanToReceivePanel() {
     setManualSku("");
   };
 
-  const updateQty = (index: number, qty: number) => {
+  const updateQty = (item: PendingItem, qty: number) => {
     setPendingItems((prev) =>
-      prev.map((p, i) => (i === index ? { ...p, quantity: Math.max(1, qty) } : p)),
+      prev.map((pending) => (pending === item ? { ...pending, quantity: Math.max(1, qty) } : pending)),
     );
   };
 
-  const removeItem = (index: number) => {
-    setPendingItems((prev) => prev.filter((_, i) => i !== index));
+  const removeItem = (item: PendingItem) => {
+    setPendingItems((prev) => prev.filter((pending) => pending !== item));
   };
 
   const handleSelectPo = (id: string) => {
@@ -108,7 +104,7 @@ export default function ScanToReceivePanel() {
       return;
     }
     // Pre-fill pending items from PO items
-    const po = purchaseOrders?.find((p) => p.id === id);
+    const po = receivablePurchaseOrders?.find((p) => p.id === id);
     if (po) {
       const poItems: PendingItem[] = po.items
         .filter((item) => item.quantityReceived < item.quantity)
@@ -125,12 +121,12 @@ export default function ScanToReceivePanel() {
   };
 
   const handleReceive = () => {
-    if (!warehouseId || pendingItems.length === 0) return;
+    if (!warehouseId || activePendingItems.length === 0) return;
     receiveMutation.mutate(
       {
         warehouseId,
-        poId: poId || undefined,
-        items: pendingItems.map((p) => ({
+        poId: activePoId || undefined,
+        items: activePendingItems.map((p) => ({
           productId: p.productId,
           sku: p.sku,
           quantity: p.quantity,
@@ -167,12 +163,12 @@ export default function ScanToReceivePanel() {
 
         <div>
           <Label className="text-xs">Purchase Order (optional)</Label>
-          <Select value={poId} onValueChange={handleSelectPo}>
+          <Select value={activePoId} onValueChange={handleSelectPo}>
             <SelectTrigger>
               <SelectValue placeholder="No PO — ad-hoc receive" />
             </SelectTrigger>
             <SelectContent>
-              {purchaseOrders?.map((po) => (
+              {receivablePurchaseOrders?.map((po) => (
                 <SelectItem key={po.id} value={po.id}>
                   {po.poNumber} — {po.supplierName}
                 </SelectItem>
@@ -193,7 +189,7 @@ export default function ScanToReceivePanel() {
         </div>
       </div>
 
-      {poId && (
+      {activePoId && (
         <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950 p-3">
           <p className="text-xs text-blue-700 dark:text-blue-300">
             PO-linked receiving: items from the selected PO are pre-filled below. Quantities default to remaining (ordered − received). Adjust as needed.
@@ -212,7 +208,7 @@ export default function ScanToReceivePanel() {
           disabled={!warehouseId}
         />
         <Button variant="outline" onClick={handleManualLookup} disabled={!warehouseId || !manualSku.trim()}>
-          {lookupQuery ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          {lookup.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         </Button>
       </div>
 
@@ -221,9 +217,9 @@ export default function ScanToReceivePanel() {
           <CardTitle className="text-sm font-medium flex items-center justify-between">
             <span className="flex items-center gap-2">
               <PackagePlus className="h-4 w-4" />
-              Pending Receive ({pendingItems.length})
+              Pending Receive ({activePendingItems.length})
             </span>
-            {pendingItems.length > 0 && (
+            {activePendingItems.length > 0 && (
               <Button
                 onClick={handleReceive}
                 disabled={!warehouseId || receiveMutation.isPending}
@@ -237,7 +233,7 @@ export default function ScanToReceivePanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {pendingItems.length === 0 ? (
+          {activePendingItems.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
               No items pending. Scan a product QR code or enter a SKU to begin.
             </p>
@@ -253,7 +249,7 @@ export default function ScanToReceivePanel() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pendingItems.map((item, index) => (
+                {activePendingItems.map((item) => (
                   <TableRow key={`${item.productId}-${item.poItemId ?? "adhoc"}`}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell className="text-muted-foreground">{item.sku ?? "—"}</TableCell>
@@ -267,12 +263,12 @@ export default function ScanToReceivePanel() {
                         type="number"
                         min={1}
                         value={item.quantity}
-                        onChange={(e) => updateQty(index, parseInt(e.target.value, 10) || 1)}
+                        onChange={(e) => updateQty(item, parseInt(e.target.value, 10) || 1)}
                         className="w-20"
                       />
                     </TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => removeItem(index)}>
+                      <Button variant="ghost" size="icon" onClick={() => removeItem(item)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>

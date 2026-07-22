@@ -14,6 +14,10 @@ describe("createSupplierBodySchema", () => {
     const result = createSupplierBodySchema.safeParse({ name: "" });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a workspace scope", () => {
+    expect(createSupplierBodySchema.safeParse({ name: "Acme Corp", workspaceId: "507f1f77bcf86cd799439011" }).success).toBe(true);
+  });
 });
 
 describe("updateSupplierBodySchema", () => {

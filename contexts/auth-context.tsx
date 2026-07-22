@@ -2,7 +2,7 @@
 
 /**
  * Auth context: provides user, login state, and logout to the whole app.
- * On mount, restores session from localStorage (for fast UI) then validates via /api/auth/session.
+ * On mount, restores non-sensitive user metadata then validates via /api/auth/session.
  * On logout/login queryClient.clear() wipes ALL cached queries so the next user never sees stale data.
  */
 import React, {
@@ -12,7 +12,6 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
-import Cookies from "js-cookie";
 import { useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/utils/axiosInstance";
 import { getSessionClient } from "@/utils/auth.client";
@@ -44,10 +43,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const clearAuthData = useCallback(() => {
     setIsLoggedIn(false);
     setUser(null);
-    Cookies.remove("session_id");
     localStorage.removeItem("isAuth");
     localStorage.removeItem("isLoggedIn");
-    localStorage.removeItem("token");
     localStorage.removeItem("getSession");
     localStorage.removeItem("prevUserId");
     localStorage.removeItem("stock-inventory-query-cache");
@@ -115,8 +112,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         });
         localStorage.setItem("isAuth", "true");
         localStorage.setItem("isLoggedIn", "true");
-        const existingToken = localStorage.getItem("token") || session.id;
-        localStorage.setItem("token", existingToken);
         localStorage.setItem("getSession", JSON.stringify(session));
       } else {
         clearAuthData();
@@ -143,9 +138,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     if (localStorage.getItem("isLoggedIn") === null) {
       localStorage.setItem("isLoggedIn", "false");
-    }
-    if (localStorage.getItem("token") === null) {
-      localStorage.setItem("token", "");
     }
     if (localStorage.getItem("getSession") === null) {
       localStorage.setItem("getSession", "");
@@ -212,11 +204,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setIsLoggedIn(true);
       setUser(userData);
-      Cookies.set("session_id", result.sessionId);
-
       localStorage.setItem("isAuth", "true");
       localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("token", result.sessionId);
       localStorage.setItem("getSession", JSON.stringify(result));
 
       return userData;
@@ -230,10 +219,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
    */
   const logout = async () => {
     try {
-      await axiosInstance.post("/auth/logout");
+      await axiosInstance.post("/auth/logout", undefined, { withCredentials: true });
+    } finally {
       clearAuthData();
-    } catch (error) {
-      throw error;
     }
   };
 

@@ -12,6 +12,7 @@ import { getCache, setCache, invalidateCache, cacheKeys } from "@/lib/cache";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 /**
  * GET /api/products/:id
@@ -41,6 +42,18 @@ export async function GET(
     const isAdmin = session.role === "admin";
     const isSupplier = session.role === "supplier";
     const isClient = session.role === "client";
+
+    // Authorize workspace access before serving a shared cached representation.
+    const accessProduct = await prisma.product.findFirst({
+      where: mergeProductListWhere({ id }),
+      select: { workspaceId: true },
+    });
+    if (!accessProduct) {
+      return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    }
+    if (accessProduct.workspaceId) {
+      await requireWorkspaceRole(session, accessProduct.workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
+    }
 
     // Check cache first
     const cacheKey = cacheKeys.products.detail(id);
@@ -74,7 +87,7 @@ export async function GET(
         orderBy: { createdAt: "desc" as const },
       },
     };
-    if (isAdmin) {
+    if (accessProduct.workspaceId || isAdmin) {
       product = await prisma.product.findFirst({
         where: mergeProductListWhere({ id }),
         include: productInclude,

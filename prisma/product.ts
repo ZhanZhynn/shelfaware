@@ -16,12 +16,14 @@ export const createProduct = async (data: {
   status: string;
   userId: string;
   categoryId: string;
-  supplierId: string;
-  createdAt: Date;
+    supplierId: string;
+    createdAt: Date;
+    workspaceId?: string;
 }) => {
   return prisma.product.create({
     data: {
       ...data,
+      skuScopeId: data.workspaceId ?? data.userId,
       createdBy: data.userId, // Set createdBy same as userId
     },
   });

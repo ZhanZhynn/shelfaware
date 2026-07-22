@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { getStockMovementsForUser } from "@/prisma/stock-movement";
+import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
@@ -21,12 +22,13 @@ export async function GET(request: NextRequest) {
     const limitParam = searchParams.get("limit");
     const limit = limitParam ? Math.min(100, parseInt(limitParam, 10)) : 50;
 
+    const memberships = session.role === "admin" ? [] : await prisma.workspaceMember.findMany({ where: { userId: session.id, role: { in: ["admin", "warehouse"] } }, select: { workspaceId: true } });
     const movements = await getStockMovementsForUser(session.id, {
       productId,
       warehouseId,
       sourceType,
       limit,
-    });
+    }, session.role === "admin" ? undefined : memberships.map((member) => member.workspaceId), session.role === "admin");
 
     return NextResponse.json(movements);
   } catch (error) {

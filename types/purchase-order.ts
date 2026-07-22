@@ -25,6 +25,7 @@ export interface PurchaseOrder {
   supplierId: string;
   supplierName?: string;
   userId: string;
+  workspaceId?: string | null;
   status: PurchaseOrderStatus;
   totalAmount: number;
   notes?: string;

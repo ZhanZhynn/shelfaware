@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { approvePurchaseOrder } from "@/prisma/purchase-order";
+import { approvePurchaseOrder, authorizePurchaseOrder } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
 
 export async function POST(
@@ -16,10 +16,6 @@ export async function POST(
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    if (session.role !== "admin") {
-      return NextResponse.json({ error: "Only admins can approve purchase orders" }, { status: 403 });
-    }
-
     const { id } = await params;
     const body = await request.json();
     const { action } = body;
@@ -29,6 +25,12 @@ export async function POST(
         { error: "action must be 'approve' or 'reject'" },
         { status: 400 },
       );
+    }
+
+    const purchaseOrder = await authorizePurchaseOrder(session, id, ["admin"]);
+    // Legacy orders have no workspace role model; approval remains a global-admin action.
+    if (!purchaseOrder || (!purchaseOrder.workspaceId && session.role !== "admin")) {
+      return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
     }
 
     const data = await approvePurchaseOrder(session.id, id, action);

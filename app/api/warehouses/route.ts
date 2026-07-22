@@ -12,6 +12,7 @@ import {
   createWarehouseBodySchema,
   updateWarehouseBodySchema,
 } from "@/lib/validations/warehouse";
+import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 
 /**
  * GET /api/warehouses
@@ -25,9 +26,10 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = session.id;
+    const memberships = session.role === "admin" ? [] : await prisma.workspaceMember.findMany({ where: { userId, role: { in: ["admin", "warehouse"] } }, select: { workspaceId: true } });
 
     const warehouses = await prisma.warehouse.findMany({
-      where: { userId },
+      where: session.role === "admin" ? {} : { OR: [{ userId }, { workspaceId: { in: memberships.map((member) => member.workspaceId) } }] },
     });
 
     return NextResponse.json(warehouses);
@@ -68,7 +70,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, address, type, status } = validationResult.data;
+    const { name, address, type, status, workspaceId } = validationResult.data;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "warehouse"]);
 
     const warehouse = await prisma.warehouse.create({
       data: {
@@ -83,6 +86,7 @@ export async function POST(request: NextRequest) {
         createdBy: userId,
         createdAt: new Date(),
         updatedAt: null,
+        workspaceId,
       },
     });
 

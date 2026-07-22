@@ -51,7 +51,6 @@ export interface LoginResponse {
   userName: string;
   userEmail: string;
   userRole?: string; // user | admin | supplier | client | retailer; defaults to "user"
-  sessionId: string;
 }
 
 /**

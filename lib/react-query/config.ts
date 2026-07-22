@@ -305,6 +305,13 @@ export const queryKeys = {
     detail: (id: string) =>
       [...queryKeys.purchaseOrders.details(), id] as const,
   },
+  sourcing: {
+    all: ["sourcing"] as const,
+    workspaces: () => [...queryKeys.sourcing.all, "workspaces"] as const,
+    members: (workspaceId: string) => [...queryKeys.sourcing.all, "members", workspaceId] as const,
+    cases: (workspaceId: string) => [...queryKeys.sourcing.all, "cases", workspaceId] as const,
+    case: (id: string) => [...queryKeys.sourcing.all, "case", id] as const,
+  },
 
   // Executive KPI queries
   executiveKpi: {
@@ -336,5 +343,5 @@ export const queryKeys = {
   },
 
   // Product lookup (by scan) — short-lived, keyed by query
-  productLookup: (q: string) => ["productLookup", q] as const,
+  productLookup: (q: string, workspaceId?: string) => ["productLookup", workspaceId ?? "", q] as const,
 } as const;

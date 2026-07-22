@@ -7,6 +7,8 @@ import {
   createPurchaseOrder,
 } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
+import { prisma } from "@/prisma/client";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 export async function GET(request: NextRequest) {
   const rateLimitResponse = await withRateLimit(request, defaultRateLimits.standard);
@@ -21,12 +23,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") || undefined;
     const supplierId = searchParams.get("supplierId") || undefined;
+    const memberships = session.role === "admin" ? [] : await prisma.workspaceMember.findMany({ where: { userId: session.id, role: { in: ["admin", "warehouse"] } }, select: { workspaceId: true } });
 
-    const cacheKey = `purchaseOrders:list:${session.id}:${status || "all"}:${supplierId || "all"}`;
+    const cacheKey = `purchaseOrders:list:${session.id}:${status || "all"}:${supplierId || "all"}:${memberships.map((member) => member.workspaceId).join(",")}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 
-    const data = await getPurchaseOrdersForUser(session.id, { status, supplierId });
+    const data = await getPurchaseOrdersForUser(session.id, { status, supplierId, workspaceIds: session.role === "admin" ? undefined : memberships.map((member) => member.workspaceId), globalAdmin: session.role === "admin" });
     await setCache(cacheKey, data, 120);
 
     return NextResponse.json(data);
@@ -50,7 +53,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { supplierId, notes, items } = body;
+    const { supplierId, notes, items, workspaceId } = body;
 
     if (!supplierId || !items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json(
@@ -59,7 +62,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const data = await createPurchaseOrder(session.id, { supplierId, notes, items });
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin"]);
+    const data = await createPurchaseOrder(session.id, { supplierId, notes, items, workspaceId });
     return NextResponse.json(data, { status: 201 });
   } catch (error) {
     logger.error("Error creating purchase order:", error);

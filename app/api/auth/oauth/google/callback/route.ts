@@ -20,6 +20,7 @@ import { notifyAdminsOfPendingRegistration } from "@/lib/notifications/in-app";
 import { sendPendingRegistrationAdminEmail } from "@/lib/email/notifications";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { hasSourcingAccess, safeSourcingDestination, sourcingDestination } from "@/lib/sourcing/portal";
 
 /**
  * Helper to redirect to login with error/pending message and clear OAuth cookies.
@@ -276,7 +277,11 @@ export async function GET(request: NextRequest) {
       }
 
       // Redirect to role-appropriate page directly (avoids double-redirect chain through /)
-      const roleDest =
+       const callback = request.cookies.get("oauth_callback")?.value;
+       const wantsSourcing = callback?.startsWith("/sourcing") || callback?.startsWith("/admin/sourcing");
+       const roleDest = wantsSourcing
+         ? (await hasSourcingAccess(user) ? (user.role === "admin" ? sourcingDestination(user) : safeSourcingDestination(callback)) : "/login/sourcing?error=no_sourcing_access")
+         :
         user.role === "client"
           ? "/client"
           : user.role === "supplier"

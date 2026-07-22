@@ -3,7 +3,6 @@
  * These functions can be safely imported in client components
  */
 
-import Cookies from "js-cookie";
 import { User } from "@/types";
 
 /**

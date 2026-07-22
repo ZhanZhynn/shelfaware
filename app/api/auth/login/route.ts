@@ -129,7 +129,6 @@ export async function POST(request: NextRequest) {
         userName: user.name,
         userEmail: user.email,
         userRole,
-        sessionId: token,
       },
       { status: 200, headers: responseHeaders },
     );

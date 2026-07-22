@@ -468,6 +468,7 @@ export const cacheKeys = {
       return `tiktok:orders:${shopId}:${filterStr}`;
     },
     orderDetail: (id: string) => `tiktok:order:${id}`,
+    stats: (shopId: string, dateRange?: string) => `tiktok:stats:${shopId}:${dateRange || "all"}`,
     syncLogs: (shopId: string) => `tiktok:sync-logs:${shopId}`,
     pattern: "tiktok:*",
   },

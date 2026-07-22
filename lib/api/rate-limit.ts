@@ -23,6 +23,8 @@ export interface ApiRateLimitConfig {
    * Get identifier from request (e.g., user ID, IP address)
    */
   getIdentifier: (request: NextRequest) => string;
+  /** Require the bounded in-process limiter if Redis is unavailable. */
+  strictFallback?: boolean;
 }
 
 /**
@@ -49,6 +51,7 @@ export const defaultRateLimits = {
   strict: {
     limit: 30,
     window: 60,
+    strictFallback: true,
     getIdentifier: (request: NextRequest) => {
       const userId = request.headers.get("x-user-id");
       if (userId) return `user:${userId}`;
@@ -91,6 +94,7 @@ export async function withRateLimit(
       limit: config.limit,
       window: config.window,
       identifier,
+      strict: config.strictFallback,
     });
 
     // Add rate limit headers to response

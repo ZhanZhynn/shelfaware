@@ -30,6 +30,7 @@ import {
   createProductBodySchema,
   updateProductBodySchema,
 } from "@/lib/validations/product";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 // NOTE: Performance tracking wrapper is available but deferred until after all features are implemented
 // import { withPerformanceTracking } from "@/lib/api/performance-wrapper";
 
@@ -57,11 +58,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isSupplier = session.role === "supplier";
+    const workspaceId = new URL(request.url).searchParams.get("workspaceId") || undefined;
+    const isSupplier = !workspaceId && session.role === "supplier";
     let cacheKey: string;
-    let productWhere: { userId: string } | { supplierId: string };
+    let productWhere: { userId: string } | { supplierId: string } | { workspaceId: string };
 
-    if (isSupplier) {
+    if (workspaceId) {
+      await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
+      cacheKey = cacheKeys.products.list({ workspaceId });
+      productWhere = { workspaceId };
+    } else if (isSupplier) {
       const supplier = await getSupplierByUserId(session.id);
       if (!supplier) {
         return NextResponse.json([]);
@@ -216,11 +222,16 @@ export async function POST(request: NextRequest) {
       imageUrl,
       imageFileId,
       expirationDate,
+      workspaceId,
     } = validationResult.data;
 
-    // Check if SKU already exists
-    const existingProduct = await prisma.product.findUnique({
-      where: { sku },
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "warehouse"]);
+    const ownership = workspaceId ? { workspaceId } : { userId };
+    const skuScopeId = workspaceId ?? userId;
+
+    // Use the same non-null compound scope as the database index.
+    const existingProduct = await prisma.product.findFirst({
+      where: { sku, skuScopeId },
     });
 
     if (existingProduct) {
@@ -228,6 +239,14 @@ export async function POST(request: NextRequest) {
         { error: "SKU must be unique" },
         { status: 400 },
       );
+    }
+
+    const [category, supplier] = await Promise.all([
+      prisma.category.findFirst({ where: { id: categoryId, ...ownership, status: true } }),
+      prisma.supplier.findFirst({ where: { id: supplierId, ...ownership, status: true } }),
+    ]);
+    if (!category || !supplier) {
+      return NextResponse.json({ error: "Category and supplier must belong to the selected scope" }, { status: 400 });
     }
 
     // Create product with audit fields
@@ -239,6 +258,8 @@ export async function POST(request: NextRequest) {
         quantity: BigInt(quantity) as any,
         status,
         userId,
+        workspaceId,
+        skuScopeId,
         createdBy: userId, // Set createdBy same as userId
         categoryId,
         supplierId,
@@ -259,13 +280,6 @@ export async function POST(request: NextRequest) {
     }).catch(() => {});
 
     // Fetch category and supplier data for the response
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
-    });
-    const supplier = await prisma.supplier.findUnique({
-      where: { id: supplierId },
-    });
-
     // Generate QR code and upload to ImageKit (async, don't block response)
     generateAndUploadQRCode(
       JSON.stringify({
@@ -402,10 +416,7 @@ export async function PUT(request: NextRequest) {
       expirationDate,
     } = validationResult.data;
 
-    // Verify product belongs to user
-    const existingProduct = await prisma.product.findFirst({
-      where: mergeProductListWhere({ id, userId }),
-    });
+    const existingProduct = await prisma.product.findUnique({ where: { id } });
 
     if (!existingProduct) {
       return NextResponse.json(
@@ -413,11 +424,16 @@ export async function PUT(request: NextRequest) {
         { status: 404 },
       );
     }
+    if (existingProduct.workspaceId) {
+      await requireWorkspaceRole(session, existingProduct.workspaceId, ["admin", "warehouse"]);
+    } else if (existingProduct.userId !== userId && session.role !== "admin") {
+      return NextResponse.json({ error: "Product not found or unauthorized" }, { status: 404 });
+    }
 
     // Check if SKU is being changed and if new SKU already exists
     if (sku && sku !== existingProduct.sku) {
-      const skuExists = await prisma.product.findUnique({
-        where: { sku },
+      const skuExists = await prisma.product.findFirst({
+        where: { sku, skuScopeId: existingProduct.skuScopeId },
       });
 
       if (skuExists) {
@@ -425,6 +441,17 @@ export async function PUT(request: NextRequest) {
           { error: "SKU must be unique" },
           { status: 400 },
         );
+      }
+    }
+
+    const ownership = existingProduct.workspaceId ? { workspaceId: existingProduct.workspaceId } : { userId: existingProduct.userId };
+    if (categoryId || supplierId) {
+      const [category, supplier] = await Promise.all([
+        categoryId ? prisma.category.findFirst({ where: { id: categoryId, ...ownership, status: true }, select: { id: true } }) : true,
+        supplierId ? prisma.supplier.findFirst({ where: { id: supplierId, ...ownership, status: true }, select: { id: true } }) : true,
+      ]);
+      if (!category || !supplier) {
+        return NextResponse.json({ error: "Category and supplier must belong to the product scope" }, { status: 400 });
       }
     }
 

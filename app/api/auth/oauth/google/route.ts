@@ -8,6 +8,7 @@ import { getGoogleOAuthUrl, isGoogleOAuthConfigured } from "@/lib/auth/oauth";
 import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { safeSourcingDestination } from "@/lib/sourcing/routing";
 
 /**
  * GET /api/auth/oauth/google
@@ -37,7 +38,10 @@ export async function GET(request: NextRequest) {
 
     // Get callback URL from query params or use default
     const { searchParams } = new URL(request.url);
-    const callbackUrl = searchParams.get("callback") || "/";
+    const requestedCallback = searchParams.get("callback");
+    const callbackUrl = requestedCallback?.startsWith("/sourcing") || requestedCallback?.startsWith("/admin/sourcing")
+      ? safeSourcingDestination(requestedCallback)
+      : "/";
     const baseUrl = getRequestBaseUrl(request);
     const redirectUri = new URL(
       "/api/auth/oauth/google/callback",

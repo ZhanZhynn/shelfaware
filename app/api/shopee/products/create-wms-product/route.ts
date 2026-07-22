@@ -125,6 +125,7 @@ async function createWmsProductsForShopeeProduct(
           reservedQuantity: BigInt(0) as any,
           status,
           userId,
+          skuScopeId: userId,
           createdBy: userId,
           categoryId,
           supplierId,

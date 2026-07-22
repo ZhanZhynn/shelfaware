@@ -77,6 +77,7 @@ export type ProductFormData = z.infer<typeof productSchema>;
 export const productFormSubmitSchema = productSchema.extend({
   categoryId: z.string().min(1, "Category is required"),
   supplierId: z.string().min(1, "Supplier is required"),
+  workspaceId: z.string().min(1, "Workspace ID is required").optional(),
 });
 
 /**
@@ -93,6 +94,7 @@ export const createProductBodySchema = z.object({
   imageUrl: optionalImageUrlSchema.optional(),
   imageFileId: z.string().optional(),
   expirationDate: optionalExpirationDateSchema.optional(),
+  workspaceId: z.string().min(1, "Workspace ID is required").optional(),
 });
 
 /**

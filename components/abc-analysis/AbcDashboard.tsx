@@ -23,8 +23,8 @@ export default function AbcDashboard() {
   const [preset, setPreset] = useState(30);
   const [channel, setChannel] = useState<"all" | "wms" | "shopee">("all");
 
-  const toDate = new Date().toISOString().split("T")[0];
-  const fromDate = new Date(Date.now() - preset * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const toDate = new Date().toISOString().slice(0, 10);
+  const fromDate = new Date(new Date(toDate).getTime() - preset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const { data, isLoading } = useAbcAnalysis({
     dateFrom: fromDate,

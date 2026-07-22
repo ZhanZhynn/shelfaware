@@ -12,6 +12,7 @@ export interface Warehouse {
   type?: string | null;
   status: boolean;
   userId: string;
+  workspaceId?: string | null;
   createdAt: Date;
   updatedAt?: Date | null;
   createdBy: string;
@@ -26,6 +27,7 @@ export interface CreateWarehouseInput {
   address?: string | null;
   type?: string | null;
   status?: boolean;
+  workspaceId?: string;
 }
 
 /**

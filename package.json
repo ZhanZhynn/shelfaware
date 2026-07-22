@@ -16,14 +16,16 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
+    "fresh-start:reset": "tsx scripts/reset-business-data.ts",
+    "fresh-start:reset-marketplace": "tsx scripts/reset-business-data.ts --include-marketplace",
+    "fresh-start:bootstrap": "tsx scripts/bootstrap-workspace.ts",
     "script:check-all-data": "tsx scripts/check-all-data.ts",
     "script:delete-all-data": "tsx scripts/delete-all-data.ts",
-    "script:delete-all-suppliers": "tsx scripts/delete-all-suppliers.ts",
-    "script:delete-all-categories": "tsx scripts/delete-all-categories.ts",
     "script:delete-user": "tsx scripts/delete-user.ts",
     "script:backfill-order-stock": "tsx scripts/backfill-order-stock.ts",
     "script:check-order-stock": "tsx scripts/check-order-product-stock.ts",
-    "script:fix-product2-stock": "tsx scripts/fix-product2-stock.ts"
+    "script:fix-product2-stock": "tsx scripts/fix-product2-stock.ts",
+    "script:migrate-product-sku-index": "tsx scripts/migrate-product-sku-index.ts"
   },
   "dependencies": {
     "@congminh1254/shopee-sdk": "^1.13.0",

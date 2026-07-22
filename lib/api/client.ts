@@ -9,7 +9,6 @@ import axios, {
   type AxiosRequestConfig,
   type AxiosResponse,
 } from "axios";
-import Cookies from "js-cookie";
 import { API_ENDPOINTS } from "./endpoints";
 import {
   createApiError,
@@ -113,20 +112,6 @@ function createAxiosInstance(): AxiosInstance {
     timeout: 30000, // 30 second timeout
   });
 
-  // Request interceptor - Add auth token
-  instance.interceptors.request.use(
-    (config) => {
-      const token = Cookies.get("session_id");
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-      return config;
-    },
-    (error) => {
-      return Promise.reject(error);
-    },
-  );
-
   // Response interceptor - Handle errors globally
   instance.interceptors.response.use(
     (response) => response,
@@ -159,7 +144,7 @@ class ApiClient {
   auth = {
     /**
      * Login user
-     * Returns: { userId, userName, userEmail, sessionId }
+     * Returns: { userId, userName, userEmail, userRole }
      */
     login: async (data: LoginInput): Promise<ApiResponse<LoginResponse>> => {
       const response = await this.client.post<LoginResponse>(
@@ -310,9 +295,9 @@ class ApiClient {
     /**
      * Lookup product by scanned QR/QR payload or SKU (for receiving)
      */
-    lookup: async (q: string) => {
+    lookup: async (q: string, workspaceId?: string) => {
       const response = await this.client.get(
-        `${API_ENDPOINTS.productLookup}?q=${encodeURIComponent(q)}`,
+        `${API_ENDPOINTS.productLookup}?q=${encodeURIComponent(q)}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ""}`,
       );
       return {
         data: response.data,
@@ -1113,6 +1098,16 @@ class ApiClient {
         statusText: response.statusText,
       };
     },
+  };
+
+  sourcing = {
+    workspaces: async () => this.client.get(API_ENDPOINTS.sourcing.workspaces).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    members: async (workspaceId: string) => this.client.get(API_ENDPOINTS.sourcing.members(workspaceId)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    suppliers: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.suppliers.base}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    cases: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.cases}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    case: async (id: string) => this.client.get(API_ENDPOINTS.sourcing.case(id)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    create: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.cases, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    command: async (id: string, data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.commands(id), data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
   };
 
   /**

@@ -14,6 +14,7 @@ import {
   createSupplierBodySchema,
   updateSupplierBodySchema,
 } from "@/lib/validations/supplier";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 /**
  * GET /api/suppliers
@@ -31,8 +32,12 @@ export async function GET(request: NextRequest) {
 
     const userId = session.id;
     const isClient = session.role === "client";
+    const workspaceId = new URL(request.url).searchParams.get("workspaceId") || undefined;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
 
-    const suppliers = isClient
+    const suppliers = workspaceId
+      ? await prisma.supplier.findMany({ where: { workspaceId }, orderBy: { name: "asc" } })
+      : isClient
       ? await prisma.supplier.findMany({ where: { userId } })
       : await getSuppliersForAdminIncludingDemo(userId);
 
@@ -82,13 +87,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, status, description, notes } = validationResult.data;
+    const { name, status, description, notes, workspaceId } = validationResult.data;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer"]);
 
     // Create supplier with audit fields and new optional fields
     const supplier = await prisma.supplier.create({
       data: {
         name,
         userId,
+        workspaceId,
         status: status ?? true,
         description:
           description && typeof description === "string"
@@ -156,16 +163,18 @@ export async function PUT(request: NextRequest) {
 
     const { id, name, status, description, notes } = validationResult.data;
 
-    // Verify supplier belongs to user
-    const existingSupplier = await prisma.supplier.findFirst({
-      where: { id, userId },
-    });
+    const existingSupplier = await prisma.supplier.findUnique({ where: { id } });
 
     if (!existingSupplier) {
       return NextResponse.json(
         { error: "Supplier not found or unauthorized" },
         { status: 404 }
       );
+    }
+    if (existingSupplier.workspaceId) {
+      await requireWorkspaceRole(session, existingSupplier.workspaceId, ["admin", "sourcer"]);
+    } else if (existingSupplier.userId !== userId && session.role !== "admin") {
+      return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
     }
 
     // Prepare update data with new optional fields
@@ -245,16 +254,18 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Verify supplier belongs to user
-    const existingSupplier = await prisma.supplier.findFirst({
-      where: { id, userId },
-    });
+    const existingSupplier = await prisma.supplier.findUnique({ where: { id } });
 
     if (!existingSupplier) {
       return NextResponse.json(
         { error: "Supplier not found or unauthorized" },
         { status: 404 }
       );
+    }
+    if (existingSupplier.workspaceId) {
+      await requireWorkspaceRole(session, existingSupplier.workspaceId, ["admin", "sourcer"]);
+    } else if (existingSupplier.userId !== userId && session.role !== "admin") {
+      return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
     }
 
     await prisma.supplier.delete({

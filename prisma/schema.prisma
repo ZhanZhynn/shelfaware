@@ -16,6 +16,7 @@ model Category {
   id          String    @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   userId      String    @db.ObjectId // Created by user ID
+  workspaceId String?   @db.ObjectId
   status      Boolean   @default(true) // Active/Inactive status (default: active)
   description String? // Optional description field
   notes       String? // Optional notes field
@@ -23,6 +24,9 @@ model Category {
   updatedAt   DateTime? @db.Date // Manually managed - null on create, set on update
   createdBy   String    @db.ObjectId // Same as userId, for clarity
   updatedBy   String?   @db.ObjectId // Last updated by user ID
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId])
 }
 
 model Department {
@@ -127,10 +131,12 @@ model Product {
   price            Float
   quantity         BigInt
   reservedQuantity BigInt      @default(0) // Stock reserved by pending orders (not yet confirmed)
-  sku              String      @unique
+  sku              String
   status           String
   supplierId       String      @db.ObjectId
   userId           String      @db.ObjectId // Created by user ID
+  workspaceId      String?     @db.ObjectId
+  skuScopeId       String      @db.ObjectId // workspaceId for shared products, userId for legacy products
   createdBy        String      @db.ObjectId // Same as userId, for clarity
   updatedBy        String?     @db.ObjectId // Last updated by user ID
   qrCodeUrl        String? // ImageKit URL for QR code image
@@ -143,8 +149,12 @@ model Product {
   orderItems       OrderItem[] // Orders containing this product (one-to-many relationship)
   channelMappings  ProductChannelMapping[] // Channel links (Shopee, etc.)
   stockMovements   StockMovement[] // Inbound/outbound movement ledger
+  workspace        Workspace?  @relation(fields: [workspaceId], references: [id])
 
   @@index([deletedAt])
+  @@unique([skuScopeId, sku])
+  @@index([userId, sku])
+  @@index([workspaceId])
 }
 
 model ProductChannelMapping {
@@ -179,12 +189,15 @@ model StockAllocation {
   quantity         BigInt    @default(0)  // Quantity in this warehouse
   reservedQuantity BigInt    @default(0)  // Reserved stock in this warehouse
   userId           String    @db.ObjectId // User who created this allocation
+  workspaceId      String?   @db.ObjectId
   createdAt        DateTime  @default(now()) @db.Date
   updatedAt        DateTime? @db.Date
+  workspace        Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@unique([productId, warehouseId])
   @@index([productId])
   @@index([warehouseId])
+  @@index([workspaceId])
 }
 
 // Stock transfer between warehouses
@@ -217,17 +230,20 @@ model StockMovement {
   sourceId      String?   @db.ObjectId  // PO id or transfer id
   poItemId      String?   @db.ObjectId  // specific PO item (for PO-linked receiving)
   receivedById  String    @db.ObjectId  // User who performed the movement
+  workspaceId   String?   @db.ObjectId
   receivedAt    DateTime  @default(now()) @db.Date
   notes         String?
   createdAt     DateTime  @default(now()) @db.Date
   user          User      @relation(fields: [receivedById], references: [id])
   product       Product   @relation(fields: [productId], references: [id])
   warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@index([productId, warehouseId, receivedAt])
   @@index([sourceType, sourceId])
   @@index([receivedById])
   @@index([warehouseId])
+  @@index([workspaceId])
 }
 
 model Warehouse {
@@ -237,19 +253,23 @@ model Warehouse {
   type        String?   // Optional type: main, secondary, storage, etc.
   status      Boolean   @default(true) // Active/Inactive
   userId      String    @db.ObjectId // Created by user ID
+  workspaceId String?   @db.ObjectId
   createdAt   DateTime  @default(now()) @db.Date
   updatedAt   DateTime? @db.Date
   createdBy   String    @db.ObjectId
   updatedBy   String?   @db.ObjectId
   stockMovements StockMovement[]
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@index([userId])
+  @@index([workspaceId])
 }
 
 model Supplier {
   id            String    @id @default(auto()) @map("_id") @db.ObjectId
   name          String
   userId        String    @db.ObjectId // Created by user ID
+  workspaceId   String?   @db.ObjectId
   status        Boolean   @default(true) // Active/Inactive status (default: active)
   description   String? // Optional description field
   notes         String? // Optional notes field
@@ -258,6 +278,9 @@ model Supplier {
   createdBy     String    @db.ObjectId // Same as userId, for clarity
   updatedBy     String?   @db.ObjectId // Last updated by user ID
   purchaseOrders PurchaseOrder[]
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId])
 }
 
 model User {
@@ -293,10 +316,195 @@ model User {
   shopifyShops  ShopifyShop[]  // Shopify connected shops (one-to-many relationship)
   notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
   stockMovements StockMovement[] // Stock movements performed by this user
+  workspaceMemberships WorkspaceMember[]
+  sentWorkspaceInvitations WorkspaceInvitation[] @relation("WorkspaceInvitationSender")
+  ownedWorkspaces Workspace[] @relation("WorkspaceOwner")
 }
 
 model UserAction {
   id String @id @default(auto()) @map("_id") @db.ObjectId
+}
+
+model Workspace {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  name String
+  ownerId String @db.ObjectId
+  createdAt DateTime @default(now()) @db.Date
+  updatedAt DateTime? @db.Date
+  owner User @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members WorkspaceMember[]
+  products Product[]
+  categories Category[]
+  suppliers Supplier[]
+  warehouses Warehouse[]
+  purchaseOrders PurchaseOrder[]
+  stockAllocations StockAllocation[]
+  stockMovements StockMovement[]
+  sourcingCases SourcingCase[]
+  sourcingQuotes SourcingQuote[]
+  sourcingOrders SourcingOrder[]
+  sourcingEvents SourcingEvent[]
+  purchaseReceipts PurchaseReceipt[]
+  invitations WorkspaceInvitation[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  userId String @db.ObjectId
+  role String // admin | sourcer | warehouse | viewer
+  createdAt DateTime @default(now()) @db.Date
+  updatedAt DateTime? @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model WorkspaceInvitation {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  email String
+  name String?
+  tokenHash String @unique
+  status String @default("pending") // pending | accepted | revoked | expired
+  expiresAt DateTime @db.Date
+  sentAt DateTime @default(now()) @db.Date
+  acceptedAt DateTime? @db.Date
+  revokedAt DateTime? @db.Date
+  createdById String @db.ObjectId
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User @relation("WorkspaceInvitationSender", fields: [createdById], references: [id])
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+}
+
+model SourcingCase {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  title String
+  description String?
+  photoUrls Json?
+  size String?
+  material String?
+  variant String?
+  specifications String?
+  referenceUrl String?
+  notes String?
+  route String @default("yiwu")
+  stage String @default("draft")
+  version Int @default(1)
+  assignedToId String? @db.ObjectId
+  createdById String @db.ObjectId
+  archivedAt DateTime? @db.Date
+  createdAt DateTime @default(now()) @db.Date
+  updatedAt DateTime? @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  quotes SourcingQuote[]
+  orders SourcingOrder[]
+  events SourcingEvent[]
+  receipts PurchaseReceipt[]
+
+  @@index([workspaceId, stage])
+  @@index([workspaceId, assignedToId])
+}
+
+model SourcingQuote {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  caseId String @db.ObjectId
+  revision Int
+  status String @default("draft")
+  supplierName String
+  supplierId String? @db.ObjectId
+  currency String @default("CNY")
+  items Json
+  unitPriceRmb Float?
+  moq Int?
+  unitsPerCarton Int?
+  cartonDimensions String?
+  cartonWeightKg Float?
+  leadTimeDays Int?
+  validUntil DateTime? @db.Date
+  samplePhotoUrls Json?
+  notes String?
+  submittedAt DateTime? @db.Date
+  createdById String @db.ObjectId
+  createdAt DateTime @default(now()) @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, revision])
+  @@index([workspaceId, caseId])
+}
+
+model SourcingOrder {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  caseId String @db.ObjectId
+  quoteId String @db.ObjectId
+  purchaseOrderId String? @unique @db.ObjectId
+  status String @default("confirmed")
+  createdById String @db.ObjectId
+  createdAt DateTime @default(now()) @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  receipts PurchaseReceipt[]
+
+  @@index([workspaceId, caseId])
+}
+
+model SourcingEvent {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  caseId String @db.ObjectId
+  type String
+  actorId String @db.ObjectId
+  payload Json?
+  createdAt DateTime @default(now()) @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+model PurchaseReceipt {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String @db.ObjectId
+  purchaseOrderId String @db.ObjectId
+  sourcingOrderId String? @db.ObjectId
+  sourcingCaseId String? @db.ObjectId
+  warehouseId String @db.ObjectId
+  receivedById String @db.ObjectId
+  notes String?
+  finalizedAt DateTime @default(now()) @db.Date
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingOrder SourcingOrder? @relation(fields: [sourcingOrderId], references: [id])
+  sourcingCase SourcingCase? @relation(fields: [sourcingCaseId], references: [id])
+  items PurchaseReceiptItem[]
+
+  @@index([workspaceId, purchaseOrderId])
+}
+
+model PurchaseReceiptItem {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  purchaseReceiptId String @db.ObjectId
+  purchaseOrderItemId String @db.ObjectId
+  productId String @db.ObjectId
+  acceptedQuantity Int @default(0)
+  damagedQuantity Int @default(0)
+  shortageQuantity Int @default(0)
+  notes String?
+  receipt PurchaseReceipt @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseReceiptId])
+  @@index([purchaseOrderItemId])
 }
 
 model VerificationToken {
@@ -748,6 +956,7 @@ model PurchaseOrder {
   poNumber      String    @unique
   supplierId    String    @db.ObjectId
   userId        String    @db.ObjectId
+  workspaceId   String?   @db.ObjectId
   status        String    @default("draft") // draft, pending_approval, approved, rejected, ordered, received, cancelled
   totalAmount   Float     @default(0)
   notes         String?
@@ -762,11 +971,14 @@ model PurchaseOrder {
   updatedBy     String?   @db.ObjectId
   supplier      Supplier  @relation(fields: [supplierId], references: [id])
   items         PurchaseOrderItem[]
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
+  sourcingOrder SourcingOrder?
 
   @@index([userId])
   @@index([supplierId])
   @@index([status])
   @@index([createdAt])
+  @@index([workspaceId])
 }
 
 model PurchaseOrderItem {

@@ -124,9 +124,7 @@ const getProductBySku: ChatTool = {
   handler: async (args, session) => {
     const sku = typeof args.sku === "string" ? args.sku.trim() : "";
     if (!sku) return { ok: false, error: "sku is required" };
-    const product = await prisma.product.findUnique({
-      where: { sku },
-    });
+    const product = await prisma.product.findFirst({ where: { sku, userId: session.id } });
     if (!product || product.userId !== session.id || product.deletedAt) {
       return { ok: false, error: `No product found with SKU "${sku}"` };
     }

@@ -4,6 +4,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import type { ProductLookupResult } from "@/types/receiving";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 export async function GET(request: NextRequest) {
   const rateLimitResponse = await withRateLimit(request, defaultRateLimits.standard);
@@ -17,11 +18,14 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get("q");
+    const workspaceId = searchParams.get("workspaceId") || undefined;
     if (!q) {
       return NextResponse.json({ error: "Query parameter 'q' is required" }, { status: 400 });
     }
 
     const userId = session.id;
+    if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "warehouse"]);
+    const ownership = workspaceId ? { workspaceId } : { userId };
     let productId: string | undefined;
     let sku: string | undefined;
 
@@ -37,19 +41,23 @@ export async function GET(request: NextRequest) {
       sku = q.trim();
     }
 
+    if (!productId && !sku) {
+      return NextResponse.json({ error: "A product ID or SKU is required" }, { status: 400 });
+    }
+
     // Lookup by productId first, then by SKU
     let product: { id: string; sku: string; name: string; price: number; quantity: bigint; imageUrl: string | null } | null = null;
 
     if (productId) {
       product = await prisma.product.findFirst({
-        where: { id: productId, userId, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
+        where: { id: productId, ...ownership, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
         select: { id: true, sku: true, name: true, price: true, quantity: true, imageUrl: true },
       });
     }
 
     if (!product && sku) {
       product = await prisma.product.findFirst({
-        where: { sku, userId, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
+        where: { sku, ...ownership, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
         select: { id: true, sku: true, name: true, price: true, quantity: true, imageUrl: true },
       });
     }

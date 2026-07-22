@@ -18,8 +18,10 @@ export async function createStockMovement(data: {
 export async function getStockMovementsForUser(
   userId: string,
   filters?: { productId?: string; warehouseId?: string; sourceType?: string; limit?: number },
+  workspaceIds?: string[],
+  globalAdmin = false,
 ): Promise<StockMovementRecord[]> {
-  const where: Record<string, unknown> = { receivedById: userId };
+  const where: Record<string, unknown> = globalAdmin ? {} : workspaceIds ? { OR: [{ receivedById: userId }, { workspaceId: { in: workspaceIds } }] } : { receivedById: userId };
   if (filters?.productId) where.productId = filters.productId;
   if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
   if (filters?.sourceType) where.sourceType = filters.sourceType;

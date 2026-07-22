@@ -117,6 +117,11 @@ const MANAGEMENT_ITEMS: NavItem[] = [
     icon: ClipboardList,
   },
   {
+    href: "/admin/sourcing",
+    label: "Sourcing",
+    icon: ShoppingBag,
+  },
+  {
     href: "/admin/receiving",
     label: "Receiving",
     icon: ScanLine,

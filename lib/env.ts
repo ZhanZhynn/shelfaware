@@ -14,6 +14,7 @@ const requiredEnvVars = [
 /** Optional: when set, enable ImageKit, OAuth, email, cache, payments, shipping, etc. */
 const optionalEnvVars = [
   "NEXT_PUBLIC_LOCAL_API_URL",
+  "NEXT_PUBLIC_APP_URL",
   "IMAGEKIT_PUBLIC_KEY",
   "IMAGEKIT_PRIVATE_KEY",
   "IMAGEKIT_URL_ENDPOINT",

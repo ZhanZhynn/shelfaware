@@ -26,6 +26,8 @@ const COMPONENT_FETCH_CRUD_ALLOWLIST = new Set([
   "components/admin/AdminAnalyticsContent.tsx",
   "components/Pages/ApiStatusPage.tsx",
   "components/Pages/ApiDocsPage.tsx",
+  "components/sourcing/SourcingPortal.tsx",
+  "components/sourcing/SourcingCaseDetail.tsx",
 ]);
 
 /** Domains with query sub-keys beyond list/detail — invalidate-all must use *.all */
@@ -75,6 +77,9 @@ const API_WRITE_ROUTE_INVALIDATION_SPEC: Record<string, readonly string[]> = {
   "app/api/shipping/webhook/route.ts": ["invalidateOnOrderChange"],
   "app/api/notifications/in-app/[id]/route.ts": ["invalidateAllServerCaches"],
   "app/api/notifications/in-app/mark-all-read/route.ts": ["invalidateAllServerCaches"],
+  "app/api/receiving/route.ts": ["invalidateAllServerCaches"],
+  "app/api/sourcing/cases/route.ts": ["invalidateAllServerCaches"],
+  "app/api/sourcing/cases/[id]/commands/route.ts": ["invalidateAllServerCaches"],
 };
 
 /** Update mutations must refresh the open detail view (setQueryData or invalidateQueries on detail) */
@@ -109,6 +114,8 @@ const API_WRITE_EXEMPT = new Set([
   "app/api/shipping/rates/route.ts",
   "app/api/notifications/route.ts",
   "app/api/email/queue/process/route.ts",
+  "app/api/workspaces/route.ts",
+  "app/api/workspaces/[id]/members/route.ts",
 ]);
 
 const SERVER_INVALIDATE_PATTERNS = [

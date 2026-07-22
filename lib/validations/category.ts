@@ -31,6 +31,7 @@ export const createCategoryBodySchema = z.object({
   status: z.boolean().optional().default(true),
   description: optionalDescriptionSchema,
   notes: optionalNotesSchema,
+  workspaceId: z.string().min(1, "Workspace ID is required").optional(),
 });
 
 /**

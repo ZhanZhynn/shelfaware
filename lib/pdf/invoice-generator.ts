@@ -5,6 +5,7 @@
 
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { formatMoney } from "@/lib/money";
 
 interface InvoiceItem {
   productName: string;
@@ -29,6 +30,7 @@ interface InvoicePDFData {
   total: number;
   amountPaid: number;
   amountDue: number;
+  currency?: string;
 
   // Client/Billing info
   clientName?: string;
@@ -69,8 +71,8 @@ function formatDate(date: Date | string): string {
 /**
  * Format currency
  */
-function formatCurrency(amount: number): string {
-  return `$${amount.toFixed(2)}`;
+function formatCurrency(amount: number, currency = "MYR"): string {
+  return formatMoney(amount, currency);
 }
 
 /**

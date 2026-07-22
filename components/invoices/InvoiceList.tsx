@@ -37,9 +37,9 @@ import {
 import type { Invoice } from "@/types";
 import type { InvoiceWithSource } from "./InvoiceTableColumns";
 import type { InvoiceSourceFilterValue } from "./InvoiceSourceFilter";
+import { formatMoney } from "@/lib/money";
 
-const formatCurrency = (value: number) =>
-  `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatCurrency = (value: number) => formatMoney(value, "MYR");
 
 const InvoiceTable = dynamic(
   () =>

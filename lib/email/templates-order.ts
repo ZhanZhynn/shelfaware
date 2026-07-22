@@ -14,6 +14,7 @@ import type {
   ShippingNotificationData,
   OrderStatusUpdateData,
 } from "./types";
+import { formatMoney } from "@/lib/money";
 
 /**
  * Generate unique subject with timestamp and random number to avoid spam
@@ -33,8 +34,8 @@ function generateUniqueSubject(baseSubject: string): string {
  * @param amount - Amount to format
  * @returns string - Formatted currency string
  */
-function formatCurrency(amount: number): string {
-  return `$${amount.toFixed(2)}`;
+function formatCurrency(amount: number, currency = "MYR"): string {
+  return formatMoney(amount, currency);
 }
 
 /**

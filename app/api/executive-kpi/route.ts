@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get("dateFrom") || undefined;
     const dateTo = searchParams.get("dateTo") || undefined;
 
-    const cacheKey = `executive-kpi:${session.id}:${dateFrom || "30d"}:${dateTo || "now"}`;
+    const cacheKey = `executive-kpi:v2:${session.id}:${dateFrom || "30d"}:${dateTo || "now"}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 

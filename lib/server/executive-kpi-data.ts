@@ -1,6 +1,6 @@
 import prisma from "@/prisma/client";
-import { logger } from "@/lib/logger";
 import type { ExecutiveKpiData, KpiMetric } from "@/types/executive-kpi";
+import { getFinancialCurrencyContext } from "@/lib/server/financial-currency";
 
 function kpi(current: number, previous?: number): KpiMetric {
   const change = previous !== undefined ? current - previous : undefined;
@@ -27,6 +27,7 @@ export async function getExecutiveKpiForUser(
   const periodDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
   const prevFrom = new Date(from.getTime() - periodDays * 24 * 60 * 60 * 1000);
   const prevTo = new Date(from);
+  const currency = await getFinancialCurrencyContext(userId);
 
   const [
     wmsOrders,
@@ -38,25 +39,25 @@ export async function getExecutiveKpiForUser(
   ] = await Promise.all([
     prisma.order.findMany({
       where: { userId, createdAt: { gte: from, lte: to } },
-      select: { id: true, status: true, total: true, shipping: true, createdAt: true, shippedAt: true, deliveredAt: true },
+      select: { id: true, status: true, total: true, shipping: true, currency: true, createdAt: true, shippedAt: true, deliveredAt: true },
     }),
     prisma.shopeeOrder.findMany({
       where: { userId, shopeeCreatedAt: { gte: from, lte: to } },
       select: {
         id: true, orderStatus: true, totalAmount: true, shipByDate: true,
         shippedAt: true, commissionFee: true, serviceFee: true, sellerTxnFee: true,
-        sellerIncome: true, shopeeCreatedAt: true,
+        sellerIncome: true, currency: true, shopeeCreatedAt: true,
       },
     }),
     prisma.invoice.findMany({
       where: { userId, issuedAt: { gte: from, lte: to } },
-      select: { status: true, total: true, amountPaid: true, issuedAt: true, paidAt: true },
+      select: { status: true, total: true, amountPaid: true, currency: true, issuedAt: true, paidAt: true },
     }),
     prisma.shopeeOrderItem.findMany({
       where: {
         order: { userId, orderStatus: { not: "CANCELLED" }, shopeeCreatedAt: { gte: from, lte: to } },
       },
-      select: { quantity: true, price: true },
+      select: { quantity: true, price: true, order: { select: { currency: true } } },
     }),
     prisma.product.findMany({
       where: { userId, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
@@ -70,6 +71,8 @@ export async function getExecutiveKpiForUser(
 
   const nonCancelledWms = wmsOrders.filter((o) => o.status !== "cancelled");
   const nonCancelledShopee = shopeeOrders.filter((o) => o.orderStatus !== "CANCELLED");
+  const sum = <T>(items: T[], getAmount: (item: T) => number, getCurrency: (item: T) => string | null | undefined, legacyBaseCurrency = false) =>
+    items.reduce((total, item) => total + (currency.convert(getAmount(item), getCurrency(item), legacyBaseCurrency) ?? 0), 0);
   const wmsShippedOrDelivered = nonCancelledWms.filter((o) => ["shipped", "delivered"].includes(o.status));
   const shopeeShippedOrCompleted = nonCancelledShopee.filter((o) => ["SHIPPED", "COMPLETED"].includes(o.orderStatus));
   const totalOrders = nonCancelledWms.length + nonCancelledShopee.length;
@@ -80,26 +83,32 @@ export async function getExecutiveKpiForUser(
   const slaCompliant = shopeeWithSla.filter((o) => o.shippedAt! <= o.shipByDate!).length;
   const slaRate = shopeeWithSla.length > 0 ? (slaCompliant / shopeeWithSla.length) * 100 : 100;
 
-  const wmsRevenue = nonCancelledWms.reduce((s, o) => s + o.total, 0);
-  const shopeeRevenue = nonCancelledShopee.reduce((s, o) => s + o.totalAmount, 0);
+  const wmsRevenue = sum(nonCancelledWms, (o) => o.total, (o) => o.currency, true);
+  const shopeeRevenue = sum(nonCancelledShopee, (o) => o.totalAmount, (o) => o.currency);
   const totalRevenue = wmsRevenue + shopeeRevenue;
 
   const wmsInvoicePaid = wmsInvoiceStats.filter((i) => i.status === "paid");
-  const totalPaid = wmsInvoicePaid.reduce((s, i) => s + i.amountPaid, 0);
-  const totalOutstanding = wmsInvoiceStats.filter((i) => ["sent", "overdue"].includes(i.status))
-    .reduce((s, i) => s + (i.total - i.amountPaid), 0);
+  const totalPaid = sum(wmsInvoicePaid, (i) => i.amountPaid, (i) => i.currency, true);
+  const totalOutstanding = sum(
+    wmsInvoiceStats.filter((i) => ["sent", "overdue"].includes(i.status)),
+    (i) => i.total - i.amountPaid,
+    (i) => i.currency,
+    true,
+  );
 
-  const totalExpenses = nonCancelledShopee.reduce(
-    (s, o) => s + (o.commissionFee ?? 0) + (o.serviceFee ?? 0) + (o.sellerTxnFee ?? 0),
-    0,
+  const totalExpenses = sum(
+    nonCancelledShopee,
+    (o) => (o.commissionFee ?? 0) + (o.serviceFee ?? 0) + (o.sellerTxnFee ?? 0),
+    (o) => o.currency,
   );
   const grossProfit = totalRevenue - totalExpenses;
   const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
-  const totalInventoryValue = products.reduce((s, p) => s + p.price * Number(p.quantity), 0)
-    + shopeeProducts.reduce((s, p) => s + p.price * p.stock, 0);
-  const cogs = products.reduce((s, p) => s + p.price * Number(p.quantity), 0)
-    + shopeeFeeStats.reduce((s, i) => s + i.price * i.quantity, 0);
+  const totalInventoryValue = sum(products, (p) => p.price * Number(p.quantity), () => null, true)
+    // Marketplace product prices have no persisted currency, so they cannot be safely valued.
+    + sum(shopeeProducts, (p) => p.price * p.stock, () => null);
+  const cogs = sum(products, (p) => p.price * Number(p.quantity), () => null, true)
+    + sum(shopeeFeeStats, (i) => i.price * i.quantity, (i) => i.order.currency);
   const inventoryTurnover = totalInventoryValue > 0 ? cogs / totalInventoryValue : 0;
 
   const dsoValues = wmsInvoicePaid
@@ -109,16 +118,13 @@ export async function getExecutiveKpiForUser(
     ? dsoValues.reduce((s, d) => s + d, 0) / dsoValues.length
     : 0;
 
-  const cashFlow = totalPaid + nonCancelledShopee.reduce((s, o) => s + (o.sellerIncome ?? 0), 0) - totalOutstanding;
+  const cashFlow = totalPaid
+    + sum(nonCancelledShopee, (o) => o.sellerIncome ?? 0, (o) => o.currency)
+    - totalOutstanding;
 
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-
-  const buildKpi = (current: number, prevData?: { wmsOrders: typeof wmsOrders; shopeeOrders: typeof shopeeOrders }) => {
-    if (!prevData) return kpi(current);
-    const prevWmsRev = prevData.wmsOrders.filter((o) => o.status !== "cancelled").reduce((s, o) => s + o.total, 0);
-    const prevShopeeRev = prevData.shopeeOrders.filter((o) => o.orderStatus !== "CANCELLED").reduce((s, o) => s + o.totalAmount, 0);
-    return kpi(current, prevWmsRev + prevShopeeRev);
-  };
+  const includedOrderCount = nonCancelledWms.filter((o) => currency.convert(o.total, o.currency, true) !== null).length
+    + nonCancelledShopee.filter((o) => currency.convert(o.totalAmount, o.currency) !== null).length;
+  const avgOrderValue = includedOrderCount > 0 ? totalRevenue / includedOrderCount : 0;
 
   const revenueBreakdown: ExecutiveKpiData["revenueBreakdown"] = [];
   const trendStart = new Date(from);
@@ -132,8 +138,8 @@ export async function getExecutiveKpiForUser(
     if (mStart > to) break;
     const mWms = wmsOrders.filter((o) => o.createdAt >= mStart && o.createdAt <= mEnd && o.status !== "cancelled");
     const mShopee = shopeeOrders.filter((o) => o.shopeeCreatedAt && o.shopeeCreatedAt >= mStart && o.shopeeCreatedAt <= mEnd && o.orderStatus !== "CANCELLED");
-    const mWmsRev = mWms.reduce((s, o) => s + o.total, 0);
-    const mShopeeRev = mShopee.reduce((s, o) => s + o.totalAmount, 0);
+    const mWmsRev = sum(mWms, (o) => o.total, (o) => o.currency, true);
+    const mShopeeRev = sum(mShopee, (o) => o.totalAmount, (o) => o.currency);
     revenueBreakdown.push({
       period: mStart.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
       wmsRevenue: mWmsRev,
@@ -148,6 +154,7 @@ export async function getExecutiveKpiForUser(
   ];
 
   return {
+    currency: currency.metadata(),
     period: { from: from.toISOString(), to: to.toISOString() },
     comparePeriod: { from: prevFrom.toISOString(), to: prevTo.toISOString() },
     kpis: {
@@ -157,7 +164,7 @@ export async function getExecutiveKpiForUser(
       grossMargin: kpi(grossMargin),
       cashFlow: kpi(cashFlow),
       daysSalesOutstanding: kpi(avgDso),
-      totalRevenue: buildKpi(totalRevenue),
+      totalRevenue: kpi(totalRevenue),
       totalOrders: kpi(totalOrders),
       avgOrderValue: kpi(avgOrderValue),
     },

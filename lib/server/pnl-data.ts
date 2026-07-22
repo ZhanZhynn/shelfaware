@@ -1,6 +1,6 @@
 import prisma from "@/prisma/client";
-import { logger } from "@/lib/logger";
 import type { PnlReport, PnlData, PnlMonthlyTrend } from "@/types/pnl";
+import { getFinancialCurrencyContext } from "@/lib/server/financial-currency";
 
 interface PeriodParams {
   from: Date;
@@ -52,12 +52,17 @@ function getComparePeriod(mainPeriod: PeriodParams): PeriodParams {
   };
 }
 
-async function calculatePnl(userId: string, from: Date, to: Date): Promise<PnlData> {
+async function calculatePnl(
+  userId: string,
+  from: Date,
+  to: Date,
+  currency: Awaited<ReturnType<typeof getFinancialCurrencyContext>>,
+): Promise<PnlData> {
   const [wmsOrders, shopeeOrders, wmsInvoiceStats, shopeeFeeStats, shopeeReturns, wmsReturns] =
     await Promise.all([
       prisma.order.findMany({
         where: { userId, status: { not: "cancelled" }, createdAt: { gte: from, lte: to } },
-        select: { id: true, total: true, shipping: true },
+        select: { id: true, total: true, shipping: true, currency: true },
       }),
       prisma.shopeeOrder.findMany({
         where: {
@@ -68,6 +73,7 @@ async function calculatePnl(userId: string, from: Date, to: Date): Promise<PnlDa
         select: {
           id: true,
           totalAmount: true,
+          currency: true,
           commissionFee: true,
           serviceFee: true,
           sellerTxnFee: true,
@@ -88,7 +94,7 @@ async function calculatePnl(userId: string, from: Date, to: Date): Promise<PnlDa
             shopeeCreatedAt: { gte: from, lte: to },
           },
         },
-        select: { variantId: true, productId: true, quantity: true, price: true },
+        select: { variantId: true, productId: true, quantity: true, price: true, order: { select: { currency: true } } },
       }),
       prisma.shopeeReturn.findMany({
         where: {
@@ -96,16 +102,19 @@ async function calculatePnl(userId: string, from: Date, to: Date): Promise<PnlDa
           status: "COMPLETED",
           shopeeCreatedAt: { gte: from, lte: to },
         },
-        select: { refundAmount: true },
+        select: { refundAmount: true, currency: true },
       }),
       prisma.order.findMany({
         where: { userId, paymentStatus: "refunded", createdAt: { gte: from, lte: to } },
-        select: { total: true },
+        select: { total: true, currency: true },
       }),
     ]);
 
-  const wmsRevenue = wmsOrders.reduce((s, o) => s + o.total, 0);
-  const shopeeRevenue = shopeeOrders.reduce((s, o) => s + o.totalAmount, 0);
+  const sum = <T>(items: T[], getAmount: (item: T) => number, getCurrency: (item: T) => string | null | undefined, legacyBaseCurrency = false) =>
+    items.reduce((total, item) => total + (currency.convert(getAmount(item), getCurrency(item), legacyBaseCurrency) ?? 0), 0);
+
+  const wmsRevenue = sum(wmsOrders, (o) => o.total, (o) => o.currency, true);
+  const shopeeRevenue = sum(shopeeOrders, (o) => o.totalAmount, (o) => o.currency);
 
   const productIds = [...new Set(wmsInvoiceStats.map((i) => i.productId))];
   const products = productIds.length > 0
@@ -118,21 +127,22 @@ async function calculatePnl(userId: string, from: Date, to: Date): Promise<PnlDa
 
   const wmsCogs = wmsInvoiceStats.reduce((s, i) => {
     const cost = productPriceMap.get(i.productId) ?? i.price;
-    return s + cost * i.quantity;
+    return s + (currency.convert(cost * i.quantity, null, true) ?? 0);
   }, 0);
 
-  const shopeeCogs = shopeeFeeStats.reduce((s, i) => s + i.price * i.quantity, 0);
+  const shopeeCogs = sum(shopeeFeeStats, (i) => i.price * i.quantity, (i) => i.order.currency);
 
-  const marketplaceFees = shopeeOrders.reduce(
-    (s, o) => s + (o.commissionFee ?? 0) + (o.serviceFee ?? 0) + (o.sellerTxnFee ?? 0),
-    0,
+  const marketplaceFees = sum(
+    shopeeOrders,
+    (o) => (o.commissionFee ?? 0) + (o.serviceFee ?? 0) + (o.sellerTxnFee ?? 0),
+    (o) => o.currency,
   );
 
-  const wmsShipping = wmsOrders.reduce((s, o) => s + (o.shipping ?? 0), 0);
-  const shopeeShipping = shopeeOrders.reduce((s, o) => s + (o.shippingFee ?? 0), 0);
+  const wmsShipping = sum(wmsOrders, (o) => o.shipping ?? 0, (o) => o.currency, true);
+  const shopeeShipping = sum(shopeeOrders, (o) => o.shippingFee ?? 0, (o) => o.currency);
 
-  const wmsReturnsTotal = wmsReturns.reduce((s, o) => s + o.total, 0);
-  const shopeeReturnsTotal = shopeeReturns.reduce((s, r) => s + r.refundAmount, 0);
+  const wmsReturnsTotal = sum(wmsReturns, (o) => o.total, (o) => o.currency, true);
+  const shopeeReturnsTotal = sum(shopeeReturns, (r) => r.refundAmount, (r) => r.currency);
 
   const revenue = { wms: wmsRevenue, shopee: shopeeRevenue, total: wmsRevenue + shopeeRevenue };
   const cogs = { wms: wmsCogs, shopee: shopeeCogs, total: wmsCogs + shopeeCogs };
@@ -168,10 +178,11 @@ export async function getPnlForUser(
 ): Promise<PnlReport> {
   const mainPeriod = getPeriod(period, dateFrom, dateTo);
   const comparePeriod = getComparePeriod(mainPeriod);
+  const currency = await getFinancialCurrencyContext(userId);
 
   const [current, previous] = await Promise.all([
-    calculatePnl(userId, mainPeriod.from, mainPeriod.to),
-    calculatePnl(userId, comparePeriod.from, comparePeriod.to),
+    calculatePnl(userId, mainPeriod.from, mainPeriod.to, currency),
+    calculatePnl(userId, comparePeriod.from, comparePeriod.to, currency),
   ]);
 
   const monthlyTrend: PnlMonthlyTrend[] = [];
@@ -187,7 +198,7 @@ export async function getPnlForUser(
 
     if (mStart > mainPeriod.to) break;
 
-    const mPnl = await calculatePnl(userId, mStart, mEnd);
+    const mPnl = await calculatePnl(userId, mStart, mEnd, currency);
     monthlyTrend.push({
       month: mStart.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
       revenue: mPnl.revenue.total,
@@ -198,6 +209,7 @@ export async function getPnlForUser(
   }
 
   return {
+    currency: currency.metadata(),
     period: {
       from: mainPeriod.from.toISOString(),
       to: mainPeriod.to.toISOString(),

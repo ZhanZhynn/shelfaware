@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     const dateFrom = searchParams.get("dateFrom") || undefined;
     const dateTo = searchParams.get("dateTo") || undefined;
 
-    const cacheKey = `pnl:${session.id}:${period || "default"}:${dateFrom || ""}:${dateTo || ""}`;
+    const cacheKey = `pnl:v2:${session.id}:${period || "default"}:${dateFrom || ""}:${dateTo || ""}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 

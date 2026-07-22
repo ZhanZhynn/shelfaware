@@ -21,12 +21,7 @@ import {
 import { StatisticsCard } from "./StatisticsCard";
 import { StatisticsCardSkeleton } from "./StatisticsCardSkeleton";
 import { useDashboard } from "@/hooks/queries/use-dashboard";
-
-const formatCurrency = (value: number) =>
-  `$${value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+import { formatMoney } from "@/lib/money";
 
 /**
  * StatisticsSection — 8 cards in same order and format as admin dashboard-overall-insights.
@@ -38,6 +33,7 @@ export function StatisticsSection() {
 
   const dashboardQuery = useDashboard();
   const stats = dashboardQuery.data ?? null;
+  const formatCurrency = (value: number) => formatMoney(value, stats?.currency.baseCurrency ?? "MYR");
 
   useEffect(() => {
     if (!isMountedRef.current) {

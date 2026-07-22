@@ -1,3 +1,5 @@
+import type { FinancialCurrencyMetadata } from "@/lib/server/financial-currency";
+
 export interface KpiMetric {
   value: number;
   previousValue?: number;
@@ -7,6 +9,7 @@ export interface KpiMetric {
 }
 
 export interface ExecutiveKpiData {
+  currency: FinancialCurrencyMetadata;
   period: { from: string; to: string };
   comparePeriod?: { from: string; to: string };
   kpis: {

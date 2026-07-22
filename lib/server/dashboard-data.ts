@@ -10,6 +10,7 @@ import { getCache, setCache, cacheKeys } from "@/lib/cache";
 import { prisma } from "@/prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
 import { getDemoSupplierUserId } from "@/prisma/supplier";
+import { getFinancialCurrencyContext } from "@/lib/server/financial-currency";
 import type {
   DashboardStats,
   DashboardCounts,
@@ -99,7 +100,7 @@ async function getStoreOrderIds(productOwnerUserId: string): Promise<string[]> {
 }
 
 export async function getDashboardForAdmin(userId: string): Promise<DashboardStats> {
-  const cacheKey = cacheKeys.dashboard.overview(userId);
+  const cacheKey = `${cacheKeys.dashboard.overview(userId)}:currency-v2`;
   const cached = await getCache<DashboardStats>(cacheKey);
   if (cached) return cached;
 
@@ -111,6 +112,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
 
   const since = getTwelveMonthsAgo();
   const whereUser = userScope(userId);
+  const currency = await getFinancialCurrencyContext(userId);
 
   const userProductIds = (
     await prisma.product.findMany({
@@ -146,14 +148,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     warehousesCount,
     ticketsCount,
     reviewsCount,
-    orderSum,
-    orderSumNonCancelled,
-    orderSumPending,
-    orderSumPaid,
-    orderRefundedSum,
     orderRefundedCount,
-    orderSumCancelled,
-    invoiceSum,
     ordersRaw,
     invoicesRaw,
     productsRaw,
@@ -162,13 +157,14 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     recentReviews,
     recentImports,
     orderStatusGroups,
-    topProductsRaw,
     invoiceStatusGroups,
     activeWarehousesCount,
     inactiveWarehousesCount,
     warehouseTypeGroups,
     selfInvoiceCount,
-    orderRevenueSelfSum,
+    financialOrders,
+    financialInvoices,
+    topProductItems,
   ] = await Promise.all([
     prisma.product.count({ where: mergeProductListWhere(whereUser) }),
     prisma.supplier.count({ where: whereSuppliers }),
@@ -178,47 +174,17 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     prisma.warehouse.count({ where: whereUser }),
     prisma.supportTicket.count({ where: { assignedToId: userId } }),
     prisma.productReview.count({ where: reviewWhere }),
-    prisma.order.aggregate({ where: whereStoreOrders, _sum: { total: true } }),
-    prisma.order.aggregate({
-      where: { ...whereStoreOrders, status: { not: "cancelled" } },
-      _sum: { total: true },
-    }),
-    prisma.order.aggregate({
-      where: {
-        ...whereStoreOrders,
-        status: { not: "cancelled" },
-        paymentStatus: { in: ["unpaid", "partial"] },
-      },
-      _sum: { total: true },
-    }),
-    prisma.order.aggregate({
-      where: {
-        ...whereStoreOrders,
-        status: { not: "cancelled" },
-        paymentStatus: "paid",
-      },
-      _sum: { total: true },
-    }),
-    prisma.order.aggregate({
-      where: { ...whereStoreOrders, paymentStatus: "refunded" },
-      _sum: { total: true },
-    }),
     prisma.order.count({
       where: { ...whereStoreOrders, paymentStatus: "refunded" },
     }),
-    prisma.order.aggregate({
-      where: { ...whereStoreOrders, status: "cancelled" },
-      _sum: { total: true },
-    }),
-    prisma.invoice.aggregate({ where: whereInvoiceForStore, _sum: { total: true } }),
     prisma.order.findMany({
       where: { ...whereStoreOrders, createdAt: { gte: since } },
-      select: { createdAt: true, total: true, status: true },
+      select: { createdAt: true, total: true, currency: true, status: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.invoice.findMany({
       where: { ...whereInvoiceForStore, createdAt: { gte: since } },
-      select: { createdAt: true, total: true },
+      select: { createdAt: true, total: true, currency: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.product.findMany({
@@ -235,6 +201,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
         id: true,
         orderNumber: true,
         total: true,
+        currency: true,
         status: true,
         createdAt: true,
       },
@@ -278,14 +245,6 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
       where: whereStoreOrders,
       _count: { id: true },
     }),
-    storeOrderIds.length > 0 ? prisma.orderItem.groupBy({
-      by: ["productId", "productName", "sku"],
-      where: { orderId: { in: storeOrderIds } },
-      _count: { id: true },
-      _sum: { quantity: true, subtotal: true },
-      orderBy: { _count: { id: "desc" } },
-      take: 10,
-    }) : [],
     prisma.invoice.groupBy({
       by: ["status"],
       where: whereInvoiceForStore,
@@ -302,15 +261,25 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     selfOrderIds.length > 0
       ? prisma.invoice.count({ where: { orderId: { in: selfOrderIds } } })
       : 0,
-    selfOrderIds.length > 0
-      ? prisma.order.aggregate({
-          where: {
-            id: { in: selfOrderIds },
-            status: { not: "cancelled" },
-          },
-          _sum: { total: true },
-        })
-      : { _sum: { total: null as number | null } },
+    prisma.order.findMany({
+      where: whereStoreOrders,
+      select: { id: true, userId: true, status: true, paymentStatus: true, total: true, currency: true },
+    }),
+    prisma.invoice.findMany({
+      where: whereInvoiceForStore,
+      select: { status: true, total: true, amountPaid: true, amountDue: true, currency: true },
+    }),
+    storeOrderIds.length > 0 ? prisma.orderItem.findMany({
+      where: { orderId: { in: storeOrderIds } },
+      select: {
+        productId: true,
+        productName: true,
+        sku: true,
+        quantity: true,
+        subtotal: true,
+        order: { select: { currency: true } },
+      },
+    }) : [],
   ]);
 
   const [
@@ -358,15 +327,14 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     const now = new Date();
     const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-    const [shopeeOrderCount, shopeeOrderSum, shopeeStatusGroups, shopeeNearSlaCount] =
+      const [shopeeOrderCount, shopeeOrdersForCurrency, shopeeStatusGroups, shopeeNearSlaCount] =
       await Promise.all([
         prisma.shopeeOrder.count({
           where: { shopId: { in: shopeeShopIds } },
         }),
-        prisma.shopeeOrder.aggregate({
+        prisma.shopeeOrder.findMany({
           where: { shopId: { in: shopeeShopIds } },
-          _sum: { totalAmount: true },
-          _avg: { totalAmount: true },
+          select: { totalAmount: true, currency: true },
         }),
         prisma.shopeeOrder.groupBy({
           by: ["orderStatus"],
@@ -387,10 +355,17 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
       shopeeStatusMap[s.orderStatus] = s._count;
     }
 
+    const shopeeRevenue = shopeeOrdersForCurrency.reduce(
+      (total, order) => total + (currency.convert(order.totalAmount, order.currency) ?? 0),
+      0,
+    );
+    const includedShopeeOrders = shopeeOrdersForCurrency.filter(
+      (order) => currency.convert(order.totalAmount, order.currency) !== null,
+    ).length;
     shopeeOrderAnalytics = {
       totalOrders: shopeeOrderCount,
-      totalRevenue: shopeeOrderSum._sum.totalAmount || 0,
-      averageOrderValue: shopeeOrderSum._avg.totalAmount || 0,
+      totalRevenue: shopeeRevenue,
+      averageOrderValue: includedShopeeOrders > 0 ? shopeeRevenue / includedShopeeOrders : 0,
       ordersByStatus: shopeeStatusMap,
       nearSlaCount: shopeeNearSlaCount,
     };
@@ -405,15 +380,14 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
 
   let lazadaOrderAnalytics: import("@/types").DashboardLazadaOrderAnalytics | undefined;
   if (lazadaShopIds.length > 0) {
-    const [lazadaOrderCount, lazadaOrderSum, lazadaStatusGroups] =
+    const [lazadaOrderCount, lazadaOrdersForCurrency, lazadaStatusGroups] =
       await Promise.all([
         prisma.lazadaOrder.count({
           where: { shopId: { in: lazadaShopIds } },
         }),
-        prisma.lazadaOrder.aggregate({
+        prisma.lazadaOrder.findMany({
           where: { shopId: { in: lazadaShopIds } },
-          _sum: { totalAmount: true },
-          _avg: { totalAmount: true },
+          select: { totalAmount: true, currency: true },
         }),
         prisma.lazadaOrder.groupBy({
           by: ["orderStatus"],
@@ -427,10 +401,17 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
       lazadaStatusMap[s.orderStatus] = s._count;
     }
 
+    const lazadaRevenue = lazadaOrdersForCurrency.reduce(
+      (total, order) => total + (currency.convert(order.totalAmount, order.currency) ?? 0),
+      0,
+    );
+    const includedLazadaOrders = lazadaOrdersForCurrency.filter(
+      (order) => currency.convert(order.totalAmount, order.currency) !== null,
+    ).length;
     lazadaOrderAnalytics = {
       totalOrders: lazadaOrderCount,
-      totalRevenue: lazadaOrderSum._sum.totalAmount || 0,
-      averageOrderValue: lazadaOrderSum._avg.totalAmount || 0,
+      totalRevenue: lazadaRevenue,
+      averageOrderValue: includedLazadaOrders > 0 ? lazadaRevenue / includedLazadaOrders : 0,
       ordersByStatus: lazadaStatusMap,
     };
   }
@@ -512,9 +493,21 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     reviews: reviewsCount,
   };
 
+  // WMS records without a currency predate currency support and are in the workspace base currency.
+  const orderAmount = (order: typeof financialOrders[number]) =>
+    currency.convert(order.total, order.currency, true) ?? 0;
+  const invoiceAmount = (invoice: typeof financialInvoices[number], amount: number) =>
+    currency.convert(amount, invoice.currency, true) ?? 0;
+  const sumOrders = (predicate: (order: typeof financialOrders[number]) => boolean) =>
+    financialOrders.filter(predicate).reduce((total, order) => total + orderAmount(order), 0);
+  const sumInvoices = (
+    predicate: (invoice: typeof financialInvoices[number]) => boolean,
+    amount: (invoice: typeof financialInvoices[number]) => number,
+  ) => financialInvoices.filter(predicate).reduce((total, invoice) => total + invoiceAmount(invoice, amount(invoice)), 0);
+
   const revenue: DashboardRevenue = {
-    fromOrders: Number(orderSum._sum.total ?? 0),
-    fromInvoices: Number(invoiceSum._sum.total ?? 0),
+    fromOrders: sumOrders(() => true),
+    fromInvoices: sumInvoices(() => true, (invoice) => invoice.total),
   };
 
   const months = getLast12Months();
@@ -535,7 +528,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     const cur = orderByMonth.get(key);
     if (cur) {
       cur.count += 1;
-      cur.sum += Number(o.total);
+      cur.sum += currency.convert(o.total, o.currency, true) ?? 0;
     }
   }
   for (const inv of invoicesRaw) {
@@ -544,7 +537,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     const cur = invoiceByMonth.get(key);
     if (cur) {
       cur.count += 1;
-      cur.sum += Number(inv.total);
+      cur.sum += currency.convert(inv.total, inv.currency, true) ?? 0;
     }
   }
   for (const p of productsRaw) {
@@ -574,6 +567,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
         id: o.id,
         orderNumber: o.orderNumber,
         total: Number(o.total),
+        currency: o.currency,
         status: o.status,
         createdAt: o.createdAt.toISOString(),
       }),
@@ -625,23 +619,32 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
   }
 
   // Build top products
-  const topProducts: DashboardTopProduct[] = topProductsRaw.map((p) => ({
-    productId: p.productId,
-    productName: p.productName,
-    sku: p.sku,
-    orderCount: p._count.id,
-    totalQuantity: p._sum.quantity ?? 0,
-    totalRevenue: p._sum.subtotal ?? 0,
-  }));
+  const topProductsById = new Map<string, DashboardTopProduct>();
+  for (const item of topProductItems) {
+    const current = topProductsById.get(item.productId) ?? {
+      productId: item.productId,
+      productName: item.productName,
+      sku: item.sku,
+      orderCount: 0,
+      totalQuantity: 0,
+      totalRevenue: 0,
+    };
+    current.orderCount += 1;
+    current.totalQuantity += item.quantity;
+    current.totalRevenue += currency.convert(item.subtotal, item.order.currency, true) ?? 0;
+    topProductsById.set(item.productId, current);
+  }
+  const topProducts = [...topProductsById.values()]
+    .sort((a, b) => b.orderCount - a.orderCount)
+    .slice(0, 10);
 
-  // Calculate average order value (all orders for backward compatibility)
-  const totalOrderRevenue = Number(orderSum._sum.total ?? 0);
-  const averageOrderValue =
-    ordersCount > 0 ? totalOrderRevenue / ordersCount : 0;
+  const totalOrderRevenue = sumOrders(() => true);
+  const includedOrders = financialOrders.filter((order) => currency.convert(order.total, order.currency, true) !== null).length;
+  const averageOrderValue = includedOrders > 0 ? totalOrderRevenue / includedOrders : 0;
 
-  const totalRevenueExcludingCancelled = Number(orderSumNonCancelled._sum.total ?? 0);
-  const pendingOrderAmount = Number(orderSumPending._sum.total ?? 0);
-  const paidOrderAmount = Number(orderSumPaid._sum.total ?? 0);
+  const totalRevenueExcludingCancelled = sumOrders((order) => order.status !== "cancelled");
+  const pendingOrderAmount = sumOrders((order) => order.status !== "cancelled" && ["unpaid", "partial"].includes(order.paymentStatus));
+  const paidOrderAmount = sumOrders((order) => order.status !== "cancelled" && order.paymentStatus === "paid");
 
   const orderAnalytics: DashboardOrderAnalytics = {
     statusDistribution,
@@ -651,9 +654,9 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     totalRevenueExcludingCancelled,
     pendingOrderAmount,
     paidOrderAmount,
-    refundedAmount: Number(orderRefundedSum._sum.total ?? 0),
+    refundedAmount: sumOrders((order) => order.paymentStatus === "refunded"),
     refundedCount: orderRefundedCount,
-    cancelledOrderAmount: Number(orderSumCancelled?._sum?.total ?? 0),
+    cancelledOrderAmount: sumOrders((order) => order.status === "cancelled"),
   };
 
   // Build invoice status distribution and analytics
@@ -674,24 +677,22 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     if (status in invoiceStatusDistribution) {
       invoiceStatusDistribution[status] = g._count.id;
     }
-    if (status === "paid") {
-      paidRevenue += Number(g._sum.total ?? 0);
-    } else if (status === "overdue") {
-      overdueAmount += Number(g._sum.amountDue ?? 0);
-      outstandingAmount += Number(g._sum.amountDue ?? 0);
-    } else if (status === "sent" || status === "draft") {
-      outstandingAmount += Number(g._sum.amountDue ?? 0);
-    } else if (status === "cancelled") {
-      cancelledInvoiceSum += Number(g._sum.total ?? 0);
-    }
   }
 
-  const totalInvoiceRevenue = Number(invoiceSum._sum.total ?? 0);
+  paidRevenue = sumInvoices((invoice) => invoice.status === "paid", (invoice) => invoice.total);
+  overdueAmount = sumInvoices((invoice) => invoice.status === "overdue", (invoice) => invoice.amountDue);
+  outstandingAmount = sumInvoices((invoice) => ["overdue", "sent", "draft"].includes(invoice.status), (invoice) => invoice.amountDue);
+  cancelledInvoiceSum = sumInvoices((invoice) => invoice.status === "cancelled", (invoice) => invoice.total);
+
+  const totalInvoiceRevenue = sumInvoices(() => true, (invoice) => invoice.total);
   const totalExcludingCancelled = totalInvoiceRevenue - cancelledInvoiceSum;
-  const averageInvoiceValue =
-    invoicesCount > 0 ? totalInvoiceRevenue / invoicesCount : 0;
-  const nonCancelledCount =
-    invoicesCount - (invoiceStatusDistribution.cancelled ?? 0);
+  const includedInvoiceCount = financialInvoices.filter(
+    (invoice) => currency.convert(invoice.total, invoice.currency, true) !== null,
+  ).length;
+  const averageInvoiceValue = includedInvoiceCount > 0 ? totalInvoiceRevenue / includedInvoiceCount : 0;
+  const nonCancelledCount = financialInvoices.filter(
+    (invoice) => invoice.status !== "cancelled" && currency.convert(invoice.total, invoice.currency, true) !== null,
+  ).length;
   const avgExcludingCancelled =
     nonCancelledCount > 0 ? totalExcludingCancelled / nonCancelledCount : 0;
 
@@ -721,7 +722,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
   };
 
   const selfOrderCount = selfOrderIds.length;
-  const revenueSelf = Number(orderRevenueSelfSum?._sum?.total ?? 0);
+  const revenueSelf = sumOrders((order) => order.userId === userId && order.status !== "cancelled");
   const selfOthersBreakdown: DashboardSelfOthersBreakdown = {
     orderSelfCount: selfOrderCount,
     orderOthersCount: ordersCount - selfOrderCount,
@@ -732,6 +733,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
   };
 
   const result: DashboardStats = {
+    currency: currency.metadata(),
     counts,
     revenue,
     trends,

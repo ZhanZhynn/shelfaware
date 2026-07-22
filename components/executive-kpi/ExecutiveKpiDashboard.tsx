@@ -31,10 +31,7 @@ import {
   BarChart3,
   Zap,
 } from "lucide-react";
-
-function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatMoney } from "@/lib/money";
 
 function formatNumber(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
@@ -116,12 +113,16 @@ export default function ExecutiveKpiDashboard() {
   }
 
   const { kpis, revenueBreakdown, channelSplit } = data;
+  const formatCurrency = (value: number) => formatMoney(value, data.currency.baseCurrency);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Executive KPI Dashboard</h1>
-        <p className="text-muted-foreground">Combined WMS + Shopee performance overview</p>
+        <p className="text-muted-foreground">Combined WMS + Shopee performance overview · {data.currency.baseCurrency}</p>
+        {data.currency.excludedCurrencies.length > 0 && (
+          <p className="text-xs text-amber-700">Excluded currencies without a persisted exchange rate: {data.currency.excludedCurrencies.join(", ")}</p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -172,7 +173,7 @@ export default function ExecutiveKpiDashboard() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => formatCurrency(v)} />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",

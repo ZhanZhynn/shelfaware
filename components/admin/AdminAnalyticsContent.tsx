@@ -43,10 +43,7 @@ import { ResponsiveChartContainer } from "@/components/ui/responsive-chart-conta
 import { format } from "date-fns";
 import type { DashboardStats } from "@/types";
 import ForecastingSection from "@/components/admin/ForecastingSection";
-
-function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatMoney } from "@/lib/money";
 
 export type AdminAnalyticsContentProps = {
   initialStats?: DashboardStats | null;
@@ -60,6 +57,7 @@ export default function AdminAnalyticsContent({
   const { isCheckingAuth, user } = useAuth();
   const dashboardQuery = useDashboard();
   const stats = dashboardQuery.data ?? initialStats ?? null;
+  const formatCurrency = (value: number) => formatMoney(value, stats?.currency.baseCurrency ?? "MYR");
 
   useLayoutEffect(() => {
     if (initialStats != null && user?.id) {
@@ -163,6 +161,9 @@ export default function AdminAnalyticsContent({
             products, users, suppliers, categories, orders, invoices,
             warehouses, tickets, and reviews. Store-wide metrics.
           </p>
+          {stats?.currency.excludedCurrencies.length ? (
+            <p className="text-xs text-amber-700">Excluded currencies without a persisted exchange rate: {stats.currency.excludedCurrencies.join(", ")}</p>
+          ) : null}
         </div>
 
         {/* Overview cards — max 3 per row on admin (sidebar); same height via h-full */}

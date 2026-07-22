@@ -1,3 +1,5 @@
+import type { FinancialCurrencyMetadata } from "@/lib/server/financial-currency";
+
 /**
  * Dashboard (admin overview) type definitions
  * Used by GET /api/dashboard and admin Analytics page.
@@ -33,6 +35,7 @@ export interface DashboardRecentOrder {
   id: string;
   orderNumber: string;
   total: number;
+  currency: string;
   status: string;
   createdAt: string;
 }
@@ -229,6 +232,7 @@ export interface DashboardSelfOthersBreakdown {
 }
 
 export interface DashboardStats {
+  currency: FinancialCurrencyMetadata;
   counts: DashboardCounts;
   revenue: DashboardRevenue;
   trends: DashboardTrendPoint[];

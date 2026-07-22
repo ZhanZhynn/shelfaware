@@ -1,3 +1,5 @@
+import type { FinancialCurrencyMetadata } from "@/lib/server/financial-currency";
+
 export interface PnlData {
   revenue: {
     wms: number;
@@ -30,6 +32,7 @@ export interface PnlMonthlyTrend {
 }
 
 export interface PnlReport {
+  currency: FinancialCurrencyMetadata;
   period: { from: string; to: string; label: string };
   comparePeriod?: { from: string; to: string; label: string };
   current: PnlData;

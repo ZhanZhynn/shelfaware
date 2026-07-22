@@ -39,6 +39,10 @@
     {
       "path": "/api/tiktok/sync/cron",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/exchange-rates/refresh",
+      "schedule": "15 1 * * *"
     }
   ]
 }

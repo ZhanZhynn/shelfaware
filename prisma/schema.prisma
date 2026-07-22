@@ -329,6 +329,8 @@ model Workspace {
   id String @id @default(auto()) @map("_id") @db.ObjectId
   name String
   ownerId String @db.ObjectId
+  baseCurrency String @default("MYR")
+  locale String @default("en-MY")
   createdAt DateTime @default(now()) @db.Date
   updatedAt DateTime? @db.Date
   owner User @relation("WorkspaceOwner", fields: [ownerId], references: [id])
@@ -395,6 +397,9 @@ model SourcingCase {
   specifications String?
   referenceUrl String?
   notes String?
+  requestedQuantity Int?
+  targetUnitPriceMyr Float?
+  selectedQuoteId String? @db.ObjectId
   route String @default("yiwu")
   stage String @default("draft")
   version Int @default(1)
@@ -424,6 +429,13 @@ model SourcingQuote {
   currency String @default("CNY")
   items Json
   unitPriceRmb Float?
+  unitPriceMyr Float?
+  fxRate Float?
+  fxRateDate DateTime? @db.Date
+  fxProvider String?
+  fxOverriddenById String? @db.ObjectId
+  fxOverrideReason String?
+  approvedAt DateTime? @db.Date
   moq Int?
   unitsPerCarton Int?
   cartonDimensions String?
@@ -959,6 +971,11 @@ model PurchaseOrder {
   workspaceId   String?   @db.ObjectId
   status        String    @default("draft") // draft, pending_approval, approved, rejected, ordered, shipped, received, cancelled
   totalAmount   Float     @default(0)
+  currency      String    @default("MYR")
+  convertedTotalMyr Float?
+  fxRate Float?
+  fxRateDate DateTime? @db.Date
+  fxProvider String?
   notes         String?
   trackingNumber  String?
   trackingCarrier String?
@@ -985,6 +1002,19 @@ model PurchaseOrder {
   @@index([status])
   @@index([createdAt])
   @@index([workspaceId])
+}
+
+model ExchangeRate {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  baseCurrency String
+  quoteCurrency String
+  rate Float
+  provider String
+  rateDate DateTime @db.Date
+  fetchedAt DateTime @db.Date
+
+  @@unique([baseCurrency, quoteCurrency])
+  @@index([fetchedAt])
 }
 
 model PurchaseOrderItem {

@@ -82,8 +82,18 @@ describe("sourcing workflow semantics", () => {
         workspaceId: "w",
         title: "Case",
         referenceUrl: "",
+        requestedQuantity: "25",
+        targetUnitPriceMyr: "8.5",
       }).referenceUrl,
     ).toBeUndefined();
+    expect(
+      sourcingCaseSchema.parse({
+        workspaceId: "w",
+        title: "Case",
+        requestedQuantity: "25",
+        targetUnitPriceMyr: "8.5",
+      }),
+    ).toMatchObject({ requestedQuantity: 25, targetUnitPriceMyr: 8.5 });
     expect(
       sourcingCommandSchema.safeParse({ action: "reject", version: 1 }).success,
     ).toBe(false);
@@ -94,5 +104,12 @@ describe("sourcing workflow semantics", () => {
         reason: "Supplier unavailable",
       }).success,
     ).toBe(true);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "approve",
+        version: 1,
+        fxRateOverride: 0.61,
+      }).success,
+    ).toBe(false);
   });
 });

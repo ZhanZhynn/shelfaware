@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Truck, FileText, ExternalLink } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-500/15 text-gray-700",
@@ -33,10 +34,6 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 function formatDate(value?: string) {
   return value ? new Date(value).toLocaleDateString() : "—";
 }
@@ -46,6 +43,12 @@ interface PO {
   poNumber: string;
   status: string;
   totalAmount: number;
+  currency?: string;
+  myrEstimate?: number;
+  estimateKind?: "locked" | "current";
+  estimateRate?: number;
+  estimateRateDate?: string;
+  estimateProvider?: string;
   notes?: string;
   trackingNumber?: string;
   trackingCarrier?: string;
@@ -175,14 +178,28 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
               <Link href={`${poDetailBase}/${selected.id}`} className="text-sky-600 underline font-medium">{selected.poNumber}</Link>
               <Badge className={STATUS_COLORS[selected.status] || ""}>{STATUS_LABELS[selected.status] || selected.status}</Badge>
               <span className="text-sm text-muted-foreground">{selected.supplier?.name || "—"}</span>
-              <span className="text-sm text-muted-foreground">{formatCurrency(selected.totalAmount)}</span>
+               <span className="text-sm text-muted-foreground">{formatMoney(selected.totalAmount, selected.currency || "MYR")}</span>
             </div>
 
-            <div className="grid gap-3 text-sm sm:grid-cols-2">
+             <div className="grid gap-3 text-sm sm:grid-cols-2">
               <p><b>Created:</b> {formatDate(selected.createdAt)}</p>
               {selected.orderedAt && <p><b>Ordered:</b> {formatDate(selected.orderedAt)}</p>}
               {selected.shippedAt && <p><b>Shipped:</b> {formatDate(selected.shippedAt)}</p>}
-            </div>
+             </div>
+
+             {selected.myrEstimate != null && selected.currency === "CNY" && (
+               <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950/20">
+                 <p className="font-medium">Estimated in MYR</p>
+                 <p className="mt-1 text-lg font-semibold">{formatMoney(selected.myrEstimate, "MYR")}</p>
+                 <p className="mt-1 text-muted-foreground">
+                   1 CNY = {selected.estimateRate?.toFixed(5)} MYR
+                   {selected.estimateRateDate ? ` · Rate date: ${formatDate(selected.estimateRateDate)}` : ""}
+                 </p>
+                 <p className="text-xs text-muted-foreground">
+                   {selected.estimateKind === "locked" ? "Locked at quote approval." : "Latest daily estimate; supplier purchase order remains denominated in CNY."}
+                 </p>
+               </div>
+             )}
 
             {(selected.trackingNumber || selected.trackingCarrier || selected.shippedAt) && !editingTracking && (
               <div className="rounded-lg border p-3 space-y-1 text-sm">
@@ -270,8 +287,8 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
                     <span className="font-medium">{item.productName}</span>
                     <span className="text-muted-foreground">{item.sku || "—"}</span>
                     <span className="text-right">{item.quantity}</span>
-                    <span className="text-right">{formatCurrency(item.unitCost)}</span>
-                    <span className="text-right font-medium">{formatCurrency(item.subtotal)}</span>
+                     <span className="text-right">{formatMoney(item.unitCost, selected.currency || "MYR")}</span>
+                     <span className="text-right font-medium">{formatMoney(item.subtotal, selected.currency || "MYR")}</span>
                   </div>
                 ))}
               </div>

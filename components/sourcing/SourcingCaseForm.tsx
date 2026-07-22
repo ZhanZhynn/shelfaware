@@ -112,8 +112,10 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
             )}
             {field("size", "Size")}
             {field("material", "Material")}
-            {field("variant", "Variant")}
-            {field("referenceUrl", "Reference URL", "https://")}
+             {field("variant", "Variant")}
+             {field("requestedQuantity", "Requested quantity", "number")}
+             {field("targetUnitPriceMyr", "Target unit cost (RM)", "number")}
+             {field("referenceUrl", "Reference URL", "https://")}
           </CardContent>
         </Card>
         <Card>

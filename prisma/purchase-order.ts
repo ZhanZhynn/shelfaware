@@ -75,6 +75,7 @@ export async function createPurchaseOrder(
   data: {
     supplierId: string;
     notes?: string;
+    currency?: string;
     items: { productId: string; productName: string; sku?: string; quantity: number; unitCost: number }[];
     workspaceId?: string;
   },
@@ -97,6 +98,7 @@ export async function createPurchaseOrder(
       workspaceId: data.workspaceId,
       status: "draft",
       totalAmount,
+      currency: data.currency || "MYR",
       notes: data.notes,
       createdBy: userId,
       items: {

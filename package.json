@@ -25,7 +25,9 @@
     "script:backfill-order-stock": "tsx scripts/backfill-order-stock.ts",
     "script:check-order-stock": "tsx scripts/check-order-product-stock.ts",
     "script:fix-product2-stock": "tsx scripts/fix-product2-stock.ts",
-    "script:migrate-product-sku-index": "tsx scripts/migrate-product-sku-index.ts"
+    "script:migrate-product-sku-index": "tsx scripts/migrate-product-sku-index.ts",
+    "script:migrate-currency-default": "tsx scripts/migrate-currency-default.ts",
+    "script:backfill-sourcing-po-currency": "tsx scripts/backfill-sourcing-po-currency.ts"
   },
   "dependencies": {
     "@congminh1254/shopee-sdk": "^1.13.0",

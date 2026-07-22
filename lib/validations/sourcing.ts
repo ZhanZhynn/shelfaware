@@ -36,6 +36,8 @@ export const sourcingCaseSchema = z.object({
   specifications: optionalText(4000),
   referenceUrl: optionalHttpUrl,
   notes: optionalText(4000),
+  requestedQuantity: optionalNumber(z.coerce.number().int().positive()),
+  targetUnitPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
   route: z.enum(["yiwu", "other"]).default("yiwu"),
   assignedToId: z.string().min(1).optional().nullable(),
 });
@@ -72,6 +74,9 @@ export const sourcingCommandSchema = z
     ]),
     version: z.number().int().positive(),
     assigneeId: z.string().min(1).optional(),
+    quoteId: z.string().min(1).optional(),
+    fxRateOverride: z.coerce.number().positive().optional(),
+    fxOverrideReason: z.string().trim().min(1).max(500).optional(),
     quote: sourcingQuoteSchema.optional(),
     reason: z.string().trim().min(1).max(2000).optional(),
   })
@@ -84,6 +89,13 @@ export const sourcingCommandSchema = z
         code: z.ZodIssueCode.custom,
         path: ["reason"],
         message: "A reason is required",
+      });
+    }
+    if (value.fxRateOverride && !value.fxOverrideReason?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fxOverrideReason"],
+        message: "An exchange-rate override reason is required",
       });
     }
   });

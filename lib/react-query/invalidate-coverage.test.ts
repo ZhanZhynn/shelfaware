@@ -80,6 +80,7 @@ const API_WRITE_ROUTE_INVALIDATION_SPEC: Record<string, readonly string[]> = {
   "app/api/receiving/route.ts": ["invalidateAllServerCaches"],
   "app/api/sourcing/cases/route.ts": ["invalidateAllServerCaches"],
   "app/api/sourcing/cases/[id]/commands/route.ts": ["invalidateAllServerCaches"],
+  "app/api/exchange-rates/refresh/route.ts": ["invalidateAllServerCaches"],
 };
 
 /** Update mutations must refresh the open detail view (setQueryData or invalidateQueries on detail) */

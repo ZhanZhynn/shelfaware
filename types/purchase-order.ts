@@ -29,6 +29,8 @@ export interface PurchaseOrder {
   workspaceId?: string | null;
   status: PurchaseOrderStatus;
   totalAmount: number;
+  currency?: string;
+  convertedTotalMyr?: number | null;
   notes?: string;
   trackingNumber?: string;
   trackingCarrier?: string;
@@ -50,6 +52,7 @@ export interface PurchaseOrder {
 
 export interface CreatePurchaseOrderInput {
   supplierId: string;
+  currency?: string;
   notes?: string;
   items: {
     productId: string;

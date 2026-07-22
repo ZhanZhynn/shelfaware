@@ -11,10 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Truck, Package, FileText } from "lucide-react";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/types/purchase-order";
-
-function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatMoney } from "@/lib/money";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-500/15 text-gray-700",
@@ -129,7 +126,8 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
         <CardHeader><CardTitle>Details</CardTitle></CardHeader>
         <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
           <p><b>Supplier:</b> {order.supplierName || "—"}</p>
-          <p><b>Total:</b> {formatCurrency(order.totalAmount)}</p>
+           <p><b>Total:</b> {formatMoney(order.totalAmount, order.currency || "MYR")}</p>
+           {order.convertedTotalMyr != null && order.currency !== "MYR" && <p><b>MYR estimate:</b> {formatMoney(order.convertedTotalMyr, "MYR")}</p>}
           <p><b>Created:</b> {formatDate(order.createdAt)}</p>
           <p><b>Ordered:</b> {formatDate(order.orderedAt)}</p>
           {order.shippedAt && <p><b>Shipped:</b> {formatDate(order.shippedAt)}</p>}
@@ -240,8 +238,8 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
                   <span className="font-medium">{item.productName}</span>
                   <span className="text-muted-foreground">{item.sku || "—"}</span>
                   <span className="text-right">{item.quantity}</span>
-                  <span className="text-right">{formatCurrency(item.unitCost)}</span>
-                  <span className="text-right font-medium">{formatCurrency(item.subtotal)}</span>
+                   <span className="text-right">{formatMoney(item.unitCost, order.currency || "MYR")}</span>
+                   <span className="text-right font-medium">{formatMoney(item.subtotal, order.currency || "MYR")}</span>
                 </div>
               ))}
             </div>

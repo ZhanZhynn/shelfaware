@@ -10,10 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Plus, Eye, Trash2, Check, X, ClipboardList } from "lucide-react";
 import type { PurchaseOrder } from "@/types/purchase-order";
-
-function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatMoney } from "@/lib/money";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-500/15 text-gray-700",
@@ -63,7 +60,7 @@ export default function PurchaseOrderList() {
     draft: orders.filter((o: PurchaseOrder) => o.status === "draft").length,
     pendingApproval: orders.filter((o: PurchaseOrder) => o.status === "pending_approval").length,
     approved: orders.filter((o: PurchaseOrder) => o.status === "approved").length,
-    totalValue: orders.reduce((s: number, o: PurchaseOrder) => s + (o.totalAmount as number), 0),
+     totalValue: orders.reduce((s: number, o: PurchaseOrder) => s + (o.currency === "MYR" || !o.currency ? o.totalAmount : (o.convertedTotalMyr || 0)), 0),
   };
 
   return (
@@ -95,7 +92,7 @@ export default function PurchaseOrderList() {
         <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Total Value</p>
-            <p className="text-2xl font-bold">{formatCurrency(stats.totalValue)}</p>
+             <p className="text-2xl font-bold">{formatMoney(stats.totalValue, "MYR")}</p>
           </CardContent>
         </Card>
       </div>
@@ -149,7 +146,8 @@ export default function PurchaseOrderList() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <p className="font-bold">{formatCurrency(order.totalAmount as number)}</p>
+                    <p className="font-bold">{formatMoney(order.totalAmount, order.currency || "MYR")}</p>
+                    {order.convertedTotalMyr != null && order.currency !== "MYR" && <p className="text-xs text-muted-foreground">≈ {formatMoney(order.convertedTotalMyr, "MYR")}</p>}
                     <div className="flex items-center gap-1">
                       <Button variant="ghost" size="icon" className="h-8 w-8" title="View" asChild>
                         <Link href={`/admin/purchase-orders/${order.id}`}><Eye className="h-4 w-4" /></Link>

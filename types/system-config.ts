@@ -116,10 +116,10 @@ export const DEFAULT_CONFIGS: Omit<
   },
   {
     key: "currency",
-    value: "USD",
+    value: "MYR",
     type: "string",
     label: "Currency",
-    description: "Default currency for prices and transactions",
+    description: "Default currency for prices and transactions (MYR)",
     category: "payment",
     isPublic: true,
   },

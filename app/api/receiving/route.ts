@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       if (!warehouse) throw new SourcingAccessError("Warehouse not found", 404);
       const po = poId ? await tx.purchaseOrder.findUnique({ where: { id: poId }, include: { items: true, sourcingOrder: true } }) : null;
       if (poId && !po) throw new SourcingAccessError("Purchase order not found", 404);
-      if (po && !["approved", "ordered"].includes(po.status)) throw new SourcingAccessError(`PO must be approved or ordered to receive (current: ${po.status})`, 409);
+       if (po && !["approved", "ordered", "shipped"].includes(po.status)) throw new SourcingAccessError(`PO must be approved, ordered, or shipped to receive (current: ${po.status})`, 409);
       if (po?.workspaceId) {
         await requireWorkspaceRole(user, po.workspaceId, ["admin", "warehouse"]);
         if (warehouse.workspaceId !== po.workspaceId) throw new SourcingAccessError("Warehouse must belong to the purchase order workspace", 400);

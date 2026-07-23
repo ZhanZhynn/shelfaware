@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:invalidate": "vitest run lib/react-query/invalidate-coverage.test.ts",
+    "test:e2e": "playwright test",
     "prisma": "prisma",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -99,6 +100,7 @@
     "zustand": "^5.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/exceljs": "^0.5.3",
     "@types/js-cookie": "^3.0.6",

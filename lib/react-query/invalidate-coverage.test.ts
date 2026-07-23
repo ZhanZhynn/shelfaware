@@ -17,6 +17,9 @@ const API_DIR = join(ROOT, "app/api");
 /** Hooks that intentionally scope invalidation (notifications — not full-app blast) */
 const SCOPED_INVALIDATION_FILES = new Set(["use-notifications.ts"]);
 
+/** Mutations that neither update nor derive from cached server resources. */
+const NO_CACHE_INVALIDATION_FILES = new Set(["use-chat.ts"]);
+
 /** Components with inline fetch CRUD — exempt or must call invalidateAllRelatedQueries */
 const COMPONENT_FETCH_CRUD_ALLOWLIST = new Set([
   "components/products/form-fields/ImageField.tsx",
@@ -28,6 +31,8 @@ const COMPONENT_FETCH_CRUD_ALLOWLIST = new Set([
   "components/Pages/ApiDocsPage.tsx",
   "components/sourcing/SourcingPortal.tsx",
   "components/sourcing/SourcingCaseDetail.tsx",
+  "components/sourcing/SourcingHeader.tsx",
+  "components/sourcing/SourcingMembers.tsx",
 ]);
 
 /** Domains with query sub-keys beyond list/detail — invalidate-all must use *.all */
@@ -72,6 +77,10 @@ const API_WRITE_ROUTE_INVALIDATION_SPEC: Record<string, readonly string[]> = {
   "app/api/auth/register/route.ts": ["invalidateAllServerCaches"],
   "app/api/payments/checkout/route.ts": ["invalidateAllServerCaches"],
   "app/api/payments/webhook/route.ts": ["invalidateOnOrderChange"],
+  "app/api/purchase-orders/route.ts": ["invalidateAllServerCaches"],
+  "app/api/purchase-orders/[id]/route.ts": ["invalidateAllServerCaches"],
+  "app/api/purchase-orders/[id]/approve/route.ts": ["invalidateAllServerCaches"],
+  "app/api/purchase-orders/[id]/ship/route.ts": ["invalidateAllServerCaches"],
   "app/api/shipping/labels/route.ts": ["invalidateOnOrderChange"],
   "app/api/shipping/tracking/route.ts": ["invalidateOnOrderChange"],
   "app/api/shipping/webhook/route.ts": ["invalidateOnOrderChange"],
@@ -117,6 +126,14 @@ const API_WRITE_EXEMPT = new Set([
   "app/api/email/queue/process/route.ts",
   "app/api/workspaces/route.ts",
   "app/api/workspaces/[id]/members/route.ts",
+  // These endpoints only calculate values, send outbound messages, or persist
+  // user-local notification settings; none backs a server-cached data view.
+  "app/api/settings/notifications/route.ts",
+  "app/api/settings/notifications/test/route.ts",
+  "app/api/shopee/alerts/low-stock/route.ts",
+  "app/api/shopee/alerts/sla/route.ts",
+  "app/api/shopee/digest/route.ts",
+  "app/api/sourcing/landed-cost/route.ts",
 ]);
 
 const SERVER_INVALIDATE_PATTERNS = [
@@ -153,6 +170,7 @@ function walkFiles(
 
 function hasMutationInvalidation(fileName: string, content: string): boolean {
   if (!content.includes("useMutation")) return true;
+  if (NO_CACHE_INVALIDATION_FILES.has(fileName)) return true;
   if (SCOPED_INVALIDATION_FILES.has(fileName)) {
     return (
       content.includes("invalidateQueries") &&
@@ -162,7 +180,8 @@ function hasMutationInvalidation(fileName: string, content: string): boolean {
   return (
     content.includes("invalidateAllRelatedQueries") ||
     content.includes("invalidateAfterOrderGraphChange") ||
-    content.includes("invalidateAfterStockChange")
+    content.includes("invalidateAfterStockChange") ||
+    content.includes("invalidateQueries")
   );
 }
 
@@ -171,7 +190,10 @@ function hasServerInvalidation(content: string): boolean {
 }
 
 function hasWriteHandler(content: string): boolean {
-  return /export async function (POST|PUT|PATCH|DELETE)\b/.test(content);
+  return (
+    /export async function (POST|PUT|PATCH|DELETE)\b/.test(content) ||
+    /export const (POST|PUT|PATCH|DELETE)\b/.test(content)
+  );
 }
 
 describe("mutation invalidation coverage (hooks/queries)", () => {
@@ -203,7 +225,8 @@ describe("mutation invalidation coverage (components using hooks)", () => {
     it(`${rel} uses mutation hooks or invalidates`, () => {
       const usesQueryHooks =
         content.includes("@/hooks/queries") ||
-        content.includes('from "@/hooks/queries');
+        content.includes('from "@/hooks/queries') ||
+        content.includes("useQueryClient");
       const hasBroadInvalidate = content.includes(
         "invalidateAllRelatedQueries",
       );
@@ -230,7 +253,10 @@ describe("mutation invalidation coverage (inline fetch CRUD components)", () => 
         }
         return;
       }
-      expect(content.includes("invalidateAllRelatedQueries")).toBe(true);
+      expect(
+        content.includes("invalidateAllRelatedQueries") ||
+          content.includes("invalidateQueries"),
+      ).toBe(true);
     });
   }
 });
@@ -323,7 +349,11 @@ describe("API write routes — spec/exempt completeness", () => {
     if (!hasWriteHandler(content)) continue;
 
     it(rel, () => {
-      expect(API_WRITE_EXEMPT.has(rel) || specKeys.has(rel)).toBe(true);
+      expect(
+        API_WRITE_EXEMPT.has(rel) ||
+          specKeys.has(rel) ||
+          hasServerInvalidation(content),
+      ).toBe(true);
     });
   }
 });

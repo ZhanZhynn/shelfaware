@@ -8,6 +8,7 @@ import {
   authorizePurchaseOrder,
 } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 export async function GET(
   request: NextRequest,
@@ -29,6 +30,7 @@ export async function GET(
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 });
     }
 
+    void invalidateAllServerCaches();
     return NextResponse.json(data);
   } catch (error) {
     logger.error("Error fetching purchase order:", error);
@@ -102,6 +104,7 @@ export async function DELETE(
       );
     }
 
+    void invalidateAllServerCaches();
     return NextResponse.json({ success: true });
   } catch (error) {
     logger.error("Error deleting purchase order:", error);

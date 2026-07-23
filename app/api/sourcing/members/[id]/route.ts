@@ -4,6 +4,7 @@ import { prisma } from "@/prisma/client";
 import { ensureWorkspaceAdminRetention, requireGlobalAdmin, SourcingAccessError, withWorkspaceAdminGuard } from "@/lib/sourcing/auth";
 import { activeAssignedCasesWhere } from "@/lib/sourcing/active-cases";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -21,6 +22,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       if (activeCases) await tx.sourcingCase.updateMany({ where: activeAssignedCasesWhere(current.workspaceId, current.userId), data: { assignedToId: null, updatedAt: new Date() } });
       await tx.workspaceMember.delete({ where: { id } });
     });
+    void invalidateAllServerCaches();
     return NextResponse.json({ status: "removed" });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to remove sourcer" }, { status: error instanceof SourcingAccessError ? error.status : 500 }); }
 }

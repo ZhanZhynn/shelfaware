@@ -6,6 +6,7 @@ import { authorizePurchaseOrder } from "@/prisma/purchase-order";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
 import { completeSourcingSla } from "@/lib/sourcing/sla";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 const json = (value: unknown) =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -89,6 +90,7 @@ export async function POST(
       logger.error("[Ship] Failed to create sourcing event", eventError);
     }
 
+    void invalidateAllServerCaches();
     return NextResponse.json({
       ...order,
       supplierName: order.supplier.name,
@@ -177,6 +179,7 @@ export async function PUT(
       logger.error("[Ship] Failed to create sourcing event", eventError);
     }
 
+    void invalidateAllServerCaches();
     return NextResponse.json({
       ...order,
       supplierName: order.supplier.name,
@@ -258,6 +261,7 @@ export async function PATCH(
       logger.error("[Ship] Failed to create sourcing event", eventError);
     }
 
+    void invalidateAllServerCaches();
     return NextResponse.json({
       ...order,
       supplierName: order.supplier.name,

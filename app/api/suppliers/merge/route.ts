@@ -4,6 +4,7 @@ import { prisma } from "@/prisma/client";
 import { createAuditLog } from "@/prisma/audit-log";
 import { requireGlobalAdmin, SourcingAccessError } from "@/lib/sourcing/auth";
 import { z } from "zod";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 const bodySchema = z.object({ sourceId: z.string().min(1), targetId: z.string().min(1) }).refine(({ sourceId, targetId }) => sourceId !== targetId, { message: "Source and target must differ" });
 
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
       return { products: products.count, sourcingQuotes: quotes.count, purchaseOrders: purchaseOrders.count, supportTickets: tickets.count, evaluations: evaluations.count };
     });
     createAuditLog({ userId: session.id, action: "update", entityType: "supplier", entityId: sourceId, details: { operation: "merge", targetId, ...result } }).catch(() => {});
+    void invalidateAllServerCaches();
     return NextResponse.json({ success: true, sourceId, targetId, migrated: result });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Supplier merge failed" }, { status: error instanceof SourcingAccessError ? error.status : 500 });

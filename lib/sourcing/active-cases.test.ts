@@ -7,7 +7,7 @@ describe("activeAssignedCasesWhere", () => {
       workspaceId: "workspace",
       assignedToId: "sourcer",
       archivedAt: null,
-      stage: { notIn: ["ordered", "rejected", "cannot_source"] },
+      stage: { notIn: ["ordered", "shipped", "received", "rejected", "cannot_source"] },
     });
   });
 });

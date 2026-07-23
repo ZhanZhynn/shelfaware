@@ -16,11 +16,11 @@ describe("logger production 4xx guard", () => {
     vi.resetModules();
     captureException.mockClear();
     captureMessage.mockClear();
-    process.env.NODE_ENV = "production";
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
   });
 
   afterEach(() => {
-    process.env.NODE_ENV = originalEnv;
+    (process.env as Record<string, string | undefined>).NODE_ENV = originalEnv;
   });
 
   it("skips Sentry for 400 Axios errors", async () => {

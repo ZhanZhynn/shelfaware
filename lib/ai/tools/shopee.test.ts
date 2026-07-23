@@ -206,7 +206,7 @@ describe("getShopeeProducts handler", () => {
     const result = await getHandler("getShopeeProducts")({ lowStockThreshold: 10 }, session);
     expect(result.ok).toBe(true);
     expect(result.data).toMatchObject({ count: 1 });
-    expect((result.data as { products: { name: string }[] }).products[0].name).toBe("Low");
+    expect((result.data as { products: { name: string }[] }).products[0]?.name).toBe("Low");
   });
 
   it("filters by variant SKU when sku param provided", async () => {
@@ -231,7 +231,7 @@ describe("getShopeeProducts handler", () => {
     const result = await getHandler("getShopeeProducts")({ sku: "TEE-RED-S" }, session);
     expect(result.ok).toBe(true);
     expect(result.data).toMatchObject({ count: 1 });
-    expect((result.data as { products: { variants: { modelSku: string }[] }[] }).products[0].variants[0].modelSku).toBe("TEE-RED-S");
+    expect((result.data as { products: { variants: { modelSku: string }[] }[] }).products[0]?.variants[0]?.modelSku).toBe("TEE-RED-S");
   });
 });
 

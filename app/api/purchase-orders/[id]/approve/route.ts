@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { approvePurchaseOrder, authorizePurchaseOrder } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 export async function POST(
   request: NextRequest,
@@ -41,6 +42,7 @@ export async function POST(
       );
     }
 
+    void invalidateAllServerCaches();
     return NextResponse.json(data);
   } catch (error) {
     logger.error("Error approving purchase order:", error);

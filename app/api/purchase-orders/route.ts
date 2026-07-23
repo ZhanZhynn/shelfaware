@@ -9,6 +9,7 @@ import {
 import { logger } from "@/lib/logger";
 import { prisma } from "@/prisma/client";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 export async function GET(request: NextRequest) {
   const rateLimitResponse = await withRateLimit(request, defaultRateLimits.standard);
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
 
     if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin"]);
     const data = await createPurchaseOrder(session.id, { supplierId, notes, items, workspaceId });
+    void invalidateAllServerCaches();
     return NextResponse.json(data, { status: 201 });
   } catch (error) {
     logger.error("Error creating purchase order:", error);

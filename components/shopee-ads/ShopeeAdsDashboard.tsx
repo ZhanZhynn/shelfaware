@@ -42,9 +42,10 @@ import {
 } from "lucide-react";
 import type { KpiMetric } from "@/types/executive-kpi";
 import { useToast } from "@/hooks/use-toast";
+import { formatMoney } from "@/lib/money";
 
 function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(value, "MYR");
 }
 
 function formatNumber(value: number): string {
@@ -261,7 +262,7 @@ export default function ShopeeAdsDashboard() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${formatMoney(Number(v) / 1000, "MYR")}k`} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "hsl(var(--card))",
@@ -288,7 +289,7 @@ export default function ShopeeAdsDashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topCampaigns} layout="vertical" margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                  <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `${formatMoney(Number(v) / 1000, "MYR")}k`} />
                   <YAxis
                     type="number"
                     dataKey="campaignId"

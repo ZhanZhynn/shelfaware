@@ -17,11 +17,11 @@
 
 ## Test Coverage
 
-- [ ] Add Playwright browser coverage for sourcing request, multi-offer comparison, approval, PO creation, shipment, and receipt.
+- [x] Add Playwright browser coverage for sourcing request, multi-offer comparison, approval, PO creation, shipment, and receipt.
 - [ ] Add browser coverage for comments, mentions, attachments, notifications, and SLA reminders.
-- [ ] Add payment integration coverage for MYR checkout and webhook currency/amount validation.
+- [x] Add payment integration coverage for MYR checkout and webhook currency/amount validation.
 - [ ] Add MongoDB integration coverage for sourcing transactions, concurrent edits, and receipt idempotency.
-- [ ] Resolve existing repository-wide invalidation coverage and unrelated TypeScript test failures so the full test suite passes.
+- [x] Resolve existing repository-wide invalidation coverage and unrelated TypeScript test failures so the full test suite passes.
 
 ## Production Rollout
 

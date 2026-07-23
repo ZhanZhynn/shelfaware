@@ -159,6 +159,26 @@ Default scripts:
 | Build  | `npm run build` | Prisma generate + production build |
 | Start  | `npm run start` | Production server                  |
 | Lint   | `npm run lint`  | ESLint                             |
+| Unit tests | `npm test` | Vitest unit and route tests |
+| Browser tests | `npm run test:e2e` | Opt-in Playwright sourcing flow |
+
+### Browser Sourcing Test
+
+The Playwright sourcing test is intentionally opt-in and skips successfully unless all of the following are set. It mutates an isolated, seeded workspace; never point it at production.
+
+```bash
+npx playwright install chromium
+E2E_BASE_URL=http://127.0.0.1:3000 \
+E2E_STORAGE_STATE=/absolute/path/to/admin-storage-state.json \
+E2E_SOURCING_WORKSPACE_ID=<workspace-id> \
+E2E_SOURCING_CASE_ID=<quoted-case-with-two-offers> \
+E2E_RECEIVING_WAREHOUSE_ID=<warehouse-id> \
+E2E_RECEIVING_PRODUCT_ID=<product-id> \
+E2E_RECEIVING_PO_ITEM_ID=<po-item-id> \
+npm run test:e2e
+```
+
+The seeded case must be in the `quoted` stage with a selected submitted offer, a fresh CNY-to-MYR exchange rate, and an authenticated workspace admin. The test approves the offer, creates and ships the purchase order, records one accepted unit, and asserts the case reaches `received`.
 
 ---
 

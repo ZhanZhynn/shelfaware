@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 const templateData = z.object({ title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).optional().nullable(), size: z.string().trim().max(200).optional().nullable(), material: z.string().trim().max(200).optional().nullable(), variant: z.string().trim().max(200).optional().nullable(), specifications: z.string().trim().max(4000).optional().nullable(), requestedQuantity: z.number().int().positive().optional().nullable(), targetUnitPriceMyr: z.number().nonnegative().optional().nullable(), route: z.enum(["yiwu", "other"]).optional() });
 const createSchema = z.object({ workspaceId: z.string().min(1), name: z.string().trim().min(1).max(100), data: templateData });
@@ -23,6 +24,8 @@ export async function POST(request: NextRequest) {
     const user = await getSessionFromRequest(request); if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const input = createSchema.parse(await request.json());
     await requireWorkspaceRole(user, input.workspaceId, ["admin", "sourcer"]);
-    return NextResponse.json(await prisma.sourcingTemplate.create({ data: { ...input, createdById: user.id } }), { status: 201 });
+    const template = await prisma.sourcingTemplate.create({ data: { ...input, createdById: user.id } });
+    void invalidateAllServerCaches();
+    return NextResponse.json(template, { status: 201 });
   } catch (error) { return failure(error); }
 }

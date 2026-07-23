@@ -5,6 +5,7 @@ import { prisma } from "@/prisma/client";
 import { createAuditLog } from "@/prisma/audit-log";
 import { generateAndUploadQRCode } from "@/lib/imagekit";
 import { z } from "zod";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 const createWmsProductSchema = z.object({
   shopeeProductId: z.string().min(1, "Shopee product ID is required"),
@@ -259,6 +260,7 @@ export async function POST(request: NextRequest) {
       skipped,
     });
 
+    void invalidateAllServerCaches();
     return NextResponse.json(
       {
         products: created.map((c) => c.product),
@@ -339,6 +341,7 @@ async function handleBulkCreate(body: unknown, userId: string) {
     skipped: totalSkipped,
   });
 
+  if (totalCreated > 0) void invalidateAllServerCaches();
   return NextResponse.json(
     {
       created: totalCreated,

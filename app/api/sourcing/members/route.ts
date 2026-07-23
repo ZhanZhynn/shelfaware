@@ -6,6 +6,7 @@ import { prisma } from "@/prisma/client";
 import { ensureWorkspaceAdminRetention, requireGlobalAdmin, SourcingAccessError, withWorkspaceAdminGuard } from "@/lib/sourcing/auth";
 import { normalizeInvitationEmail, hashInvitationToken, sendWorkspaceInvitation } from "@/lib/sourcing/invitations";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 const addSchema = z.object({ workspaceId: z.string().regex(/^[a-f\d]{24}$/i), email: z.string().email().max(254), name: z.string().trim().max(120).optional(), invite: z.boolean().default(true), confirmRoleChange: z.boolean().default(false) });
 const actionSchema = z.object({ invitationId: z.string().regex(/^[a-f\d]{24}$/i), action: z.enum(["resend", "revoke"]) });
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
         await tx.workspaceMember.upsert({ where: { workspaceId_userId: { workspaceId: workspace.id, userId: existing.id } }, create: { workspaceId: workspace.id, userId: existing.id, role: "sourcer" }, update: { role: "sourcer", updatedAt: new Date() } });
       });
       await prisma.notification.create({ data: { userId: existing.id, type: "workspace_membership", title: "Sourcing access granted", message: `You were added as a sourcer for ${workspace.name}.`, link: "/sourcing" } });
+      void invalidateAllServerCaches();
       return NextResponse.json({ status: "attached" });
     }
     if (!body.invite) return NextResponse.json({ error: "No approved account exists for this email. Send an invitation instead." }, { status: 409 });
@@ -59,6 +61,7 @@ export async function POST(request: NextRequest) {
     await prisma.workspaceInvitation.updateMany({ where: { workspaceId: workspace.id, email, status: "pending" }, data: { status: "revoked", revokedAt: new Date() } });
     const invitation = await prisma.workspaceInvitation.create({ data: { workspaceId: workspace.id, email, name: body.name || null, tokenHash: hashInvitationToken(token), expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), createdById: user.id } });
     void sendWorkspaceInvitation({ email, name: invitation.name, token, workspaceName: workspace.name });
+    void invalidateAllServerCaches();
     return NextResponse.json({ status: "invited" }, { status: 201 });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to add sourcer" }, { status: error instanceof SourcingAccessError ? error.status : error instanceof z.ZodError ? 400 : 500 }); }
 }
@@ -69,10 +72,11 @@ export async function PATCH(request: NextRequest) {
     const { invitationId, action } = actionSchema.parse(await request.json());
     const invitation = await prisma.workspaceInvitation.findUnique({ where: { id: invitationId }, include: { workspace: { select: { name: true } } } });
     if (!invitation || invitation.status !== "pending") return NextResponse.json({ error: "Pending invitation not found" }, { status: 404 });
-    if (action === "revoke") { await prisma.workspaceInvitation.update({ where: { id: invitation.id }, data: { status: "revoked", revokedAt: new Date() } }); return NextResponse.json({ status: "revoked" }); }
+    if (action === "revoke") { await prisma.workspaceInvitation.update({ where: { id: invitation.id }, data: { status: "revoked", revokedAt: new Date() } }); void invalidateAllServerCaches(); return NextResponse.json({ status: "revoked" }); }
     const token = crypto.randomBytes(32).toString("base64url");
     await prisma.workspaceInvitation.update({ where: { id: invitation.id }, data: { tokenHash: hashInvitationToken(token), expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), sentAt: new Date() } });
     void sendWorkspaceInvitation({ email: invitation.email, name: invitation.name, token, workspaceName: invitation.workspace.name });
+    void invalidateAllServerCaches();
     return NextResponse.json({ status: "resent" });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update invitation" }, { status: error instanceof SourcingAccessError ? error.status : error instanceof z.ZodError ? 400 : 500 }); }
 }

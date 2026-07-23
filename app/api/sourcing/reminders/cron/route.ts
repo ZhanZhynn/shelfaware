@@ -4,6 +4,7 @@ import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { deliverSourcingNotification } from "@/lib/sourcing/notifications";
 import { normalizeSourcingSlaConfig } from "@/lib/sourcing/sla";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 export const runtime = "nodejs";
 
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest) {
         sent++;
       }
     }
+    if (sent > 0) void invalidateAllServerCaches();
     return NextResponse.json({ success: true, cases: cases.length, sent });
   } catch (error) {
     logger.error("[Sourcing reminders] Cron failed", error);

@@ -6,6 +6,7 @@ import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 import { normalizeSourcingSlaConfig } from "@/lib/sourcing/sla";
 import { sourcingSlaSettingsSchema } from "@/lib/validations/sourcing";
 import { ZodError } from "zod";
+import { invalidateAllServerCaches } from "@/lib/cache";
 
 function failure(error: unknown) {
   const status = error instanceof SourcingAccessError ? error.status : error instanceof ZodError ? 400 : 500;
@@ -47,6 +48,7 @@ export async function PUT(request: NextRequest) {
       data: { sourcingSlaConfig: config as Prisma.InputJsonValue, updatedAt: new Date() },
       select: { sourcingSlaConfig: true },
     });
+    void invalidateAllServerCaches();
     return NextResponse.json(normalizeSourcingSlaConfig(workspace.sourcingSlaConfig));
   } catch (error) { return failure(error); }
 }

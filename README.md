@@ -162,9 +162,9 @@ Default scripts:
 | Unit tests | `npm test` | Vitest unit and route tests |
 | Browser tests | `npm run test:e2e` | Opt-in Playwright sourcing flow |
 
-### Browser Sourcing Test
+### Browser Sourcing Tests
 
-The Playwright sourcing test is intentionally opt-in and skips successfully unless all of the following are set. It mutates an isolated, seeded workspace; never point it at production.
+The Playwright sourcing tests are intentionally opt-in and skip successfully unless the environment required by a spec is set. They mutate an isolated, seeded workspace; never point them at production.
 
 ```bash
 npx playwright install chromium
@@ -179,6 +179,20 @@ npm run test:e2e
 ```
 
 The seeded case must be in the `quoted` stage with a selected submitted offer, a fresh CNY-to-MYR exchange rate, and an authenticated workspace admin. The test approves the offer, creates and ships the purchase order, records one accepted unit, and asserts the case reaches `received`.
+
+The collaboration coverage additionally requires a separate active case that is assigned to a workspace sourcer, plus a storage state for that sourcer. The case must not already have a reminder for the current workspace date. ImageKit must be configured on the target app for the attachment upload.
+
+```bash
+E2E_BASE_URL=http://127.0.0.1:3000 \
+E2E_STORAGE_STATE=/absolute/path/to/admin-storage-state.json \
+E2E_SOURCING_COLLABORATION_CASE_ID=<active-case-assigned-to-recipient> \
+E2E_SOURCING_RECIPIENT_STORAGE_STATE=/absolute/path/to/recipient-storage-state.json \
+E2E_SOURCING_RECIPIENT_NAME=<recipient-name-as-displayed-in-the-workspace> \
+E2E_CRON_SECRET=<target-app-cron-secret> \
+npm run test:e2e
+```
+
+It posts a mention, uploads a CSV attachment, sets an overdue SLA, invokes the authenticated reminder cron, then verifies the recipient's browser notification bell shows both notifications.
 
 ---
 

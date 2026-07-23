@@ -1468,6 +1468,7 @@ model TikTokOrder {
   shippingProvider    String?
   fulfillmentType     String?   // FULFILLMENT_BY_SELLER, FULFILLMENT_BY_TIKTOK
   shippingType        String?   // TIKTOK_SHIPPING, SELLER_SHIPPING
+  currency            String?   // Payment currency supplied by TikTok
   payment             Json?     // Flattened payment object {currency, total_product_price, total_shipping_fee, platform_fee, seller_income, buyer_payment, tax, etc.}
   recipientAddress    Json?     // {name, phone, email, address_detail, region_code, state, city, district, postal_code}
   isCod               Boolean?  @default(false)
@@ -1512,6 +1513,7 @@ model TikTokOrderItem {
   subtotalAmount        Float
   taxAmount             Float?    @default(0)
   refundAmount          Float?    @default(0)
+  currency              String?   // Line-item currency supplied by TikTok
   isGift                Boolean?  @default(false)
   saleAttrs             Json?     // Array of {attribute_id, attribute_name, attribute_value_name}
   createdAt             DateTime  @default(now()) @db.Date
@@ -1648,6 +1650,7 @@ model ShopifyOrderItem {
   sku                 String?
   price               Float
   discountedPrice     Float?
+  currency            String?   // Original unit-price currency supplied by Shopify
   createdAt           DateTime  @default(now()) @db.Date
   order               ShopifyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 

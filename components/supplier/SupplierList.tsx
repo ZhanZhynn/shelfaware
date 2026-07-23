@@ -19,9 +19,9 @@ import { StatisticsCard } from "@/components/home/StatisticsCard";
 import { StatisticsCardSkeleton } from "@/components/home/StatisticsCardSkeleton";
 import { Package, DollarSign, Truck, FolderTree } from "lucide-react";
 import { Supplier } from "@/types";
+import { formatMoney } from "@/lib/money";
 
-const formatCurrency = (value: number) =>
-  `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatCurrency = (value: number) => formatMoney(value, "MYR");
 
 /**
  * Dynamic import for SupplierTable to enable code splitting

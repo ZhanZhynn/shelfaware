@@ -12,9 +12,10 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AbcProduct } from "@/types/abc-analysis";
+import { formatMoney } from "@/lib/money";
 
 function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(value, "MYR");
 }
 
 export default function AbcStockHolding({ products }: { products: AbcProduct[] }) {
@@ -45,7 +46,7 @@ export default function AbcStockHolding({ products }: { products: AbcProduct[] }
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} layout="vertical" margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-muted" />
-                <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => formatMoney(Number(v), "MYR")} />
                 <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{

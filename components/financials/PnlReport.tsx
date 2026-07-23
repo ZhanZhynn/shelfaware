@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, TrendingDown, DollarSign, Receipt, ArrowDown, ShoppingCart, RotateCcw, Truck } from "lucide-react";
 import { formatMoney } from "@/lib/money";
+import { CurrencyReconciliation } from "./CurrencyReconciliation";
 
 const PERIODS = [
   { value: "this_month", label: "This Month" },
@@ -111,6 +112,8 @@ export default function PnlReport() {
           </Button>
         ))}
       </div>
+
+      <CurrencyReconciliation />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <MetricCard

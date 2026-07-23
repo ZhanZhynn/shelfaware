@@ -17,6 +17,7 @@ import { StatusDropDown } from "./ProductStatusFilter";
 import { SuppliersDropDown } from "@/components/supplier/SupplierFilter";
 import { PaginationType } from "@/components/shared/PaginationSelector";
 import { ProductImportDialog } from "./ProductImportDialog";
+import { formatMoney } from "@/lib/money";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -125,7 +126,7 @@ export default function FiltersAndActions({
       const csvData = filteredProducts.map((product) => ({
         "Product Name": product.name,
         SKU: product.sku,
-        Price: `$${product.price.toFixed(2)}`,
+        Price: formatMoney(product.price, "MYR"),
         Quantity: product.quantity,
         Status: product.status,
         Category: product.category || "Unknown",

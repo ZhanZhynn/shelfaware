@@ -338,6 +338,7 @@ export async function syncShopifyOrders(
                 sku: item.sku,
                 price: parseMoney(item.originalUnitPriceSet.shopMoney.amount),
                 discountedPrice: parseMoney(item.discountedUnitPriceSet.shopMoney.amount),
+                currency: item.originalUnitPriceSet.shopMoney.currencyCode,
                 createdAt: new Date(),
               },
             });

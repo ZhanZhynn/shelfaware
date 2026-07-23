@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface RevenueTrendData {
   period: string;
@@ -132,13 +133,13 @@ export default function MarketplaceRevenueTrendChart({
                 interval="preserveStartEnd"
               />
               <YAxis
-                tickFormatter={(v) => `$${v}`}
+                tickFormatter={(v) => formatMoney(Number(v), "MYR")}
                 className="text-xs"
                 tick={{ fontSize: 10 }}
               />
               <Tooltip
                 formatter={(value, name) => [
-                  name === "revenue" ? `${Number(value).toFixed(2)}` : value,
+                  name === "revenue" ? formatMoney(Number(value), "MYR") : value,
                   name === "revenue" ? "Revenue" : "Orders",
                 ]}
                 contentStyle={{

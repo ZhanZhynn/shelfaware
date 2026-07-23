@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFinancialCurrencyConverter } from "./financial-currency";
+import { createFinancialCurrencyConverter, hasUnknownCurrency } from "./financial-currency";
 
 describe("financial currency policy", () => {
   it("converts known amounts and excludes currencies without a persisted rate", () => {
@@ -14,5 +14,11 @@ describe("financial currency policy", () => {
       exchangeRates: { CNY: 0.61 },
       excludedCurrencies: ["UNKNOWN", "USD"],
     });
+  });
+
+  it("identifies only absent marketplace currencies as unknown", () => {
+    expect(hasUnknownCurrency(null)).toBe(true);
+    expect(hasUnknownCurrency("  ")).toBe(true);
+    expect(hasUnknownCurrency("MYR")).toBe(false);
   });
 });

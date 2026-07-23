@@ -131,14 +131,16 @@ const paymentStatusOptions: Array<{ value: PaymentStatus; label: string }> = [
   { value: "refunded", label: "Refunded" },
 ];
 
-/** Tax: 7% of subtotal (hardcoded). */
+/** Order fee policy applies only to MYR WMS orders. */
+const ORDER_FEE_CURRENCY = "MYR";
+/** Tax: 7% of the MYR subtotal. */
 const TAX_RATE = 0.07;
-/** Shipping: fixed $4.99 (hardcoded). */
+/** Shipping: fixed MYR 4.99. */
 const SHIPPING_FIXED = 4.99;
 
 /**
  * Discount percent by subtotal tiers (hardcoded):
- * &lt; $100 → 10%, $100–$300 → 20%, $300–$500 → 30%, $500+ → 50%
+ * &lt; MYR 100 → 10%, MYR 100–300 → 20%, MYR 300–500 → 30%, MYR 500+ → 50%
  */
 function getDiscountPercent(subtotal: number): number {
   if (subtotal < 100) return 10;
@@ -151,12 +153,15 @@ function getDiscountPercent(subtotal: number): number {
  * Compute tax, shipping, and discount amounts from subtotal.
  * Used for display and for create-order payload (all roles).
  */
-function getOrderFeesFromSubtotal(subtotal: number): {
+function getOrderFeesFromSubtotal(subtotal: number, currency: TransactionCurrency): {
   taxAmount: number;
   shippingAmount: number;
   discountPercent: number;
   discountAmount: number;
 } {
+  if (currency !== ORDER_FEE_CURRENCY) {
+    return { taxAmount: 0, shippingAmount: 0, discountPercent: 0, discountAmount: 0 };
+  }
   const taxAmount = subtotal * TAX_RATE;
   const shippingAmount = SHIPPING_FIXED;
   const discountPercent = getDiscountPercent(subtotal);
@@ -316,10 +321,11 @@ export default function OrderDialog({
     }, 0);
   }, [watchedItems, availableProducts]);
 
-  // Tax, shipping, discount: computed from subtotal (hardcoded rules) — no dropdowns
+  const selectedCurrency = createWatch("currency");
+  // Fixed fee rules are MYR-denominated; other order currencies receive no automatic fees.
   const orderFees = useMemo(
-    () => getOrderFeesFromSubtotal(subtotal),
-    [subtotal],
+    () => getOrderFeesFromSubtotal(subtotal, selectedCurrency),
+    [subtotal, selectedCurrency],
   );
   const total =
     subtotal +
@@ -388,7 +394,7 @@ export default function OrderDialog({
         throw new Error("At least one order item is required");
       }
 
-      // Compute subtotal and fees (tax 7%, shipping $4.99, discount by tier) for payload
+      // Compute the MYR-denominated fee policy only for MYR orders.
       const submitSubtotal = validItems.reduce((sum, item) => {
         const product = availableProducts.find((p) => p.id === item.productId);
         if (!product) return sum;
@@ -398,7 +404,7 @@ export default function OrderDialog({
             : 0;
         return sum + Number(product.price) * qty;
       }, 0);
-      const fees = getOrderFeesFromSubtotal(submitSubtotal);
+      const fees = getOrderFeesFromSubtotal(submitSubtotal, data.currency);
 
       // Check stock availability for each item
       for (const item of validItems) {
@@ -1382,7 +1388,7 @@ export default function OrderDialog({
                   )}
                 </div>
 
-                {/* Order Totals Section — tax 7%, shipping $4.99, discount by subtotal tier (computed, no dropdowns) */}
+                {/* Order Totals Section — MYR-only tax, shipping, and discount policy. */}
                 <div className="space-y-4">
                   <Label className="text-white/80 text-base font-semibold">
                     Order Totals
@@ -1390,25 +1396,25 @@ export default function OrderDialog({
                   <div className="p-4 border border-violet-400/20 rounded-lg bg-white/5 space-y-2">
                     <div className="flex justify-between text-sm text-white/70">
                       <span>Subtotal:</span>
-                      <span>{formatMoney(subtotal, createWatch("currency"))}</span>
+                      <span>{formatMoney(subtotal, selectedCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-white/70">
-                      <span>Tax (7%):</span>
-                      <span>{formatMoney(orderFees.taxAmount, createWatch("currency"))}</span>
+                      <span>Tax ({selectedCurrency === ORDER_FEE_CURRENCY ? "7% MYR policy" : "not applied"}):</span>
+                      <span>{formatMoney(orderFees.taxAmount, selectedCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-white/70">
-                      <span>Shipping:</span>
-                      <span>{formatMoney(orderFees.shippingAmount, createWatch("currency"))}</span>
+                      <span>Shipping ({selectedCurrency === ORDER_FEE_CURRENCY ? "fixed MYR 4.99" : "not applied"}):</span>
+                      <span>{formatMoney(orderFees.shippingAmount, selectedCurrency)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-white/70">
-                      <span>Discount ({orderFees.discountPercent}%):</span>
+                      <span>Discount ({orderFees.discountPercent}%{selectedCurrency === ORDER_FEE_CURRENCY ? " MYR policy" : ""}):</span>
                       <span className="text-red-400">
-                        -{formatMoney(orderFees.discountAmount, createWatch("currency"))}
+                        -{formatMoney(orderFees.discountAmount, selectedCurrency)}
                       </span>
                     </div>
                     <div className="flex justify-between text-base font-semibold text-white pt-2 border-t border-violet-400/20">
                       <span>Total:</span>
-                      <span>{formatMoney(total, createWatch("currency"))}</span>
+                      <span>{formatMoney(total, selectedCurrency)}</span>
                     </div>
                   </div>
                 </div>

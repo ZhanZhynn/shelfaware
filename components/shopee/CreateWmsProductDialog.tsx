@@ -26,6 +26,7 @@ import {
   useCreateWmsProductFromShopee,
 } from "@/hooks/queries";
 import { DeferredSelectGate } from "@/components/shared";
+import { formatMoney } from "@/lib/money";
 
 interface ShopeeProductForDialog {
   id: string;
@@ -46,7 +47,7 @@ interface CreateWmsProductDialogProps {
 }
 
 function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(value, "MYR");
 }
 
 export default function CreateWmsProductDialog({

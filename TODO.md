@@ -12,8 +12,8 @@
 - [ ] Replace secondary UI-local `$` formatters with `formatMoney` and explicit currencies.
 - [ ] Persist currency on remaining marketplace product, fee, ad, and historical record types where upstream data provides it.
 - [ ] Add historical-rate selection for date-based marketplace/reporting conversion.
-- [ ] Add a reconciliation report for records excluded from MYR aggregates because their currency is unknown.
-- [ ] Review fixed shipping, discount, and tax rules to ensure their numeric thresholds are explicitly MYR-denominated.
+- [x] Add a reconciliation report for records excluded from MYR aggregates because their currency is unknown.
+- [x] Review fixed shipping, discount, and tax rules to ensure their numeric thresholds are explicitly MYR-denominated.
 
 ## Test Coverage
 

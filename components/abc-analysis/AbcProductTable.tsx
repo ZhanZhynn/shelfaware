@@ -23,9 +23,10 @@ import {
 } from "@/components/ui/table";
 import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import type { AbcProduct } from "@/types/abc-analysis";
+import { formatMoney } from "@/lib/money";
 
 function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(value, "MYR");
 }
 
 const tierVariant: Record<string, "success" | "warning" | "destructive"> = {

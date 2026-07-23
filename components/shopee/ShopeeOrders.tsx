@@ -13,6 +13,7 @@ import {
 } from "@tanstack/react-table";
 import { apiClient } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
+import { formatMoney } from "@/lib/money";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -118,7 +119,7 @@ export default function ShopeeOrders() {
         header: "Total",
         cell: ({ row }) => (
           <span className="font-medium">
-            {row.original.currency || "$"}{row.original.totalAmount.toFixed(2)}
+            {formatMoney(row.original.totalAmount, row.original.currency || "MYR")}
           </span>
         ),
       },

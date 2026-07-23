@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DollarSign, TrendingDown, ChevronLeft, ChevronRight, Download, AlertTriangle, Package } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface ProfitSummary {
   totalRevenue: number;
@@ -116,7 +117,7 @@ export default function ShopeeProfitDashboard() {
       {
         accessorKey: "revenue",
         header: "Revenue",
-        cell: ({ row }) => <span>${row.original.revenue.toFixed(2)}</span>,
+        cell: ({ row }) => <span>{formatMoney(row.original.revenue, "MYR")}</span>,
       },
       {
         accessorKey: "quantitySold",
@@ -126,14 +127,14 @@ export default function ShopeeProfitDashboard() {
       {
         accessorKey: "estimatedFees",
         header: "Est. Fees",
-        cell: ({ row }) => <span className="text-destructive">-${row.original.estimatedFees.toFixed(2)}</span>,
+        cell: ({ row }) => <span className="text-destructive">-{formatMoney(row.original.estimatedFees, "MYR")}</span>,
       },
       {
         accessorKey: "estimatedProfit",
         header: "Est. Profit",
         cell: ({ row }) => (
           <span className={row.original.estimatedProfit >= 0 ? "text-emerald-500 font-medium" : "text-destructive font-medium"}>
-            ${row.original.estimatedProfit.toFixed(2)}
+            {formatMoney(row.original.estimatedProfit, "MYR")}
           </span>
         ),
       },
@@ -172,12 +173,12 @@ export default function ShopeeProfitDashboard() {
       {
         accessorKey: "totalEstimated",
         header: "Est. Shipping",
-        cell: ({ row }) => <span>${row.original.totalEstimated.toFixed(2)}</span>,
+        cell: ({ row }) => <span>{formatMoney(row.original.totalEstimated, "MYR")}</span>,
       },
       {
         accessorKey: "totalActual",
         header: "Actual Shipping",
-        cell: ({ row }) => <span>${row.original.totalActual.toFixed(2)}</span>,
+        cell: ({ row }) => <span>{formatMoney(row.original.totalActual, "MYR")}</span>,
       },
       {
         accessorKey: "avgDiscrepancy",
@@ -186,7 +187,7 @@ export default function ShopeeProfitDashboard() {
           const val = row.original.avgDiscrepancy;
           return (
             <span className={val > 0 ? "text-destructive font-medium" : "text-emerald-500 font-medium"}>
-              {val > 0 ? "+" : ""}${val.toFixed(2)}
+              {val > 0 ? "+" : ""}{formatMoney(val, "MYR")}
             </span>
           );
         },
@@ -308,7 +309,7 @@ export default function ShopeeProfitDashboard() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Total Revenue</p>
-                <p className="text-lg font-bold">${summary.totalRevenue.toFixed(2)}</p>
+                <p className="text-lg font-bold">{formatMoney(summary.totalRevenue, "MYR")}</p>
               </div>
             </div>
           </CardContent>
@@ -321,7 +322,7 @@ export default function ShopeeProfitDashboard() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Total Fees</p>
-                <p className="text-lg font-bold text-red-500">${summary.totalFees.toFixed(2)}</p>
+                <p className="text-lg font-bold text-red-500">{formatMoney(summary.totalFees, "MYR")}</p>
               </div>
             </div>
           </CardContent>
@@ -334,7 +335,7 @@ export default function ShopeeProfitDashboard() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Seller Income</p>
-                <p className="text-lg font-bold">${summary.totalSellerIncome.toFixed(2)}</p>
+                <p className="text-lg font-bold">{formatMoney(summary.totalSellerIncome, "MYR")}</p>
               </div>
             </div>
           </CardContent>
@@ -386,7 +387,7 @@ export default function ShopeeProfitDashboard() {
                       ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value) => [`${Number(value).toFixed(2)}`, "Amount"]}
+                    formatter={(value) => [formatMoney(Number(value), "MYR"), "Amount"]}
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",
@@ -402,7 +403,7 @@ export default function ShopeeProfitDashboard() {
               {feeBreakdown.map((fee) => (
                 <div key={fee.name} className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">{fee.name}</span>
-                  <span>${fee.amount.toFixed(2)} ({fee.percentage.toFixed(1)}%)</span>
+                  <span>{formatMoney(fee.amount, "MYR")} ({fee.percentage.toFixed(1)}%)</span>
                 </div>
               ))}
             </div>
@@ -511,11 +512,11 @@ export default function ShopeeProfitDashboard() {
               </div>
               <div className="p-3 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground">Total Estimated</p>
-                <p className="text-lg font-bold">${discrepancySummary.totalEstimated.toFixed(2)}</p>
+                <p className="text-lg font-bold">{formatMoney(discrepancySummary.totalEstimated, "MYR")}</p>
               </div>
               <div className="p-3 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground">Total Actual</p>
-                <p className="text-lg font-bold">${discrepancySummary.totalActual.toFixed(2)}</p>
+                <p className="text-lg font-bold">{formatMoney(discrepancySummary.totalActual, "MYR")}</p>
               </div>
             </div>
           )}

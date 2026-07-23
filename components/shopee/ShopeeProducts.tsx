@@ -23,6 +23,7 @@ import { useShopeeProductMappingStatus } from "@/hooks/queries";
 import { MarketplaceDataTable, VariantSubTable, type Marketplace } from "@/components/shared";
 import CreateWmsProductDialog from "./CreateWmsProductDialog";
 import BulkCreateWmsProductsDialog from "./BulkCreateWmsProductsDialog";
+import { formatMoney } from "@/lib/money";
 
 interface ShopeeProductRow {
   id: string;
@@ -171,10 +172,10 @@ export default function ShopeeProducts() {
           const originalPrice = row.original.originalPrice;
           return (
             <div className="flex flex-col">
-              <span className="font-medium">${price.toFixed(2)}</span>
+              <span className="font-medium">{formatMoney(price, "MYR")}</span>
               {originalPrice && originalPrice > price && (
                 <span className="text-xs text-muted-foreground line-through">
-                  ${originalPrice.toFixed(2)}
+                  {formatMoney(originalPrice, "MYR")}
                 </span>
               )}
             </div>

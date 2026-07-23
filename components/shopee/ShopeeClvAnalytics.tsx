@@ -19,6 +19,7 @@ import {
   Cell,
 } from "recharts";
 import { Users, TrendingUp, AlertTriangle, DollarSign, Crown, Heart, Shield, Skull } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface ClvData {
   summary: {
@@ -337,7 +338,7 @@ export default function ShopeeClvAnalytics() {
                 <XAxis dataKey="username" className="text-xs" tick={{ fontSize: 10 }} />
                 <YAxis className="text-xs" tick={{ fontSize: 10 }} />
                 <Tooltip
-                  formatter={(value) => [`RM ${Number(value).toFixed(2)}`, "CLV"]}
+                  formatter={(value) => [formatMoney(Number(value), "MYR"), "CLV"]}
                   contentStyle={{
                     backgroundColor: "hsl(var(--card))",
                     border: "1px solid hsl(var(--border))",

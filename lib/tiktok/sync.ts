@@ -456,6 +456,7 @@ export async function syncTikTokOrders(
                 shippingProvider: order.shipping_provider || null,
                 fulfillmentType: order.fulfillment_type || null,
                 shippingType: order.shipping_type || null,
+                currency: order.payment?.currency || null,
                 payment: order.payment ? JSON.parse(JSON.stringify(order.payment)) : undefined,
                 recipientAddress: order.recipient_address
                   ? JSON.parse(JSON.stringify(order.recipient_address))
@@ -534,6 +535,7 @@ export async function syncTikTokOrders(
                       subtotalAmount: 0,
                       taxAmount: 0,
                       refundAmount: 0,
+                      currency: item.currency || null,
                       isGift: item.is_gift ?? false,
                       saleAttrs: undefined,
                     },

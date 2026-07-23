@@ -367,6 +367,12 @@ export async function syncLazadaOrders(
 
           const totalAmount = parseFloat(order.price || "0");
           const shippingFee = parseFloat(order.shipping_fee || "0");
+          const itemCurrencies = [...new Set(orderItems
+            .map((item) => item.currency?.trim().toUpperCase())
+            .filter((currency): currency is string => Boolean(currency)))];
+          // Lazada omits currency on the order, but its line items provide it.
+          // Persist it only when every priced item agrees on one upstream currency.
+          const currency = itemCurrencies.length === 1 ? itemCurrencies[0] : null;
 
           const existing = await prisma.lazadaOrder.findFirst({
             where: { lazadaOrderId: String(orderId) },
@@ -378,7 +384,7 @@ export async function syncLazadaOrders(
             paymentStatus,
             totalAmount,
             shippingFee,
-            currency: "MYR", // Default; Lazada doesn't always return currency
+            currency,
             customerFirstName: order.customer_first_name || null,
             customerLastName: order.customer_last_name || null,
             paymentMethod: order.payment_method || null,
@@ -437,7 +443,7 @@ export async function syncLazadaOrders(
                   price: parseFloat(item.item_price || "0"),
                   paidPrice: parseFloat(item.paid_price || "0"),
                   itemPrice: parseFloat(item.item_price || "0"),
-                  currency: item.currency || "MYR",
+                  currency: item.currency || null,
                   status: ORDER_STATUS_MAP[itemStatus] || internalStatus,
                   shipmentProvider: item.shipment_provider || null,
                   trackingNumber: item.tracking_number || null,

@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Package, ShoppingCart, DollarSign, TrendingUp } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface ShopeeStatsCardsProps {
   stats: {
@@ -30,14 +31,14 @@ export default function ShopeeStatsCards({ stats }: ShopeeStatsCardsProps) {
     },
     {
       title: "Total Revenue",
-      value: `$${stats.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatMoney(stats.totalRevenue, "MYR"),
       icon: DollarSign,
       color: "text-amber-500",
       bgColor: "bg-amber-500/10",
     },
     {
       title: "Avg Order Value",
-      value: `$${stats.averageOrderValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatMoney(stats.averageOrderValue, "MYR"),
       icon: TrendingUp,
       color: "text-violet-500",
       bgColor: "bg-violet-500/10",

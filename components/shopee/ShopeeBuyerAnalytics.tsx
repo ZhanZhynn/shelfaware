@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api";
 import { Users, Repeat, MapPin } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface BuyerAnalytics {
   totalBuyers: number;
@@ -156,7 +157,7 @@ export default function ShopeeBuyerAnalytics() {
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={analytics.topBuyers} layout="vertical" margin={{ left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis type="number" tickFormatter={(v) => `$${v}`} className="text-xs" />
+                  <XAxis type="number" tickFormatter={(v) => formatMoney(Number(v), "MYR")} className="text-xs" />
                   <YAxis
                     dataKey="username"
                     type="category"
@@ -165,7 +166,7 @@ export default function ShopeeBuyerAnalytics() {
                     tick={{ fontSize: 10 }}
                   />
                   <Tooltip
-                    formatter={(value) => [`${Number(value).toFixed(2)}`, "Total Spent"]}
+                    formatter={(value) => [formatMoney(Number(value), "MYR"), "Total Spent"]}
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
                       border: "1px solid hsl(var(--border))",

@@ -5,9 +5,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, Box, DollarSign, ShoppingCart } from "lucide-react";
 import type { AbcTierSummary } from "@/types/abc-analysis";
+import { formatMoney } from "@/lib/money";
 
 function formatCurrency(value: number): string {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(value, "MYR");
 }
 
 function TierCard({

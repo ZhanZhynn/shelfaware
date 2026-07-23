@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { formatMoney } from "@/lib/money";
 
 // ─── Variant types per marketplace ─────────────────────────────────────────
 
@@ -101,10 +102,10 @@ function TikTokVariantRow({ variant }: { variant: TikTokVariant }) {
         {formatSalesAttrs(variant.salesAttrs) || "—"}
       </td>
       <td className="px-3 py-2 text-sm font-medium">
-        {variant.price.toFixed(2)}
+        {formatMoney(variant.price, variant.currency ?? "MYR")}
         {variant.originalPrice != null && variant.originalPrice > variant.price && (
           <span className="ml-2 text-xs text-muted-foreground line-through">
-            {variant.originalPrice.toFixed(2)}
+            {formatMoney(variant.originalPrice, variant.currency ?? "MYR")}
           </span>
         )}
       </td>
@@ -132,10 +133,10 @@ function ShopifyVariantRow({ variant }: { variant: ShopifyVariant }) {
         {variant.title || variant.displayName || "—"}
       </td>
       <td className="px-3 py-2 text-sm font-medium">
-        {variant.price.toFixed(2)}
+        {formatMoney(variant.price, "MYR")}
         {variant.compareAtPrice != null && variant.compareAtPrice > variant.price && (
           <span className="ml-2 text-xs text-muted-foreground line-through">
-            {variant.compareAtPrice.toFixed(2)}
+            {formatMoney(variant.compareAtPrice, "MYR")}
           </span>
         )}
       </td>
@@ -166,10 +167,10 @@ function ShopeeVariantRow({ variant }: { variant: ShopeeVariant }) {
         {variant.modelSku || "—"}
       </td>
       <td className="px-3 py-2 text-sm font-medium">
-        ${variant.price.toFixed(2)}
+        {formatMoney(variant.price, "MYR")}
         {variant.originalPrice != null && variant.originalPrice > variant.price && (
           <span className="ml-2 text-xs text-muted-foreground line-through">
-            ${variant.originalPrice.toFixed(2)}
+            {formatMoney(variant.originalPrice, "MYR")}
           </span>
         )}
       </td>
@@ -197,10 +198,10 @@ function LazadaVariantRow({ variant }: { variant: LazadaVariant }) {
         {variant.sellerSku || "—"}
       </td>
       <td className="px-3 py-2 text-sm font-medium">
-        RM {variant.price.toFixed(2)}
+        {formatMoney(variant.price, "MYR")}
         {variant.specialPrice != null && variant.specialPrice < variant.price && (
           <span className="ml-2 text-xs text-muted-foreground line-through">
-            RM {variant.specialPrice.toFixed(2)}
+            {formatMoney(variant.specialPrice, "MYR")}
           </span>
         )}
       </td>

@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AbcParetoPoint } from "@/types/abc-analysis";
+import { formatMoney } from "@/lib/money";
 
 export default function AbcParetoChart({ data }: { data: AbcParetoPoint[] }) {
   const [mounted, setMounted] = React.useState(false);
@@ -49,7 +50,7 @@ export default function AbcParetoChart({ data }: { data: AbcParetoPoint[] }) {
                 yAxisId="revenue"
                 orientation="left"
                 tick={{ fontSize: 12 }}
-                tickFormatter={(v) => `$${v.toLocaleString()}`}
+                tickFormatter={(v) => formatMoney(Number(v), "MYR")}
               />
               <YAxis
                 yAxisId="percent"
@@ -66,7 +67,7 @@ export default function AbcParetoChart({ data }: { data: AbcParetoPoint[] }) {
                 }}
                 formatter={(value, name) => [
                   name === "revenue"
-                    ? `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    ? formatMoney(Number(value), "MYR")
                     : `${Number(value).toFixed(1)}%`,
                   name === "revenue" ? "Revenue" : "Cumulative %",
                 ]}

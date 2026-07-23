@@ -95,6 +95,11 @@ export async function createOrder(data: CreateOrderInput, userId: string) {
     productsToReserve.push({ id: item.productId, qty: item.quantity });
   }
 
+  const currency = resolveTransactionCurrency(data.currency);
+  if (currency !== "MYR" && (data.tax || data.shipping || data.discount)) {
+    throw new Error("Automatic tax, shipping, and discount rules are MYR-denominated.");
+  }
+
   // Calculate total
   const tax = data.tax || 0;
   const shipping = data.shipping || 0;
@@ -109,7 +114,7 @@ export async function createOrder(data: CreateOrderInput, userId: string) {
       clientId: data.clientId || null,
       status: "pending",
       paymentStatus: "unpaid",
-      currency: resolveTransactionCurrency(data.currency),
+      currency,
       subtotal,
       tax: tax > 0 ? tax : null,
       shipping: shipping > 0 ? shipping : null,

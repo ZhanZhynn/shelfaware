@@ -17,6 +17,7 @@ import {
 import { QRCodeHover } from "@/components/ui/qr-code-hover";
 import { AlertTriangle, ArrowUpDown } from "lucide-react";
 import { IoMdArrowDown, IoMdArrowUp } from "react-icons/io";
+import { formatMoney } from "@/lib/money";
 
 /** Base path for detail links (e.g. "" or "/admin") so product/category/supplier links stay in admin when on admin page. */
 function detailHref(base: string, segment: string, id: string): string {
@@ -157,7 +158,7 @@ export function createProductColumns(
   {
     accessorKey: "price",
     header: ({ column }) => <SortableHeader column={column} label="Price" />,
-    cell: ({ getValue }) => `$${getValue<number>().toFixed(2)}`,
+    cell: ({ getValue }) => formatMoney(getValue<number>(), "MYR"),
   },
   {
     accessorKey: "createdAt",

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, TrendingUp, Package, ChevronLeft, ChevronRight } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface ProductPerformance {
   id: string;
@@ -133,7 +134,7 @@ export default function ShopeeProductPerformance() {
       {
         accessorKey: "revenue30d",
         header: "Revenue (30d)",
-        cell: ({ row }) => <span className="font-medium">${row.original.revenue30d.toFixed(2)}</span>,
+        cell: ({ row }) => <span className="font-medium">{formatMoney(row.original.revenue30d, "MYR")}</span>,
       },
       {
         accessorKey: "performanceRating",

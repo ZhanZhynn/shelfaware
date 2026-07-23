@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Package } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface ShopeeTopProductsTableProps {
   data: { name: string; revenue: number; quantity: number }[];
@@ -46,7 +47,7 @@ export default function ShopeeTopProductsTable({ data }: ShopeeTopProductsTableP
                   </span>
                 </div>
                 <span className="text-right font-medium tabular-nums">
-                  ${product.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(product.revenue, "MYR")}
                 </span>
                 <span className="text-right">
                   <Badge variant="secondary" className="tabular-nums text-xs">

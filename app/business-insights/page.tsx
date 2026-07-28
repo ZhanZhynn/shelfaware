@@ -17,6 +17,17 @@ export default async function BusinessInsightsRoute() {
   if (!user) {
     redirect("/login");
   }
+  if (user.role !== "admin") {
+    redirect(
+      user.role === "client"
+        ? "/client"
+        : user.role === "supplier"
+          ? "/supplier"
+          : user.role === "sourcer"
+            ? "/sourcing"
+            : "/",
+    );
+  }
   const [initialProducts, initialOrders, initialCombinedInsights] =
     await Promise.all([
       getProductsForUser(user.id),

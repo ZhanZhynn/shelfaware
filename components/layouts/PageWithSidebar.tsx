@@ -11,12 +11,15 @@ export interface PageWithSidebarProps {
   sidebarContent: ReactNode;
   /** Collapsed (icon-only) sidebar for phone screens */
   sidebarCollapsed?: ReactNode;
+  /** Hide the sidebar on phones when navigation is provided by a mobile drawer. */
+  hideSidebarOnMobile?: boolean;
   children: ReactNode;
 }
 
 export default function PageWithSidebar({
   sidebarContent,
   sidebarCollapsed,
+  hideSidebarOnMobile = false,
   children,
 }: PageWithSidebarProps) {
   return (
@@ -38,7 +41,7 @@ export default function PageWithSidebar({
         {sidebarContent}
       </aside>
       {/* When no collapsed sidebar provided, show full sidebar always (legacy) */}
-      {!sidebarCollapsed && (
+      {!sidebarCollapsed && !hideSidebarOnMobile && (
         <aside
           className="sm:hidden sticky top-0 z-10 flex h-[calc(100vh-3.5rem)] w-64 flex-shrink-0 flex-col overflow-y-auto border-r border-gray-200/50 dark:border-white/10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl"
           aria-label="Page navigation"

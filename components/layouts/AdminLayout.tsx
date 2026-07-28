@@ -16,7 +16,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     <Navbar>
       <PageWithSidebar
         sidebarContent={<AdminSidebar />}
-        sidebarCollapsed={<AdminSidebar collapsed />}
+        hideSidebarOnMobile
       >
         <div className="min-w-0 flex-1 px-1 sm:px-0">{children}</div>
       </PageWithSidebar>

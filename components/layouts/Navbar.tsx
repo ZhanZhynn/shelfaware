@@ -38,6 +38,7 @@ import { useTheme } from "next-themes";
 import ScrollControl from "../shared/ScrollControl";
 import Footer from "./Footer";
 import { NotificationBell } from "../shared";
+import AdminMobileDrawer from "./AdminMobileDrawer";
 
 /**
  * RoboHash fallback avatar URL when user has no custom/Google image.
@@ -182,7 +183,7 @@ export default function Navbar({ children }: NavbarProps) {
         dropdownItems: Array<{ label: string; path: string }>;
       };
 
-  const adminNavItems: NavItem[] = [
+  const superAdminNavItems: NavItem[] = [
     { label: "Dashboard", path: "/", hasDropdown: false },
     { label: "Products", path: "/products", hasDropdown: false },
     { label: "Orders", path: "/orders", hasDropdown: false },
@@ -196,6 +197,15 @@ export default function Navbar({ children }: NavbarProps) {
       hasDropdown: false,
     },
     { label: "Admin Panel", path: "/admin", hasDropdown: false },
+  ];
+
+  const adminNavItems: NavItem[] = [
+    { label: "Admin", path: "/admin", hasDropdown: false },
+    { label: "Business Insights", path: "/business-insights", hasDropdown: false },
+  ];
+
+  const sourcerNavItems: NavItem[] = [
+    { label: "Sourcing", path: "/sourcing", hasDropdown: false },
   ];
 
   const clientNavItems: NavItem[] = [
@@ -219,16 +229,34 @@ export default function Navbar({ children }: NavbarProps) {
       : pathname?.startsWith("/supplier")
         ? "supplier"
         : "user");
+  const isAdmin = role === "admin";
+  // Legacy admins without the flag remain Super admins; regular Admins are explicit false.
+  const isSuperAdmin = isAdmin && user?.isSuperAdmin !== false;
   const navItems: NavItem[] =
     role === "client"
       ? clientNavItems
       : role === "supplier"
         ? supplierNavItems
-        : adminNavItems;
+        : role === "sourcer"
+          ? sourcerNavItems
+          : isAdmin
+            ? isSuperAdmin
+              ? superAdminNavItems
+              : adminNavItems
+            : [];
 
   /** Home link for logo/brand: admin → /, client → /client, supplier → /supplier */
   const homePath =
-    role === "client" ? "/client" : role === "supplier" ? "/supplier" : "/";
+    role === "client"
+      ? "/client"
+      : role === "supplier"
+        ? "/supplier"
+        : role === "sourcer"
+          ? "/sourcing"
+          : isAdmin && !isSuperAdmin
+            ? "/admin"
+            : "/";
+  const showLegacyUtilities = !isAdmin || isSuperAdmin;
 
   // Avatar: use custom/Google image if present, else RoboHash (same user → same robot)
   const preferredImage =
@@ -386,19 +414,25 @@ export default function Navbar({ children }: NavbarProps) {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
+                {showLegacyUtilities && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      router.push("/support-tickets");
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={DROPDOWN_ITEM_CLASS}
+                  >
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    <span>Support Tickets</span>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onClick={() => {
-                    router.push("/support-tickets");
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={DROPDOWN_ITEM_CLASS}
-                >
-                  <MessageSquare className="mr-2 h-4 w-4" />
-                  <span>Support Tickets</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    router.push("/settings/email-preferences");
+                    router.push(
+                      isAdmin && !isSuperAdmin
+                        ? "/admin/settings/email-preferences"
+                        : "/settings/email-preferences",
+                    );
                     setIsMobileMenuOpen(false);
                   }}
                   className={DROPDOWN_ITEM_CLASS}
@@ -406,26 +440,30 @@ export default function Navbar({ children }: NavbarProps) {
                   <Settings className="mr-2 h-4 w-4" />
                   <span>Email Preferences</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    router.push("/api-docs");
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={DROPDOWN_ITEM_CLASS}
-                >
-                  <FileCode className="mr-2 h-4 w-4" />
-                  <span>API Documentation</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    router.push("/api-status");
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={DROPDOWN_ITEM_CLASS}
-                >
-                  <Activity className="mr-2 h-4 w-4" />
-                  <span>API Status</span>
-                </DropdownMenuItem>
+                {showLegacyUtilities && (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        router.push("/api-docs");
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={DROPDOWN_ITEM_CLASS}
+                    >
+                      <FileCode className="mr-2 h-4 w-4" />
+                      <span>API Documentation</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        router.push("/api-status");
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={DROPDOWN_ITEM_CLASS}
+                    >
+                      <Activity className="mr-2 h-4 w-4" />
+                      <span>API Status</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator className="bg-gray-200 dark:bg-gray-700" />
                 <DropdownMenuItem
                   onClick={handleLogout}
@@ -443,28 +481,31 @@ export default function Navbar({ children }: NavbarProps) {
 
           {/* Mobile: Burger Menu Only (LG and below) */}
           <div className="flex items-center lg:hidden">
-            {/* Burger Menu Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
-              aria-expanded={isMobileMenuOpen}
-              aria-controls="mobile-menu-panel"
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="h-8 w-8 sm:h-10 sm:w-10 text-gray-900 dark:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out"
-            >
-              {isMobileMenuOpen ? (
-                <X className="h-4 w-4 sm:h-5 sm:w-5" />
-              ) : (
-                <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
-              )}
-            </Button>
+            {isAdmin ? (
+              <AdminMobileDrawer isSuperAdmin={isSuperAdmin} />
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+                aria-expanded={isMobileMenuOpen}
+                aria-controls="mobile-menu-panel"
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="h-8 w-8 sm:h-10 sm:w-10 text-gray-900 dark:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out"
+              >
+                {isMobileMenuOpen ? (
+                  <X className="h-4 w-4 sm:h-5 sm:w-5" />
+                ) : (
+                  <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Mobile Menu Dropdown (LG and below) */}
-      {isMobileMenuOpen && (
+      {isMobileMenuOpen && !isAdmin && (
         <div
           id="mobile-menu-panel"
           role="navigation"
@@ -547,25 +588,30 @@ export default function Navbar({ children }: NavbarProps) {
 
             <Separator className="bg-gray-300/50 dark:bg-white/10" />
 
-            {/* Support Tickets */}
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-gray-700 dark:text-muted-foreground hover:text-gray-900 dark:hover:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out px-3 py-3.5 h-auto min-h-[44px]"
-              onClick={() => {
-                router.push("/support-tickets");
-                setIsMobileMenuOpen(false);
-              }}
-            >
-              <MessageSquare className="mr-2 h-4 w-4" />
-              Support Tickets
-            </Button>
+            {showLegacyUtilities && (
+              <Button
+                variant="ghost"
+                className="w-full justify-start text-gray-700 dark:text-muted-foreground hover:text-gray-900 dark:hover:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out px-3 py-3.5 h-auto min-h-[44px]"
+                onClick={() => {
+                  router.push("/support-tickets");
+                  setIsMobileMenuOpen(false);
+                }}
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Support Tickets
+              </Button>
+            )}
 
             {/* Email Preferences */}
             <Button
               variant="ghost"
               className="w-full justify-start text-gray-700 dark:text-muted-foreground hover:text-gray-900 dark:hover:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out px-3 py-3.5 h-auto min-h-[44px]"
               onClick={() => {
-                router.push("/settings/email-preferences");
+                router.push(
+                  isAdmin && !isSuperAdmin
+                    ? "/admin/settings/email-preferences"
+                    : "/settings/email-preferences",
+                );
                 setIsMobileMenuOpen(false);
               }}
             >
@@ -573,31 +619,32 @@ export default function Navbar({ children }: NavbarProps) {
               Email Preferences
             </Button>
 
-            {/* API Documentation */}
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-gray-700 dark:text-white/80 hover:backdrop-grey-100 dark:hover:backdrop-white/10 transition-all duration-200 ease-in-out px-3 py-3 h-auto min-h-[44px]"
-              onClick={() => {
-                router.push("/api-docs");
-                setIsMobileMenuOpen(false);
-              }}
-            >
-              <FileCode className="mr-2 h-4 w-4" />
-              API Documentation
-            </Button>
-
-            {/* API Status */}
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-gray-700 dark:text-muted-foreground hover:text-gray-900 dark:hover:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out px-3 py-3.5 h-auto min-h-[44px]"
-              onClick={() => {
-                router.push("/api-status");
-                setIsMobileMenuOpen(false);
-              }}
-            >
-              <Activity className="mr-2 h-4 w-4" />
-              API Status
-            </Button>
+            {showLegacyUtilities && (
+              <>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start text-gray-700 dark:text-white/80 hover:backdrop-grey-100 dark:hover:backdrop-white/10 transition-all duration-200 ease-in-out px-3 py-3 h-auto min-h-[44px]"
+                  onClick={() => {
+                    router.push("/api-docs");
+                    setIsMobileMenuOpen(false);
+                  }}
+                >
+                  <FileCode className="mr-2 h-4 w-4" />
+                  API Documentation
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start text-gray-700 dark:text-muted-foreground hover:text-gray-900 dark:hover:text-foreground hover:bg-gradient-to-br hover:from-sky-500/10 hover:via-sky-500/5 hover:to-sky-500/5 dark:hover:from-white/10 dark:hover:via-white/5 dark:hover:to-white/5 hover:backdrop-blur-sm transition-all duration-300 ease-in-out px-3 py-3.5 h-auto min-h-[44px]"
+                  onClick={() => {
+                    router.push("/api-status");
+                    setIsMobileMenuOpen(false);
+                  }}
+                >
+                  <Activity className="mr-2 h-4 w-4" />
+                  API Status
+                </Button>
+              </>
+            )}
 
             <Separator className="bg-gray-300/50 dark:bg-white/10" />
 

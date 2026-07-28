@@ -10,7 +10,9 @@ export async function GET(request: NextRequest) {
   const limited = await withRateLimit(request, defaultRateLimits.strict, user.id);
   if (limited) return limited;
   const where =
-    user.role === "admin" ? {} : { members: { some: { userId: user.id } } };
+    user.role === "admin" || user.role === "sourcer"
+      ? {}
+      : { members: { some: { userId: user.id } } };
   const workspaces = await prisma.workspace.findMany({
     where,
     include: {

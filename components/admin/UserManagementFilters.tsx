@@ -13,7 +13,8 @@ import { FilterDropdown } from "@/components/ui/filter-dropdown";
 
 const ROLE_OPTIONS = [
   { id: "user", name: "User" },
-  { id: "admin", name: "Admin" },
+  { id: "admin", name: "Admin / Super admin" },
+  { id: "sourcer", name: "Sourcer" },
   { id: "supplier", name: "Supplier" },
   { id: "client", name: "Client" },
   { id: "retailer", name: "Retailer" },

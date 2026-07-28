@@ -35,9 +35,27 @@ import {
   type CreateUserAdminFormData,
 } from "@/lib/validations/user-management";
 
-const ROLE_OPTIONS = [
-  { value: "user", label: "User", color: "text-gray-600 dark:text-gray-400" },
-  { value: "admin", label: "Admin", color: "text-rose-600 dark:text-rose-400" },
+const ACCOUNT_TYPE_OPTIONS = [
+  {
+    value: "user",
+    label: "Regular user",
+    color: "text-gray-600 dark:text-gray-400",
+  },
+  {
+    value: "workspace_admin",
+    label: "Admin",
+    color: "text-sky-600 dark:text-sky-400",
+  },
+  {
+    value: "super_admin",
+    label: "Super admin",
+    color: "text-rose-600 dark:text-rose-400",
+  },
+  {
+    value: "sourcer",
+    label: "Sourcer",
+    color: "text-indigo-600 dark:text-indigo-400",
+  },
   {
     value: "supplier",
     label: "Supplier",
@@ -75,10 +93,12 @@ export default function CreateUserDialog() {
       password: "",
       username: "",
       role: "user",
+      accountType: "user",
+      workspaceIds: [],
     },
   });
 
-  const selectedRole = watch("role");
+  const accountType = watch("accountType");
 
   const onSubmit = async (data: CreateUserAdminFormData) => {
     createUserMutation.mutate(data, {
@@ -107,9 +127,7 @@ export default function CreateUserDialog() {
           Create User
         </Button>
       </DialogTrigger>
-      <DialogContent
-        className="p-4 sm:p-7 sm:px-8 poppins max-h-[90vh] overflow-y-auto border-blue-400/30 dark:border-blue-400/30 shadow-[0_30px_80px_rgba(59,130,246,0.35)] dark:shadow-[0_30px_80px_rgba(59,130,246,0.25)]"
-      >
+      <DialogContent className="p-4 sm:p-7 sm:px-8 poppins max-h-[90vh] overflow-y-auto border-blue-400/30 dark:border-blue-400/30 shadow-[0_30px_80px_rgba(59,130,246,0.35)] dark:shadow-[0_30px_80px_rgba(59,130,246,0.25)]">
         <DialogHeader>
           <DialogTitle className="text-[22px] text-white flex items-center gap-3">
             <div className="p-2 rounded-xl border border-blue-300/30 bg-blue-100/50 dark:border-blue-400/30 dark:bg-blue-500/20">
@@ -118,7 +136,7 @@ export default function CreateUserDialog() {
             Create New User
           </DialogTitle>
           <DialogDescription className="text-white/70">
-            Add a new user to the system with their details and role.
+            Admins use the shared admin workspace. Only Super admins can edit supplier offers.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-4">
@@ -220,8 +238,11 @@ export default function CreateUserDialog() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="role" className="text-sm font-medium text-white/80">
-              User Role
+            <Label
+              htmlFor="accountType"
+              className="text-sm font-medium text-white/80"
+            >
+              Account Type
             </Label>
             <DeferredSelectGate
               enabled={open}
@@ -230,18 +251,32 @@ export default function CreateUserDialog() {
                   className="flex h-11 w-full items-center rounded-md border border-blue-400/30 bg-white/10 px-3 text-sm text-white/60"
                   aria-hidden
                 >
-                  {ROLE_OPTIONS.find((o) => o.value === selectedRole)?.label ??
-                    "Select role"}
+                  {ACCOUNT_TYPE_OPTIONS.find((o) => o.value === accountType)
+                    ?.label ?? "Select role"}
                 </div>
               }
             >
               {({ selectRemountKey }) => (
                 <Select
                   key={selectRemountKey}
-                  value={selectedRole ?? "user"}
-                  onValueChange={(val) =>
-                    setValue("role", val as CreateUserAdminFormData["role"])
-                  }
+                  value={accountType ?? "user"}
+                  onValueChange={(val) => {
+                    const nextType =
+                      val as CreateUserAdminFormData["accountType"];
+                    setValue("accountType", nextType);
+                    setValue(
+                      "role",
+                       nextType === "super_admin" || nextType === "workspace_admin"
+                          ? "admin"
+                          : nextType === "sourcer"
+                            ? "sourcer"
+                          : nextType === "supplier" ||
+                            nextType === "client" ||
+                            nextType === "retailer"
+                          ? nextType
+                          : "user",
+                    );
+                  }}
                 >
                   <SelectTrigger className="h-11 w-full border-blue-400/30 dark:border-white/20 bg-white/10 dark:bg-white/5 backdrop-blur-sm text-white placeholder:text-white/40 focus:border-blue-400 focus:ring-blue-500/50 shadow-[0_10px_30px_rgba(59,130,246,0.15)]">
                     <SelectValue placeholder="Select role" />
@@ -252,7 +287,7 @@ export default function CreateUserDialog() {
                     sideOffset={5}
                     align="start"
                   >
-                    {ROLE_OPTIONS.map((opt) => (
+                    {ACCOUNT_TYPE_OPTIONS.map((opt) => (
                       <SelectItem
                         key={opt.value}
                         value={opt.value}
@@ -265,10 +300,18 @@ export default function CreateUserDialog() {
                 </Select>
               )}
             </DeferredSelectGate>
-            {errors.role && (
-              <p className="text-sm text-rose-400">{errors.role.message}</p>
+            {errors.accountType && (
+              <p className="text-sm text-rose-400">
+                {errors.accountType.message}
+              </p>
             )}
           </div>
+          {accountType === "super_admin" && (
+            <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-100">
+              Super admins have global access to all workspaces, the full admin
+              panel, and emergency quote editing.
+            </p>
+          )}
 
           <DialogFooter className="mt-6 flex flex-col sm:flex-row items-center gap-3">
             <DialogClose asChild>

@@ -129,6 +129,7 @@ export async function POST(request: NextRequest) {
         userName: user.name,
         userEmail: user.email,
         userRole,
+        isSuperAdmin: user.isSuperAdmin,
       },
       { status: 200, headers: responseHeaders },
     );

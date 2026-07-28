@@ -16,6 +16,7 @@ function transform(
     name: r.name,
     username: r.username,
     role: r.role as UserForAdmin["role"],
+    isSuperAdmin: r.isSuperAdmin,
     status: (r.status ?? "approved") as UserForAdmin["status"],
     image: r.image,
     createdAt: r.createdAt.toISOString(),

@@ -12,11 +12,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (limited) return limited;
     const workspaceId = (await params).id;
     await requireWorkspaceRole(user, workspaceId, ["admin", "sourcer"]);
-    const members = await prisma.workspaceMember.findMany({
-      where: { workspaceId }, orderBy: { role: "asc" },
-      select: { userId: true, role: true, user: { select: { name: true, email: true, image: true } } },
+    const sourcers = await prisma.user.findMany({
+      where: { role: "sourcer", status: "approved" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, email: true, image: true },
     });
-    return NextResponse.json(members.map(({ userId, role, user }) => ({ id: userId, role, name: user.name, email: user.email, image: user.image })));
+    return NextResponse.json(
+      sourcers.map((sourcer) => ({ ...sourcer, role: "sourcer" })),
+    );
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Membership lookup failed" }, { status: error instanceof SourcingAccessError ? error.status : 500 }); }
 }
 

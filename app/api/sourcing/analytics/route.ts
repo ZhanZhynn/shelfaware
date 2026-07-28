@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const user = await getSessionFromRequest(request); if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const workspaceId = new URL(request.url).searchParams.get("workspaceId"); if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     await requireWorkspaceRole(user, workspaceId, ["admin", "sourcer"]);
-    const cases = await prisma.sourcingCase.findMany({ where: { workspaceId }, select: { stage: true, createdAt: true, updatedAt: true, slaDueAt: true, quotes: { select: { status: true } } } });
+    const cases = await prisma.sourcingCase.findMany({ where: { workspaceId, ...(user.role === "sourcer" ? { assignedToId: user.id } : {}) }, select: { stage: true, createdAt: true, updatedAt: true, slaDueAt: true, quotes: { select: { status: true } } } });
     const now = new Date(); const byStage = cases.reduce<Record<string, number>>((result, item) => ({ ...result, [item.stage]: (result[item.stage] || 0) + 1 }), {});
     const completed = cases.filter((item) => ["received", "rejected", "cannot_source"].includes(item.stage));
     const hours = completed.map((item) => ((item.updatedAt || now).getTime() - item.createdAt.getTime()) / 3600000);

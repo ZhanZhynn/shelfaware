@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     const user = await getSessionFromRequest(request); if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const parsed = schema.safeParse(await request.json()); if (!parsed.success) return NextResponse.json({ error: "Invalid supplier evaluation", details: parsed.error.flatten() }, { status: 400 });
     const data = parsed.data;
-    await requireWorkspaceRole(user, data.workspaceId, ["admin", "sourcer"]);
+    await requireWorkspaceRole(user, data.workspaceId, ["admin"]);
     const supplier = await prisma.supplier.findFirst({ where: { id: data.supplierId, workspaceId: data.workspaceId }, select: { id: true } });
     if (!supplier) return NextResponse.json({ error: "Supplier not found in workspace" }, { status: 404 });
     if (data.purchaseOrderId) { const order = await prisma.purchaseOrder.findFirst({ where: { id: data.purchaseOrderId, workspaceId: data.workspaceId, supplierId: data.supplierId }, select: { id: true } }); if (!order) return NextResponse.json({ error: "Purchase order does not belong to this supplier" }, { status: 400 }); }

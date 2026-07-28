@@ -28,10 +28,15 @@ function transform(
     name: r.name,
     username: r.username,
     role: r.role as UserForAdmin["role"],
+    isSuperAdmin: r.isSuperAdmin,
     status: (r.status ?? "approved") as UserForAdmin["status"],
     image: r.image,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt?.toISOString() ?? null,
+    workspaceAdminOf: r.workspaceMemberships.map((membership) => ({
+      workspaceId: membership.workspaceId,
+      workspaceName: membership.workspace.name,
+    })),
   };
 }
 
@@ -56,7 +61,8 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get("status") as "pending" | "approved" | "rejected" | null;
+    const status = searchParams.get("status") as
+      "pending" | "approved" | "rejected" | null;
 
     // Only cache when no filters are applied
     if (!status) {
@@ -118,6 +124,12 @@ export async function POST(request: NextRequest) {
     }
 
     const data = validation.data;
+    if (data.accountType === "super_admin" && !session.isSuperAdmin) {
+      return NextResponse.json(
+        { error: "Only Super admins can create Super admins" },
+        { status: 403 },
+      );
+    }
 
     // Check if email already exists
     if (await emailExists(data.email)) {

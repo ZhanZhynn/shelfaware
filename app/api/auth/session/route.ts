@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
       email: user.email,
       image: user.image || null, // Profile image URL (from Google OAuth)
       role: user.role ?? "user",
+      isSuperAdmin: user.isSuperAdmin,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     });

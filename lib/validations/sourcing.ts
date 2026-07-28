@@ -55,6 +55,14 @@ export const sourcingQuoteSchema = z.object({
   supplierId: z.string().min(1).optional().nullable(),
   supplierName: z.string().trim().min(1, "Supplier is required").max(200),
   unitPriceRmb: z.coerce.number().nonnegative("Price cannot be negative"),
+  piecesPerSellingUnit: optionalNumber(z.coerce.number().int().positive()),
+  cartonLengthCm: optionalNumber(z.coerce.number().positive()),
+  cartonWidthCm: optionalNumber(z.coerce.number().positive()),
+  cartonHeightCm: optionalNumber(z.coerce.number().positive()),
+  piecesPerCarton: optionalNumber(z.coerce.number().int().positive()),
+  marketPriceMyr: optionalNumber(z.coerce.number().positive()),
+  marketPack: optionalNumber(z.coerce.number().int().positive()),
+  overrideCostMyr: optionalNumber(z.coerce.number().positive()),
   moq: optionalNumber(z.coerce.number().int().positive()),
   unitsPerCarton: optionalNumber(z.coerce.number().int().positive()),
   cartonDimensions: optionalText(200),
@@ -147,8 +155,25 @@ export const sourcingSlaSettingsSchema = z.object({
   escalation: z.object({ thresholdHours: z.coerce.number().min(0).max(720), recipientIds: z.array(z.string().min(1)).max(50).refine((ids) => new Set(ids).size === ids.length, "Escalation recipients must be unique") }),
 });
 
+const costParameter = z.coerce.number().positive().max(100_000);
+const costPercentage = z.coerce.number().min(0).max(99.99);
+export const sourcingCostSettingsSchema = z.object({
+  fxCnyMyr: costParameter,
+  productCostMultiplier: costParameter,
+  shippingRateMyrPerM3: costParameter,
+  shopeeFeePercent: costPercentage,
+  fulfilmentFeePercent: costPercentage,
+  goldMarkup: costParameter,
+  tier2Markup: costParameter,
+  razorMarkup: costParameter,
+}).refine((value) => value.shopeeFeePercent + value.fulfilmentFeePercent < 100, {
+  message: "Marketplace and fulfilment fees must total less than 100%",
+  path: ["fulfilmentFeePercent"],
+});
+
 export type SourcingCaseInput = z.infer<typeof sourcingCaseSchema>;
 export type SourcingQuoteInput = z.infer<typeof sourcingQuoteSchema>;
 export type SourcingCommentInput = z.infer<typeof sourcingCommentSchema>;
 export type SourcingNextActionInput = z.infer<typeof sourcingNextActionSchema>;
 export type SourcingSlaSettingsInput = z.infer<typeof sourcingSlaSettingsSchema>;
+export type SourcingCostSettingsInput = z.infer<typeof sourcingCostSettingsSchema>;

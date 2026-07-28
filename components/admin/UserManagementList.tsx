@@ -14,7 +14,7 @@ import { UserManagementTable } from "./UserManagementTable";
 import CreateUserDialog from "./CreateUserDialog";
 import { AnalyticsCard } from "@/components/ui/analytics-card";
 import { AnalyticsCardSkeleton } from "@/components/ui/analytics-card-skeleton";
-import { Users, Shield, Truck, UserCircle } from "lucide-react";
+import { Users, Shield, Truck, UserCircle, Search } from "lucide-react";
 
 export type UserManagementListProps = {
   detailHrefBase?: string;
@@ -58,10 +58,12 @@ export default function UserManagementList({
 
   const roleCounts = useMemo(() => {
     const total = allUsers.length;
-    const admin = allUsers.filter((u) => u.role === "admin").length;
+    const superAdmin = allUsers.filter((u) => u.role === "admin" && u.isSuperAdmin).length;
+    const workspaceAdmin = allUsers.filter((u) => u.role === "admin" && !u.isSuperAdmin).length;
+    const sourcer = allUsers.filter((u) => u.role === "sourcer").length;
     const supplier = allUsers.filter((u) => u.role === "supplier").length;
     const client = allUsers.filter((u) => u.role === "client").length;
-    return { total, admin, supplier, client };
+    return { total, superAdmin, workspaceAdmin, sourcer, supplier, client };
   }, [allUsers]);
 
   return (
@@ -76,9 +78,10 @@ export default function UserManagementList({
       </div>
 
       {/* Role count cards — same data as table, updates on user CRUD */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 pb-6 items-stretch">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-6 items-stretch">
         {showSkeleton ? (
           <>
+            <AnalyticsCardSkeleton />
             <AnalyticsCardSkeleton />
             <AnalyticsCardSkeleton />
             <AnalyticsCardSkeleton />
@@ -94,11 +97,25 @@ export default function UserManagementList({
               variant="violet"
             />
             <AnalyticsCard
-              title="Admins"
-              value={roleCounts.admin}
-              description="Users with role admin"
+              title="Super admins"
+              value={roleCounts.superAdmin}
+              description="Global admin access"
               icon={Shield}
               variant="blue"
+            />
+            <AnalyticsCard
+              title="Admins"
+              value={roleCounts.workspaceAdmin}
+                description="Shared-workspace admin access"
+              icon={Shield}
+              variant="sky"
+            />
+            <AnalyticsCard
+              title="Sourcers"
+              value={roleCounts.sourcer}
+              description="Can quote assigned sourcing cases"
+              icon={Search}
+              variant="violet"
             />
             <AnalyticsCard
               title="Suppliers"

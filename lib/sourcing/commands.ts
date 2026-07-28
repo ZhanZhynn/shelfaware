@@ -8,13 +8,30 @@ import type {
   SourcingNextActionInput,
   SourcingQuoteInput,
 } from "@/lib/validations/sourcing";
-import { quoteGroupKey } from "./workflow";
+import { canEditQuote, quoteGroupKey } from "./workflow";
 import { ObjectId } from "mongodb";
 import { convertMoney } from "@/lib/money";
-import { getCurrentExchangeRate, isExchangeRateFresh } from "@/lib/exchange-rates/service";
-import { completeSourcingSla, dueAtForSourcingSla, normalizeSourcingSlaConfig } from "./sla";
+import {
+  getCurrentExchangeRate,
+  isExchangeRateFresh,
+} from "@/lib/exchange-rates/service";
+import {
+  completeSourcingSla,
+  dueAtForSourcingSla,
+  normalizeSourcingSlaConfig,
+} from "./sla";
+import {
+  calculateSourcingLandedCost,
+  normalizeSourcingCostConfig,
+} from "./landed-cost";
 
-type Actor = { id: string; role: string | null; email: string; name: string };
+type Actor = {
+  id: string;
+  role: string | null;
+  isSuperAdmin?: boolean;
+  email: string;
+  name: string;
+};
 type QuoteItem = {
   name: string;
   sku: string;
@@ -90,29 +107,37 @@ export async function createSourcingCase(
   ]);
   if (!input.title.trim())
     throw new SourcingAccessError("Title is required", 400);
-  const assignedToId = input.assignedToId || (access.role === "sourcer" ? actor.id : null);
+  const assignedToId =
+    input.assignedToId || (access.role === "sourcer" ? actor.id : null);
   if (assignedToId) {
     if (input.assignedToId && !access.globalAdmin && access.role !== "admin")
       throw new SourcingAccessError("Only workspace admins can assign cases");
-    const member = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId: input.workspaceId,
-          userId: assignedToId,
-        },
-      },
+    const sourcer = await prisma.user.findFirst({
+      where: { id: assignedToId, role: "sourcer", status: "approved" },
+      select: { id: true },
     });
-    if (!member || !["admin", "sourcer"].includes(member.role))
+    if (!sourcer)
       throw new SourcingAccessError(
-        "Assignee must be a sourcing workspace member",
+        "Assignee must be an approved Sourcer",
         400,
       );
   }
-  const workspace = await prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { sourcingSlaConfig: true } });
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: input.workspaceId },
+    select: { sourcingSlaConfig: true },
+  });
   const slaConfig = normalizeSourcingSlaConfig(workspace?.sourcingSlaConfig);
   const startedAt = new Date();
-  const firstResponseDueAt = dueAtForSourcingSla("first_response", startedAt, slaConfig);
-  const quoteDueAt = dueAtForSourcingSla("quote_submission", startedAt, slaConfig);
+  const firstResponseDueAt = dueAtForSourcingSla(
+    "first_response",
+    startedAt,
+    slaConfig,
+  );
+  const quoteDueAt = dueAtForSourcingSla(
+    "quote_submission",
+    startedAt,
+    slaConfig,
+  );
   const sourcingCase = await prisma.$transaction(async (tx) => {
     const created = await tx.sourcingCase.create({
       data: {
@@ -137,14 +162,29 @@ export async function createSourcingCase(
       },
       include: listInclude,
     });
-    await tx.sourcingSlaRecord.create({ data: {
-      workspaceId: input.workspaceId, caseId: created.id, rule: "first_response", ownerId: assignedToId,
-      startedAt, dueAt: firstResponseDueAt, completedAt: assignedToId ? startedAt : null, onTime: assignedToId ? true : null,
-    } });
-    if (assignedToId) await tx.sourcingSlaRecord.create({ data: {
-      workspaceId: input.workspaceId, caseId: created.id, rule: "quote_submission", ownerId: assignedToId,
-      startedAt, dueAt: quoteDueAt,
-    } });
+    await tx.sourcingSlaRecord.create({
+      data: {
+        workspaceId: input.workspaceId,
+        caseId: created.id,
+        rule: "first_response",
+        ownerId: assignedToId,
+        startedAt,
+        dueAt: firstResponseDueAt,
+        completedAt: assignedToId ? startedAt : null,
+        onTime: assignedToId ? true : null,
+      },
+    });
+    if (assignedToId)
+      await tx.sourcingSlaRecord.create({
+        data: {
+          workspaceId: input.workspaceId,
+          caseId: created.id,
+          rule: "quote_submission",
+          ownerId: assignedToId,
+          startedAt,
+          dueAt: quoteDueAt,
+        },
+      });
     await event(tx, created.id, input.workspaceId, actor.id, "case_created", {
       assignedToId,
     });
@@ -160,7 +200,9 @@ export async function createSourcingCase(
       title: "Sourcing case assigned",
       message: `${actor.name} assigned you to ${sourcingCase.title}.`,
       dedupeKey: `case_created:${sourcingCase.id}:${assignedToId}`,
-    }).catch((error) => logger.error("[Sourcing] Assignment notification delivery failed", error));
+    }).catch((error) =>
+      logger.error("[Sourcing] Assignment notification delivery failed", error),
+    );
   }
   return sourcingCase;
 }
@@ -170,11 +212,22 @@ export async function updateSourcingNextAction(
   caseId: string,
   input: SourcingNextActionInput,
 ) {
-  const current = await prisma.sourcingCase.findUnique({ where: { id: caseId } });
+  const current = await prisma.sourcingCase.findUnique({
+    where: { id: caseId },
+  });
   if (!current) throw new SourcingAccessError("Sourcing case not found", 404);
-  const access = await requireWorkspaceRole(actor, current.workspaceId, ["admin", "sourcer"]);
-  if (!access.globalAdmin && access.role !== "admin" && current.assignedToId !== actor.id) {
-    throw new SourcingAccessError("Only the assigned sourcer can update this case");
+  const access = await requireWorkspaceRole(actor, current.workspaceId, [
+    "admin",
+    "sourcer",
+  ]);
+  if (
+    !access.globalAdmin &&
+    access.role !== "admin" &&
+    current.assignedToId !== actor.id
+  ) {
+    throw new SourcingAccessError(
+      "Only the assigned sourcer can update this case",
+    );
   }
 
   return prisma.$transaction(async (tx) => {
@@ -215,13 +268,16 @@ export async function runSourcingCommand(
     where: { id: caseId },
   });
   if (!current) throw new SourcingAccessError("Sourcing case not found", 404);
-  const workspace = await prisma.workspace.findUnique({ where: { id: current.workspaceId }, select: { sourcingSlaConfig: true } });
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: current.workspaceId },
+    select: { sourcingSlaConfig: true, sourcingCostConfig: true },
+  });
   const slaConfig = normalizeSourcingSlaConfig(workspace?.sourcingSlaConfig);
+  const costConfig = normalizeSourcingCostConfig(workspace?.sourcingCostConfig);
   const access = await requireWorkspaceRole(actor, current.workspaceId, [
     "admin",
     "sourcer",
   ]);
-  const isAssigned = current.assignedToId === actor.id;
   // Fetch outside the workflow transaction: a provider/cache read must not hold
   // a MongoDB transaction open, and the snapshot is persisted on approval.
   const approvalReferenceRate =
@@ -229,7 +285,15 @@ export async function runSourcingCommand(
       ? await getCurrentExchangeRate("CNY", "MYR")
       : null;
   const requireAssigned = () => {
-    if (!access.globalAdmin && access.role !== "admin" && !isAssigned)
+    if (
+      !canEditQuote(
+        access.role,
+        access.globalAdmin,
+        current.assignedToId,
+        actor.id,
+        current.stage,
+      )
+    )
       throw new SourcingAccessError(
         "Only the assigned sourcer can update this case",
       );
@@ -250,17 +314,17 @@ export async function runSourcingCommand(
         throw new SourcingAccessError("Only workspace admins can assign cases");
       if (!command.assigneeId)
         throw new SourcingAccessError("Assignee is required", 400);
-      const member = await tx.workspaceMember.findUnique({
+      const sourcer = await tx.user.findFirst({
         where: {
-          workspaceId_userId: {
-            workspaceId: item.workspaceId,
-            userId: command.assigneeId,
-          },
+          id: command.assigneeId,
+          role: "sourcer",
+          status: "approved",
         },
+        select: { id: true },
       });
-      if (!member || !["admin", "sourcer"].includes(member.role))
+      if (!sourcer)
         throw new SourcingAccessError(
-          "Assignee must be a sourcing member",
+          "Assignee must be an approved Sourcer",
           400,
         );
       const now = new Date();
@@ -268,10 +332,22 @@ export async function runSourcingCommand(
       if (!item.assignedToId) {
         await completeSourcingSla(tx, caseId, "first_response", now);
         const dueAt = dueAtForSourcingSla("quote_submission", now, slaConfig);
-        await tx.sourcingSlaRecord.create({ data: { workspaceId: item.workspaceId, caseId, rule: "quote_submission", ownerId: command.assigneeId, startedAt: now, dueAt } });
+        await tx.sourcingSlaRecord.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            rule: "quote_submission",
+            ownerId: command.assigneeId,
+            startedAt: now,
+            dueAt,
+          },
+        });
         slaData = { slaDueAt: dueAt, slaRule: "quote_submission" };
       } else {
-        await tx.sourcingSlaRecord.updateMany({ where: { caseId, completedAt: null }, data: { ownerId: command.assigneeId } });
+        await tx.sourcingSlaRecord.updateMany({
+          where: { caseId, completedAt: null },
+          data: { ownerId: command.assigneeId },
+        });
       }
       const updated = await bump({
         assignedToId: command.assigneeId,
@@ -283,7 +359,9 @@ export async function runSourcingCommand(
       });
       return updated;
     }
-    if (["create_quote", "save_quote", "submit_quote"].includes(command.action)) {
+    if (
+      ["create_quote", "save_quote", "submit_quote"].includes(command.action)
+    ) {
       requireAssigned();
       if (!editableStages.includes(item.stage))
         throw new SourcingAccessError(
@@ -292,10 +370,39 @@ export async function runSourcingCommand(
         );
       if (!command.quote)
         throw new SourcingAccessError("A valid quote is required", 400);
-      if (["save_quote", "submit_quote"].includes(command.action) && !command.quoteId)
+      if (
+        ["save_quote", "submit_quote"].includes(command.action) &&
+        !command.quoteId
+      )
         throw new SourcingAccessError("A quote must be selected", 400);
-      const latest = await tx.sourcingQuote.findFirst({ where: { caseId }, orderBy: { revision: "desc" } });
+      const latest = await tx.sourcingQuote.findFirst({
+        where: { caseId },
+        orderBy: { revision: "desc" },
+      });
       const quoteInput = command.quote;
+      const landedCostSnapshot =
+        command.action === "submit_quote"
+          ? calculateSourcingLandedCost(
+              {
+                unitCostCny: quoteInput.unitPriceRmb,
+                piecesPerSellingUnit: quoteInput.piecesPerSellingUnit,
+                cartonLengthCm: quoteInput.cartonLengthCm,
+                cartonWidthCm: quoteInput.cartonWidthCm,
+                cartonHeightCm: quoteInput.cartonHeightCm,
+                piecesPerCarton: quoteInput.piecesPerCarton,
+                marketPriceMyr: quoteInput.marketPriceMyr,
+                marketPack: quoteInput.marketPack,
+                overrideCostMyr: quoteInput.overrideCostMyr,
+              },
+              costConfig,
+            )
+          : null;
+      if (command.action === "submit_quote" && !landedCostSnapshot) {
+        throw new SourcingAccessError(
+          "A supplier cost or RM override is required before submitting a quote",
+          400,
+        );
+      }
       const quoteData = {
         supplierName: quoteInput.supplierName.trim(),
         supplierId: quoteInput.supplierId || null,
@@ -304,11 +411,25 @@ export async function runSourcingCommand(
           {
             name: item.title,
             sku: item.id,
-             quantity: item.requestedQuantity ?? quoteInput.moq ?? 1,
+            quantity: item.requestedQuantity ?? quoteInput.moq ?? 1,
             unitCost: quoteInput.unitPriceRmb,
           },
         ]),
         unitPriceRmb: quoteInput.unitPriceRmb,
+        piecesPerSellingUnit: quoteInput.piecesPerSellingUnit ?? null,
+        cartonLengthCm: quoteInput.cartonLengthCm ?? null,
+        cartonWidthCm: quoteInput.cartonWidthCm ?? null,
+        cartonHeightCm: quoteInput.cartonHeightCm ?? null,
+        piecesPerCarton: quoteInput.piecesPerCarton ?? null,
+        marketPriceMyr: quoteInput.marketPriceMyr ?? null,
+        marketPack: quoteInput.marketPack ?? null,
+        overrideCostMyr: quoteInput.overrideCostMyr ?? null,
+        ...(command.action === "submit_quote"
+          ? {
+              costParamsSnapshot: json(costConfig),
+              landedCostSnapshot: json(landedCostSnapshot),
+            }
+          : {}),
         moq: quoteInput.moq ?? null,
         unitsPerCarton: quoteInput.unitsPerCarton ?? null,
         cartonDimensions: quoteInput.cartonDimensions?.trim() || null,
@@ -330,10 +451,15 @@ export async function runSourcingCommand(
       const revision = (latest?.revision ?? 0) + 1;
       // A draft is the editable working copy. Revisions are created only after submission or a change request.
       const target = command.quoteId
-        ? await tx.sourcingQuote.findFirst({ where: { id: command.quoteId, caseId, status: "draft" } })
+        ? await tx.sourcingQuote.findFirst({
+            where: { id: command.quoteId, caseId, status: "draft" },
+          })
         : null;
       if (command.quoteId && !target)
-        throw new SourcingAccessError("The selected quote is not an editable draft", 409);
+        throw new SourcingAccessError(
+          "The selected quote is not an editable draft",
+          409,
+        );
       const quote =
         command.action !== "create_quote" && target
           ? await tx.sourcingQuote.update({
@@ -352,26 +478,39 @@ export async function runSourcingCommand(
                 caseId,
                 quoteGroupId: new ObjectId().toHexString(),
                 revision,
-                status:
-                  "draft",
+                status: "draft",
                 ...quoteData,
                 createdById: actor.id,
               },
             });
       const updated = await bump({
-        ...(command.action === "submit_quote" ? (() => {
-          const now = new Date();
-          return { stage: "quoted", slaDueAt: dueAtForSourcingSla("approval", now, slaConfig), slaRule: "approval" };
-        })() : { stage: item.stage }),
+        ...(command.action === "submit_quote"
+          ? (() => {
+              const now = new Date();
+              return {
+                stage: "quoted",
+                slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
+                slaRule: "approval",
+              };
+            })()
+          : { stage: item.stage }),
       });
       if (command.action === "submit_quote") {
         const now = new Date();
         await completeSourcingSla(tx, caseId, "quote_submission", now);
-        await tx.sourcingSlaRecord.create({ data: { workspaceId: item.workspaceId, caseId, rule: "approval", startedAt: now, dueAt: dueAtForSourcingSla("approval", now, slaConfig) } });
+        await tx.sourcingSlaRecord.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            rule: "approval",
+            startedAt: now,
+            dueAt: dueAtForSourcingSla("approval", now, slaConfig),
+          },
+        });
       }
       await event(tx, caseId, item.workspaceId, actor.id, command.action, {
-         quoteId: quote.id,
-         revision: quote.revision,
+        quoteId: quote.id,
+        revision: quote.revision,
       });
       return updated;
     }
@@ -394,19 +533,24 @@ export async function runSourcingCommand(
         throw new SourcingAccessError(
           "Only workspace admins can make a sourcing decision",
         );
-       const latestSubmitted = command.quoteId
-         ? await tx.sourcingQuote.findFirst({ where: { id: command.quoteId, caseId, status: "submitted" } })
-         : null;
-       const latest = await tx.sourcingQuote.findFirst({ where: { caseId }, orderBy: { revision: "desc" } });
+      const latestSubmitted = command.quoteId
+        ? await tx.sourcingQuote.findFirst({
+            where: { id: command.quoteId, caseId, status: "submitted" },
+          })
+        : null;
+      const latest = await tx.sourcingQuote.findFirst({
+        where: { caseId },
+        orderBy: { revision: "desc" },
+      });
       if (
         ["request_changes", "approve", "reject", "cannot_source"].includes(
           command.action,
         ) &&
-         !latestSubmitted &&
+        !latestSubmitted &&
         command.action !== "cannot_source"
       )
         throw new SourcingAccessError("A submitted quote is required", 409);
-       if (command.action === "request_changes") {
+      if (command.action === "request_changes") {
         if (item.stage !== "quoted")
           throw new SourcingAccessError(
             "Only quoted cases can request changes",
@@ -417,38 +561,53 @@ export async function runSourcingCommand(
             "Change request reason is required",
             400,
           );
-         const copied = await tx.sourcingQuote.create({
+        const copied = await tx.sourcingQuote.create({
           data: {
             workspaceId: item.workspaceId,
             caseId,
-              quoteGroupId: quoteGroupKey(latestSubmitted!),
-              revision: (latest?.revision ?? 0) + 1,
+            quoteGroupId: quoteGroupKey(latestSubmitted!),
+            revision: (latest?.revision ?? 0) + 1,
             status: "draft",
-             supplierName: latestSubmitted!.supplierName,
-             supplierId: latestSubmitted!.supplierId,
-             currency: latestSubmitted!.currency,
-             items: json(latestSubmitted!.items),
-             unitPriceRmb: latestSubmitted!.unitPriceRmb,
-             moq: latestSubmitted!.moq,
-             unitsPerCarton: latestSubmitted!.unitsPerCarton,
-             cartonDimensions: latestSubmitted!.cartonDimensions,
-             cartonWeightKg: latestSubmitted!.cartonWeightKg,
-             leadTimeDays: latestSubmitted!.leadTimeDays,
-             validUntil: latestSubmitted!.validUntil,
-              samplePhotoUrls: latestSubmitted!.samplePhotoUrls ?? undefined,
-              paymentTerms: latestSubmitted!.paymentTerms,
-              certifications: latestSubmitted!.certifications ?? undefined,
-              complianceNotes: latestSubmitted!.complianceNotes,
-              riskLevel: latestSubmitted!.riskLevel,
-              recommendation: latestSubmitted!.recommendation,
-              priceBreaks: latestSubmitted!.priceBreaks ?? undefined,
-             notes: command.reason.trim(),
+            supplierName: latestSubmitted!.supplierName,
+            supplierId: latestSubmitted!.supplierId,
+            currency: latestSubmitted!.currency,
+            items: json(latestSubmitted!.items),
+            unitPriceRmb: latestSubmitted!.unitPriceRmb,
+            piecesPerSellingUnit: latestSubmitted!.piecesPerSellingUnit,
+            cartonLengthCm: latestSubmitted!.cartonLengthCm,
+            cartonWidthCm: latestSubmitted!.cartonWidthCm,
+            cartonHeightCm: latestSubmitted!.cartonHeightCm,
+            piecesPerCarton: latestSubmitted!.piecesPerCarton,
+            marketPriceMyr: latestSubmitted!.marketPriceMyr,
+            marketPack: latestSubmitted!.marketPack,
+            overrideCostMyr: latestSubmitted!.overrideCostMyr,
+            costParamsSnapshot:
+              latestSubmitted!.costParamsSnapshot ?? undefined,
+            landedCostSnapshot:
+              latestSubmitted!.landedCostSnapshot ?? undefined,
+            moq: latestSubmitted!.moq,
+            unitsPerCarton: latestSubmitted!.unitsPerCarton,
+            cartonDimensions: latestSubmitted!.cartonDimensions,
+            cartonWeightKg: latestSubmitted!.cartonWeightKg,
+            leadTimeDays: latestSubmitted!.leadTimeDays,
+            validUntil: latestSubmitted!.validUntil,
+            samplePhotoUrls: latestSubmitted!.samplePhotoUrls ?? undefined,
+            paymentTerms: latestSubmitted!.paymentTerms,
+            certifications: latestSubmitted!.certifications ?? undefined,
+            complianceNotes: latestSubmitted!.complianceNotes,
+            riskLevel: latestSubmitted!.riskLevel,
+            recommendation: latestSubmitted!.recommendation,
+            priceBreaks: latestSubmitted!.priceBreaks ?? undefined,
+            notes: command.reason.trim(),
             createdById: actor.id,
           },
         });
         await tx.sourcingQuote.update({
-            where: { id: latestSubmitted!.id },
-           data: { status: "superseded", quoteGroupId: quoteGroupKey(latestSubmitted!) },
+          where: { id: latestSubmitted!.id },
+          data: {
+            status: "superseded",
+            quoteGroupId: quoteGroupKey(latestSubmitted!),
+          },
         });
         const updated = await bump({ stage: "changes_requested" });
         await event(
@@ -476,38 +635,59 @@ export async function runSourcingCommand(
           !command.reason?.trim()
         )
           throw new SourcingAccessError("A reason is required", 400);
-         let approvalData: Prisma.SourcingCaseUpdateInput = {};
-         if (command.action === "approve") {
-           const selected = latestSubmitted!;
-           const referenceRate = approvalReferenceRate;
-           const rate = command.fxRateOverride ?? referenceRate?.rate;
-           if (!rate || (!command.fxRateOverride && !referenceRate) || (!command.fxRateOverride && !isExchangeRateFresh(referenceRate!))) {
-             throw new SourcingAccessError("A current CNY to MYR exchange rate is required before approval", 409);
-           }
-           const unitPriceMyr = selected.unitPriceRmb == null ? null : convertMoney(selected.unitPriceRmb, rate);
-           await tx.sourcingQuote.update({
-             where: { id: selected.id },
-             data: {
-               unitPriceMyr,
-               fxRate: rate,
-               fxRateDate: referenceRate?.rateDate ?? new Date(),
-               fxProvider: command.fxRateOverride ? "admin_override" : referenceRate!.provider,
-               fxOverriddenById: command.fxRateOverride ? actor.id : null,
-               fxOverrideReason: command.fxRateOverride ? command.fxOverrideReason!.trim() : null,
-               approvedAt: new Date(),
-             },
-           });
-           approvalData = { selectedQuoteId: selected.id };
-         }
-          const stage =
-            command.action === "approve" ? "approved" : command.action;
-          const now = new Date();
-          if (["approve", "reject"].includes(command.action)) await completeSourcingSla(tx, caseId, "approval", now);
-          const updated = await bump({ stage, slaDueAt: null, slaRule: null, ...approvalData });
+        let approvalData: Prisma.SourcingCaseUpdateInput = {};
+        if (command.action === "approve") {
+          const selected = latestSubmitted!;
+          const referenceRate = approvalReferenceRate;
+          const rate = command.fxRateOverride ?? referenceRate?.rate;
+          if (
+            !rate ||
+            (!command.fxRateOverride && !referenceRate) ||
+            (!command.fxRateOverride && !isExchangeRateFresh(referenceRate!))
+          ) {
+            throw new SourcingAccessError(
+              "A current CNY to MYR exchange rate is required before approval",
+              409,
+            );
+          }
+          const unitPriceMyr =
+            selected.unitPriceRmb == null
+              ? null
+              : convertMoney(selected.unitPriceRmb, rate);
+          await tx.sourcingQuote.update({
+            where: { id: selected.id },
+            data: {
+              unitPriceMyr,
+              fxRate: rate,
+              fxRateDate: referenceRate?.rateDate ?? new Date(),
+              fxProvider: command.fxRateOverride
+                ? "admin_override"
+                : referenceRate!.provider,
+              fxOverriddenById: command.fxRateOverride ? actor.id : null,
+              fxOverrideReason: command.fxRateOverride
+                ? command.fxOverrideReason!.trim()
+                : null,
+              approvedAt: new Date(),
+            },
+          });
+          approvalData = { selectedQuoteId: selected.id };
+        }
+        const stage =
+          command.action === "approve" ? "approved" : command.action;
+        const now = new Date();
+        if (["approve", "reject"].includes(command.action))
+          await completeSourcingSla(tx, caseId, "approval", now);
+        const updated = await bump({
+          stage,
+          slaDueAt: null,
+          slaRule: null,
+          ...approvalData,
+        });
         await event(tx, caseId, item.workspaceId, actor.id, command.action, {
-           reason: command.reason,
-           quoteId: command.action === "approve" ? latestSubmitted?.id : undefined,
-           fxRateOverride: command.fxRateOverride,
+          reason: command.reason,
+          quoteId:
+            command.action === "approve" ? latestSubmitted?.id : undefined,
+          fxRateOverride: command.fxRateOverride,
         });
         return updated;
       }
@@ -516,7 +696,10 @@ export async function runSourcingCommand(
           throw new SourcingAccessError(
             "Only workspace admins can archive cases",
           );
-        if (command.action === "archive" && ["ordered", "shipped", "received"].includes(item.stage))
+        if (
+          command.action === "archive" &&
+          ["ordered", "shipped", "received"].includes(item.stage)
+        )
           throw new SourcingAccessError(
             "Ordered, shipped, or received cases cannot be archived",
             409,
@@ -547,9 +730,9 @@ export async function runSourcingCommand(
           variant: item.variant,
           specifications: item.specifications,
           referenceUrl: item.referenceUrl,
-           notes: item.notes,
-           requestedQuantity: item.requestedQuantity,
-           targetUnitPriceMyr: item.targetUnitPriceMyr,
+          notes: item.notes,
+          requestedQuantity: item.requestedQuantity,
+          targetUnitPriceMyr: item.targetUnitPriceMyr,
           route: item.route,
           stage: "draft",
           createdById: actor.id,
@@ -570,9 +753,11 @@ export async function runSourcingCommand(
           "Only approved cases can be ordered",
           409,
         );
-       const quote = item.selectedQuoteId
-         ? await tx.sourcingQuote.findFirst({ where: { id: item.selectedQuoteId, caseId, status: "submitted" } })
-         : null;
+      const quote = item.selectedQuoteId
+        ? await tx.sourcingQuote.findFirst({
+            where: { id: item.selectedQuoteId, caseId, status: "submitted" },
+          })
+        : null;
       if (!quote) throw new SourcingAccessError("No approved quote found", 409);
       const lines = quote.items as unknown as QuoteItem[];
       let supplier = quote.supplierId
@@ -637,7 +822,7 @@ export async function runSourcingCommand(
               name: line.name,
               sku: line.sku,
               skuScopeId: item.workspaceId,
-               price: 0,
+              price: 0,
               quantity: BigInt(0),
               status: "active",
               categoryId: category.id,
@@ -665,7 +850,13 @@ export async function runSourcingCommand(
           workspaceId: item.workspaceId,
           status: "ordered",
           currency: quote.currency,
-          convertedTotalMyr: quote.unitPriceMyr == null ? null : products.reduce((total, line) => total + line.quantity * quote.unitPriceMyr!, 0),
+          convertedTotalMyr:
+            quote.unitPriceMyr == null
+              ? null
+              : products.reduce(
+                  (total, line) => total + line.quantity * quote.unitPriceMyr!,
+                  0,
+                ),
           fxRate: quote.fxRate,
           fxRateDate: quote.fxRateDate,
           fxProvider: quote.fxProvider,
@@ -693,13 +884,27 @@ export async function runSourcingCommand(
           caseId,
           quoteId: quote.id,
           purchaseOrderId: po.id,
+          landedCostSnapshot: quote.landedCostSnapshot ?? undefined,
           createdById: actor.id,
         },
       });
       const now = new Date();
       const shipmentDueAt = dueAtForSourcingSla("shipment", now, slaConfig);
-      await tx.sourcingSlaRecord.create({ data: { workspaceId: item.workspaceId, caseId, rule: "shipment", ownerId: item.assignedToId, startedAt: now, dueAt: shipmentDueAt } });
-      const updated = await bump({ stage: "ordered", slaDueAt: shipmentDueAt, slaRule: "shipment" });
+      await tx.sourcingSlaRecord.create({
+        data: {
+          workspaceId: item.workspaceId,
+          caseId,
+          rule: "shipment",
+          ownerId: item.assignedToId,
+          startedAt: now,
+          dueAt: shipmentDueAt,
+        },
+      });
+      const updated = await bump({
+        stage: "ordered",
+        slaDueAt: shipmentDueAt,
+        slaRule: "shipment",
+      });
       await event(tx, caseId, item.workspaceId, actor.id, "order_confirmed", {
         purchaseOrderId: po.id,
       });
@@ -710,21 +915,36 @@ export async function runSourcingCommand(
   const notification = async () => {
     if (command.action === "assign" && command.assigneeId) {
       await deliverSourcingNotification({
-        workspaceId: current.workspaceId, caseId, recipientIds: [command.assigneeId], excludeUserId: actor.id,
-        kind: "assignment", title: "Sourcing case assigned", message: `${actor.name} assigned you to ${current.title}.`,
+        workspaceId: current.workspaceId,
+        caseId,
+        recipientIds: [command.assigneeId],
+        excludeUserId: actor.id,
+        kind: "assignment",
+        title: "Sourcing case assigned",
+        message: `${actor.name} assigned you to ${current.title}.`,
         dedupeKey: `assigned:${caseId}:${result.version}:${command.assigneeId}`,
       });
       return;
     }
     if (command.action === "submit_quote") {
       await deliverSourcingNotification({
-        workspaceId: current.workspaceId, caseId, recipientIds: await sourcingAdmins(current.workspaceId), excludeUserId: actor.id,
-        kind: "quote", title: "Sourcing quote submitted", message: `${actor.name} submitted a quote for ${current.title}.`,
+        workspaceId: current.workspaceId,
+        caseId,
+        recipientIds: await sourcingAdmins(current.workspaceId),
+        excludeUserId: actor.id,
+        kind: "quote",
+        title: "Sourcing quote submitted",
+        message: `${actor.name} submitted a quote for ${current.title}.`,
         dedupeKey: `submit_quote:${caseId}:${result.version}`,
       });
       return;
     }
-    if (["request_changes", "approve", "reject", "cannot_source"].includes(command.action) && current.assignedToId) {
+    if (
+      ["request_changes", "approve", "reject", "cannot_source"].includes(
+        command.action,
+      ) &&
+      current.assignedToId
+    ) {
       const messages: Record<string, string> = {
         request_changes: `${actor.name} requested changes to the quote for ${current.title}.`,
         approve: `${actor.name} approved the quote for ${current.title}.`,
@@ -732,12 +952,19 @@ export async function runSourcingCommand(
         cannot_source: `${actor.name} marked ${current.title} as cannot source.`,
       };
       await deliverSourcingNotification({
-        workspaceId: current.workspaceId, caseId, recipientIds: [current.assignedToId], excludeUserId: actor.id,
-        kind: "decision", title: "Sourcing quote decision", message: messages[command.action]!,
+        workspaceId: current.workspaceId,
+        caseId,
+        recipientIds: [current.assignedToId],
+        excludeUserId: actor.id,
+        kind: "decision",
+        title: "Sourcing quote decision",
+        message: messages[command.action]!,
         dedupeKey: `${command.action}:${caseId}:${result.version}`,
       });
     }
   };
-  void notification().catch((error) => logger.error("[Sourcing] Command notification delivery failed", error));
+  void notification().catch((error) =>
+    logger.error("[Sourcing] Command notification delivery failed", error),
+  );
   return result;
 }

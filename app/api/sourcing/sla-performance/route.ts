@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     await requireWorkspaceRole(user, workspaceId, ["admin", "sourcer"]);
     const now = new Date();
-    const records = await prisma.sourcingSlaRecord.findMany({ where: { workspaceId }, select: { rule: true, ownerId: true, startedAt: true, dueAt: true, completedAt: true, onTime: true } });
+    const records = await prisma.sourcingSlaRecord.findMany({ where: { workspaceId, ...(user.role === "sourcer" ? { ownerId: user.id } : {}) }, select: { rule: true, ownerId: true, startedAt: true, dueAt: true, completedAt: true, onTime: true } });
     const completed = records.filter((record) => record.completedAt);
     const openBreaches = records.filter((record) => !record.completedAt && record.dueAt < now);
     const breaches = completed.filter((record) => record.onTime === false).length + openBreaches.length;

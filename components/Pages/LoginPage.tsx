@@ -29,7 +29,9 @@ export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) 
   useEffect(() => {
     if (isLoggedIn && !navigatingFromSubmitRef.current) {
       const dest = sourcing ? "/sourcing" :
-        user?.role === "client"
+        user?.role === "admin"
+          ? "/admin"
+          : user?.role === "client"
           ? "/client"
           : user?.role === "supplier"
             ? "/supplier"
@@ -172,8 +174,10 @@ export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) 
       // Full-page navigation to the correct dashboard for the user's role.
       // window.location.href bypasses the Next.js RSC cache which can contain
       // stale 307 redirects from before login, causing infinite redirect loops.
-      let dest =
-        userData.role === "client"
+        let dest =
+          userData.role === "admin"
+            ? "/admin"
+            : userData.role === "client"
           ? "/client"
           : userData.role === "supplier"
             ? "/supplier"

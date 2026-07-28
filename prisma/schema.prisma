@@ -13,17 +13,17 @@ datasource db {
 }
 
 model Category {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
   name        String
-  userId      String    @db.ObjectId // Created by user ID
-  workspaceId String?   @db.ObjectId
-  status      Boolean   @default(true) // Active/Inactive status (default: active)
+  userId      String     @db.ObjectId // Created by user ID
+  workspaceId String?    @db.ObjectId
+  status      Boolean    @default(true) // Active/Inactive status (default: active)
   description String? // Optional description field
   notes       String? // Optional notes field
-  createdAt   DateTime  @default(now()) @db.Date
-  updatedAt   DateTime? @db.Date // Manually managed - null on create, set on update
-  createdBy   String    @db.ObjectId // Same as userId, for clarity
-  updatedBy   String?   @db.ObjectId // Last updated by user ID
+  createdAt   DateTime   @default(now()) @db.Date
+  updatedAt   DateTime?  @db.Date // Manually managed - null on create, set on update
+  createdBy   String     @db.ObjectId // Same as userId, for clarity
+  updatedBy   String?    @db.ObjectId // Last updated by user ID
   workspace   Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@index([workspaceId])
@@ -34,70 +34,70 @@ model Department {
 }
 
 model Invoice {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  invoiceNumber String   @unique // Unique invoice number (e.g., INV-2024-001)
-  orderId       String   @db.ObjectId @unique // Reference to Order (one-to-one relationship)
-  userId        String   @db.ObjectId // User who created the invoice (admin/warehouse user)
-  clientId      String?  @db.ObjectId // Client who the invoice is for (optional)
-  status        String   @default("draft") // Invoice status: draft, sent, paid, overdue, cancelled
-  currency      String   @default("MYR") // ISO 4217 transaction currency
-  subtotal      Float    @default(0) // Invoice subtotal (before tax, shipping, discount)
-  tax           Float? // Tax amount (optional)
-  shipping      Float? // Shipping amount (optional), same as order for transparency
-  discount      Float? // Discount amount (optional)
-  total         Float    @default(0) // Total amount (subtotal + tax + shipping - discount)
-  amountPaid    Float    @default(0) // Amount paid so far (for partial payments)
-  amountDue     Float    @default(0) // Amount due (total - amountPaid)
-  dueDate       DateTime // Invoice due date
-  issuedAt      DateTime @default(now()) @db.Date // Invoice issue date
-  sentAt        DateTime? @db.Date // When invoice was sent to client
-  paidAt        DateTime? @db.Date // When invoice was paid
-  cancelledAt   DateTime? @db.Date // Cancellation date (if cancelled)
-  paymentLink   String? // Stripe payment link (optional)
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  invoiceNumber         String    @unique // Unique invoice number (e.g., INV-2024-001)
+  orderId               String    @unique @db.ObjectId // Reference to Order (one-to-one relationship)
+  userId                String    @db.ObjectId // User who created the invoice (admin/warehouse user)
+  clientId              String?   @db.ObjectId // Client who the invoice is for (optional)
+  status                String    @default("draft") // Invoice status: draft, sent, paid, overdue, cancelled
+  currency              String    @default("MYR") // ISO 4217 transaction currency
+  subtotal              Float     @default(0) // Invoice subtotal (before tax, shipping, discount)
+  tax                   Float? // Tax amount (optional)
+  shipping              Float? // Shipping amount (optional), same as order for transparency
+  discount              Float? // Discount amount (optional)
+  total                 Float     @default(0) // Total amount (subtotal + tax + shipping - discount)
+  amountPaid            Float     @default(0) // Amount paid so far (for partial payments)
+  amountDue             Float     @default(0) // Amount due (total - amountPaid)
+  dueDate               DateTime // Invoice due date
+  issuedAt              DateTime  @default(now()) @db.Date // Invoice issue date
+  sentAt                DateTime? @db.Date // When invoice was sent to client
+  paidAt                DateTime? @db.Date // When invoice was paid
+  cancelledAt           DateTime? @db.Date // Cancellation date (if cancelled)
+  paymentLink           String? // Stripe payment link (optional)
   stripePaymentIntentId String? // Stripe PaymentIntent ID for refunds
-  notes         String? // Invoice notes (optional)
-  billingAddress Json? // Billing address (JSON object with street, city, state, zipCode, country)
-  createdAt     DateTime @default(now()) @db.Date
-  updatedAt     DateTime? @db.Date // Manually managed - null on create, set on update
-  createdBy     String   @db.ObjectId // Same as userId, for clarity
-  updatedBy     String?  @db.ObjectId // Last updated by user ID
-  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relation to Order (one-to-one)
+  notes                 String? // Invoice notes (optional)
+  billingAddress        Json? // Billing address (JSON object with street, city, state, zipCode, country)
+  createdAt             DateTime  @default(now()) @db.Date
+  updatedAt             DateTime? @db.Date // Manually managed - null on create, set on update
+  createdBy             String    @db.ObjectId // Same as userId, for clarity
+  updatedBy             String?   @db.ObjectId // Last updated by user ID
+  order                 Order     @relation(fields: [orderId], references: [id], onDelete: Cascade) // Relation to Order (one-to-one)
+  // orderId already has @unique, so it's automatically indexed
 
   @@index([userId, status, dueDate]) // Index for efficient querying by user, status, and due date
-  // orderId already has @unique, so it's automatically indexed
 }
 
 model Order {
-  id                String      @id @default(auto()) @map("_id") @db.ObjectId
-  orderNumber       String      @unique // Unique order number (e.g., ORD-2024-001)
-  userId            String      @db.ObjectId // User who created the order (admin/warehouse user)
-  clientId          String?     @db.ObjectId // Client who placed the order (optional for now, will be used when client portal is implemented)
-  status            String      @default("pending") // Order status: pending, confirmed, processing, shipped, delivered, cancelled
-  paymentStatus     String      @default("unpaid") // Payment status: unpaid, paid, refunded, partial
-  currency          String      @default("MYR") // ISO 4217 transaction currency
-  subtotal          Float       @default(0) // Order subtotal (before tax and shipping)
-  tax               Float? // Tax amount (optional)
-  shipping          Float? // Shipping cost (optional)
-  discount          Float? // Discount amount (optional)
-  total             Float       @default(0) // Total amount (subtotal + tax + shipping - discount)
-  shippingAddress   Json? // Shipping address (JSON object with street, city, state, zipCode, country)
-  billingAddress    Json? // Billing address (JSON object, same structure as shippingAddress)
-  notes             String? // Order notes (optional)
-  trackingNumber    String? // Shipping tracking number (from Shippo)
-  trackingCarrier   String? // Shipping carrier (usps, ups, fedex, dhl, other)
-  trackingUrl       String? // Shipping tracking URL (from Shippo)
-  labelUrl          String? // Shipping label PDF URL (from Shippo)
-  estimatedDelivery DateTime? // Estimated delivery date
-  shippedAt         DateTime? // Actual shipping date
-  deliveredAt       DateTime? // Actual delivery date
-  cancelledAt       DateTime? // Cancellation date (if cancelled)
+  id                    String      @id @default(auto()) @map("_id") @db.ObjectId
+  orderNumber           String      @unique // Unique order number (e.g., ORD-2024-001)
+  userId                String      @db.ObjectId // User who created the order (admin/warehouse user)
+  clientId              String?     @db.ObjectId // Client who placed the order (optional for now, will be used when client portal is implemented)
+  status                String      @default("pending") // Order status: pending, confirmed, processing, shipped, delivered, cancelled
+  paymentStatus         String      @default("unpaid") // Payment status: unpaid, paid, refunded, partial
+  currency              String      @default("MYR") // ISO 4217 transaction currency
+  subtotal              Float       @default(0) // Order subtotal (before tax and shipping)
+  tax                   Float? // Tax amount (optional)
+  shipping              Float? // Shipping cost (optional)
+  discount              Float? // Discount amount (optional)
+  total                 Float       @default(0) // Total amount (subtotal + tax + shipping - discount)
+  shippingAddress       Json? // Shipping address (JSON object with street, city, state, zipCode, country)
+  billingAddress        Json? // Billing address (JSON object, same structure as shippingAddress)
+  notes                 String? // Order notes (optional)
+  trackingNumber        String? // Shipping tracking number (from Shippo)
+  trackingCarrier       String? // Shipping carrier (usps, ups, fedex, dhl, other)
+  trackingUrl           String? // Shipping tracking URL (from Shippo)
+  labelUrl              String? // Shipping label PDF URL (from Shippo)
+  estimatedDelivery     DateTime? // Estimated delivery date
+  shippedAt             DateTime? // Actual shipping date
+  deliveredAt           DateTime? // Actual delivery date
+  cancelledAt           DateTime? // Cancellation date (if cancelled)
   stripePaymentIntentId String? // Stripe PaymentIntent ID for refunds
-  createdAt         DateTime    @default(now()) @db.Date
-  updatedAt         DateTime?   @db.Date // Manually managed - null on create, set on update
-  createdBy         String      @db.ObjectId // Same as userId, for clarity
-  updatedBy         String?     @db.ObjectId // Last updated by user ID
-  items             OrderItem[] // Order items (one-to-many relationship)
-  invoice           Invoice? // Invoice for this order (one-to-one relationship)
+  createdAt             DateTime    @default(now()) @db.Date
+  updatedAt             DateTime?   @db.Date // Manually managed - null on create, set on update
+  createdBy             String      @db.ObjectId // Same as userId, for clarity
+  updatedBy             String?     @db.ObjectId // Last updated by user ID
+  items                 OrderItem[] // Order items (one-to-many relationship)
+  invoice               Invoice? // Invoice for this order (one-to-one relationship)
 }
 
 model OrderItem {
@@ -125,47 +125,47 @@ model Permission {
 }
 
 model Product {
-  id               String      @id @default(auto()) @map("_id") @db.ObjectId
-  categoryId       String      @db.ObjectId
-  createdAt        DateTime    @default(now()) @db.Date
-  updatedAt        DateTime?   @db.Date // Manually managed - null on create, set on update
+  id               String                  @id @default(auto()) @map("_id") @db.ObjectId
+  categoryId       String                  @db.ObjectId
+  createdAt        DateTime                @default(now()) @db.Date
+  updatedAt        DateTime?               @db.Date // Manually managed - null on create, set on update
   name             String
   price            Float
   quantity         BigInt
-  reservedQuantity BigInt      @default(0) // Stock reserved by pending orders (not yet confirmed)
+  reservedQuantity BigInt                  @default(0) // Stock reserved by pending orders (not yet confirmed)
   sku              String
   status           String
-  supplierId       String      @db.ObjectId
-  userId           String      @db.ObjectId // Created by user ID
-  workspaceId      String?     @db.ObjectId
-  skuScopeId       String      @db.ObjectId // workspaceId for shared products, userId for legacy products
-  createdBy        String      @db.ObjectId // Same as userId, for clarity
-  updatedBy        String?     @db.ObjectId // Last updated by user ID
+  supplierId       String                  @db.ObjectId
+  userId           String                  @db.ObjectId // Created by user ID
+  workspaceId      String?                 @db.ObjectId
+  skuScopeId       String                  @db.ObjectId // workspaceId for shared products, userId for legacy products
+  createdBy        String                  @db.ObjectId // Same as userId, for clarity
+  updatedBy        String?                 @db.ObjectId // Last updated by user ID
   qrCodeUrl        String? // ImageKit URL for QR code image
   qrCodeFileId     String? // ImageKit file ID for cleanup when regenerating
   imageUrl         String? // ImageKit URL for product image
   imageFileId      String? // ImageKit file ID for cleanup when updating/deleting
-  expirationDate   DateTime?   @db.Date // Product expiration date (optional, for perishable items)
-  deletedAt        DateTime?   @db.Date // Soft-delete: set when product has order history and is "deleted"
-  deletedBy        String?     @db.ObjectId // User who soft-deleted the product
+  expirationDate   DateTime?               @db.Date // Product expiration date (optional, for perishable items)
+  deletedAt        DateTime?               @db.Date // Soft-delete: set when product has order history and is "deleted"
+  deletedBy        String?                 @db.ObjectId // User who soft-deleted the product
   orderItems       OrderItem[] // Orders containing this product (one-to-many relationship)
   channelMappings  ProductChannelMapping[] // Channel links (Shopee, etc.)
   stockMovements   StockMovement[] // Inbound/outbound movement ledger
-  workspace        Workspace?  @relation(fields: [workspaceId], references: [id])
+  workspace        Workspace?              @relation(fields: [workspaceId], references: [id])
 
-  @@index([deletedAt])
   @@unique([skuScopeId, sku])
+  @@index([deletedAt])
   @@index([userId, sku])
   @@index([workspaceId])
 }
 
 model ProductChannelMapping {
-  id              String   @id @default(auto()) @map("_id") @db.ObjectId
-  wmsProductId    String   @db.ObjectId
-  channel         String // "shopee", "lazada", "tiktok", etc.
-  channelProductId String  @db.ObjectId // FK to ShopeeProduct or ShopeeProductVariant
-  channelType     String // "product" or "variant"
-  createdAt       DateTime @default(now())
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  wmsProductId     String   @db.ObjectId
+  channel          String // "shopee", "lazada", "tiktok", etc.
+  channelProductId String   @db.ObjectId // FK to ShopeeProduct or ShopeeProductVariant
+  channelType      String // "product" or "variant"
+  createdAt        DateTime @default(now())
 
   wmsProduct Product @relation(fields: [wmsProductId], references: [id], onDelete: Cascade)
 
@@ -185,15 +185,15 @@ model StockAlert {
 }
 
 model StockAllocation {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId        String    @db.ObjectId // Product this allocation is for
-  warehouseId      String    @db.ObjectId // Warehouse where stock is located
-  quantity         BigInt    @default(0)  // Quantity in this warehouse
-  reservedQuantity BigInt    @default(0)  // Reserved stock in this warehouse
-  userId           String    @db.ObjectId // User who created this allocation
-  workspaceId      String?   @db.ObjectId
-  createdAt        DateTime  @default(now()) @db.Date
-  updatedAt        DateTime? @db.Date
+  id               String     @id @default(auto()) @map("_id") @db.ObjectId
+  productId        String     @db.ObjectId // Product this allocation is for
+  warehouseId      String     @db.ObjectId // Warehouse where stock is located
+  quantity         BigInt     @default(0) // Quantity in this warehouse
+  reservedQuantity BigInt     @default(0) // Reserved stock in this warehouse
+  userId           String     @db.ObjectId // User who created this allocation
+  workspaceId      String?    @db.ObjectId
+  createdAt        DateTime   @default(now()) @db.Date
+  updatedAt        DateTime?  @db.Date
   workspace        Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@unique([productId, warehouseId])
@@ -204,16 +204,16 @@ model StockAllocation {
 
 // Stock transfer between warehouses
 model StockTransfer {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId         String    @db.ObjectId // Product being transferred
-  fromWarehouseId   String    @db.ObjectId // Source warehouse
-  toWarehouseId     String    @db.ObjectId // Destination warehouse
-  quantity          BigInt                  // Quantity transferred
-  status            String    @default("pending") // pending, completed, cancelled
-  notes             String?                 // Optional notes
-  userId            String    @db.ObjectId // User who initiated transfer
-  createdAt         DateTime  @default(now()) @db.Date
-  completedAt       DateTime? @db.Date
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  productId       String    @db.ObjectId // Product being transferred
+  fromWarehouseId String    @db.ObjectId // Source warehouse
+  toWarehouseId   String    @db.ObjectId // Destination warehouse
+  quantity        BigInt // Quantity transferred
+  status          String    @default("pending") // pending, completed, cancelled
+  notes           String? // Optional notes
+  userId          String    @db.ObjectId // User who initiated transfer
+  createdAt       DateTime  @default(now()) @db.Date
+  completedAt     DateTime? @db.Date
 
   @@index([productId])
   @@index([fromWarehouseId])
@@ -223,23 +223,23 @@ model StockTransfer {
 
 // Stock movement ledger - tracks every inbound/outbound stock event for audit
 model StockMovement {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId     String    @db.ObjectId
-  warehouseId   String    @db.ObjectId
-  quantity      BigInt                  // positive = inbound, negative = outbound
-  type          String                  // "in" | "out" | "adjustment" | "transfer"
-  sourceType    String?                 // "purchase_order" | "ad_hoc" | "transfer" | "return"
-  sourceId      String?   @db.ObjectId  // PO id or transfer id
-  poItemId      String?   @db.ObjectId  // specific PO item (for PO-linked receiving)
-  receivedById  String    @db.ObjectId  // User who performed the movement
-  workspaceId   String?   @db.ObjectId
-  receivedAt    DateTime  @default(now()) @db.Date
-  notes         String?
-  createdAt     DateTime  @default(now()) @db.Date
-  user          User      @relation(fields: [receivedById], references: [id])
-  product       Product   @relation(fields: [productId], references: [id])
-  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
-  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  productId    String     @db.ObjectId
+  warehouseId  String     @db.ObjectId
+  quantity     BigInt // positive = inbound, negative = outbound
+  type         String // "in" | "out" | "adjustment" | "transfer"
+  sourceType   String? // "purchase_order" | "ad_hoc" | "transfer" | "return"
+  sourceId     String?    @db.ObjectId // PO id or transfer id
+  poItemId     String?    @db.ObjectId // specific PO item (for PO-linked receiving)
+  receivedById String     @db.ObjectId // User who performed the movement
+  workspaceId  String?    @db.ObjectId
+  receivedAt   DateTime   @default(now()) @db.Date
+  notes        String?
+  createdAt    DateTime   @default(now()) @db.Date
+  user         User       @relation(fields: [receivedById], references: [id])
+  product      Product    @relation(fields: [productId], references: [id])
+  warehouse    Warehouse  @relation(fields: [warehouseId], references: [id])
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id])
 
   @@index([productId, warehouseId, receivedAt])
   @@index([sourceType, sourceId])
@@ -249,53 +249,53 @@ model StockMovement {
 }
 
 model Warehouse {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  name        String
-  address     String?   // Optional address (e.g. full address or location name)
-  type        String?   // Optional type: main, secondary, storage, etc.
-  status      Boolean   @default(true) // Active/Inactive
-  userId      String    @db.ObjectId // Created by user ID
-  workspaceId String?   @db.ObjectId
-  createdAt   DateTime  @default(now()) @db.Date
-  updatedAt   DateTime? @db.Date
-  createdBy   String    @db.ObjectId
-  updatedBy   String?   @db.ObjectId
+  id             String          @id @default(auto()) @map("_id") @db.ObjectId
+  name           String
+  address        String? // Optional address (e.g. full address or location name)
+  type           String? // Optional type: main, secondary, storage, etc.
+  status         Boolean         @default(true) // Active/Inactive
+  userId         String          @db.ObjectId // Created by user ID
+  workspaceId    String?         @db.ObjectId
+  createdAt      DateTime        @default(now()) @db.Date
+  updatedAt      DateTime?       @db.Date
+  createdBy      String          @db.ObjectId
+  updatedBy      String?         @db.ObjectId
   stockMovements StockMovement[]
-  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
+  workspace      Workspace?      @relation(fields: [workspaceId], references: [id])
 
   @@index([userId])
   @@index([workspaceId])
 }
 
 model Supplier {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  name          String
-  userId        String    @db.ObjectId // Created by user ID
-  workspaceId   String?   @db.ObjectId
-  status        Boolean   @default(true) // Active/Inactive status (default: active)
-  description   String? // Optional description field
-  notes         String? // Optional notes field
-  normalizedName String? // Lowercase, punctuation-normalized name for duplicate detection
-  contactName   String?
-  contactEmail  String?
-  contactPhone  String?
-  address       String?
-  city          String?
-  state         String?
-  postalCode    String?
-  country       String?
+  id              String               @id @default(auto()) @map("_id") @db.ObjectId
+  name            String
+  userId          String               @db.ObjectId // Created by user ID
+  workspaceId     String?              @db.ObjectId
+  status          Boolean              @default(true) // Active/Inactive status (default: active)
+  description     String? // Optional description field
+  notes           String? // Optional notes field
+  normalizedName  String? // Lowercase, punctuation-normalized name for duplicate detection
+  contactName     String?
+  contactEmail    String?
+  contactPhone    String?
+  address         String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String?
   defaultCurrency String?
-  paymentTerms  String?
-  leadTimeDays  Int?
-  riskLevel     String?
-  preferred     Boolean   @default(false)
-  createdAt     DateTime  @default(now()) @db.Date
-  updatedAt     DateTime? @db.Date // Manually managed - null on create, set on update
-  createdBy     String    @db.ObjectId // Same as userId, for clarity
-  updatedBy     String?   @db.ObjectId // Last updated by user ID
-  purchaseOrders PurchaseOrder[]
-  evaluations SupplierEvaluation[]
-  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
+  paymentTerms    String?
+  leadTimeDays    Int?
+  riskLevel       String?
+  preferred       Boolean              @default(false)
+  createdAt       DateTime             @default(now()) @db.Date
+  updatedAt       DateTime?            @db.Date // Manually managed - null on create, set on update
+  createdBy       String               @db.ObjectId // Same as userId, for clarity
+  updatedBy       String?              @db.ObjectId // Last updated by user ID
+  purchaseOrders  PurchaseOrder[]
+  evaluations     SupplierEvaluation[]
+  workspace       Workspace?           @relation(fields: [workspaceId], references: [id])
 
   @@index([workspaceId])
   @@index([workspaceId, normalizedName])
@@ -303,21 +303,23 @@ model Supplier {
 }
 
 model User {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  createdAt        DateTime  @db.Date
-  email            String    @unique
-  name             String
-  password         String
-  updatedAt        DateTime? @db.Date
-  username         String?   @unique
-  googleId         String? // Google OAuth ID (uniqueness enforced in app logic; @unique removed to avoid non-sparse index blocking null values)
-  image            String? // User profile image URL (from Google OAuth or other sources)
+  id                       String                 @id @default(auto()) @map("_id") @db.ObjectId
+  createdAt                DateTime               @db.Date
+  email                    String                 @unique
+  name                     String
+  password                 String
+  updatedAt                DateTime?              @db.Date
+  username                 String?                @unique
+  googleId                 String? // Google OAuth ID (uniqueness enforced in app logic; @unique removed to avoid non-sparse index blocking null values)
+  image                    String? // User profile image URL (from Google OAuth or other sources)
   // Role for access control: user, admin, supplier, client, retailer. Optional for backward compatibility; treat null as "user".
-  role             String? // user | admin | supplier | client | retailer
+  role                     String? // user | admin | supplier | client | retailer
+  // Admins use the shared admin workspace; only Super admins can override quote editing.
+  isSuperAdmin             Boolean                @default(true)
   // Account status for approval workflow: pending, approved, rejected. Default "approved" for backward compatibility.
-  status           String  @default("approved") // pending | approved | rejected
+  status                   String                 @default("approved") // pending | approved | rejected
   // Email notification preferences
-  emailPreferences Json? // Email notification preferences stored as JSON
+  emailPreferences         Json? // Email notification preferences stored as JSON
   // Structure: {
   //   lowStockAlerts: boolean,
   //   stockOutNotifications: boolean,
@@ -329,18 +331,19 @@ model User {
   //   orderStatusUpdates: boolean,
   //   sourcingNotifications: boolean
   // }
-  notifications Notification[] // In-app notifications (one-to-many relationship)
-  shopeeShops   ShopeeShop[]   // Shopee connected shops (one-to-many relationship)
-  lazadaShops   LazadaShop[]   // Lazada connected sellers (one-to-many relationship)
-  tiktokShops   TikTokShop[]   // TikTok Shop connected shops (one-to-many relationship)
-  shopifyShops  ShopifyShop[]  // Shopify connected shops (one-to-many relationship)
-  notificationSetting NotificationSetting? // Telegram notification settings (one-to-one)
-  stockMovements StockMovement[] // Stock movements performed by this user
-  workspaceMemberships WorkspaceMember[]
-  sentWorkspaceInvitations WorkspaceInvitation[] @relation("WorkspaceInvitationSender")
-  ownedWorkspaces Workspace[] @relation("WorkspaceOwner")
-  sourcingComments SourcingComment[]
-  sourcingAttachments SourcingAttachment[]
+  notifications            Notification[] // In-app notifications (one-to-many relationship)
+  shopeeShops              ShopeeShop[] // Shopee connected shops (one-to-many relationship)
+  lazadaShops              LazadaShop[] // Lazada connected sellers (one-to-many relationship)
+  tiktokShops              TikTokShop[] // TikTok Shop connected shops (one-to-many relationship)
+  shopifyShops             ShopifyShop[] // Shopify connected shops (one-to-many relationship)
+  notificationSetting      NotificationSetting? // Telegram notification settings (one-to-one)
+  stockMovements           StockMovement[] // Stock movements performed by this user
+  workspaceMemberships     WorkspaceMember[]
+  sentWorkspaceInvitations WorkspaceInvitation[]  @relation("WorkspaceInvitationSender")
+  ownedWorkspaces          Workspace[]            @relation("WorkspaceOwner")
+  sourcingComments         SourcingComment[]
+  sourcingAttachments      SourcingAttachment[]
+  sourcingCostScenarios    SourcingCostScenario[] @relation("SourcingCostScenarioCreator")
 }
 
 model UserAction {
@@ -348,106 +351,110 @@ model UserAction {
 }
 
 model Workspace {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  name String
-  ownerId String @db.ObjectId
-  baseCurrency String @default("MYR")
-  locale String @default("en-MY")
+  id                    String                 @id @default(auto()) @map("_id") @db.ObjectId
+  name                  String
+  ownerId               String                 @db.ObjectId
+  baseCurrency          String                 @default("MYR")
+  locale                String                 @default("en-MY")
   // Optional so existing workspaces retain the default sourcing SLA policy.
-  sourcingSlaConfig Json?
-  createdAt DateTime @default(now()) @db.Date
-  updatedAt DateTime? @db.Date
-  owner User @relation("WorkspaceOwner", fields: [ownerId], references: [id])
-  members WorkspaceMember[]
-  products Product[]
-  categories Category[]
-  suppliers Supplier[]
-  warehouses Warehouse[]
-  purchaseOrders PurchaseOrder[]
-  stockAllocations StockAllocation[]
-  stockMovements StockMovement[]
-  sourcingCases SourcingCase[]
-  sourcingQuotes SourcingQuote[]
-  sourcingOrders SourcingOrder[]
-  sourcingEvents SourcingEvent[]
-  sourcingComments SourcingComment[]
-  sourcingAttachments SourcingAttachment[]
-  sourcingSlaRecords SourcingSlaRecord[]
-  purchaseReceipts PurchaseReceipt[]
-  supplierEvaluations SupplierEvaluation[]
-  invitations WorkspaceInvitation[]
+  sourcingSlaConfig     Json?
+  // Shared parameters for the canonical per-piece sourcing landed-cost model.
+  sourcingCostConfig    Json?
+  createdAt             DateTime               @default(now()) @db.Date
+  updatedAt             DateTime?              @db.Date
+  owner                 User                   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members               WorkspaceMember[]
+  products              Product[]
+  categories            Category[]
+  suppliers             Supplier[]
+  warehouses            Warehouse[]
+  purchaseOrders        PurchaseOrder[]
+  stockAllocations      StockAllocation[]
+  stockMovements        StockMovement[]
+  sourcingCases         SourcingCase[]
+  sourcingQuotes        SourcingQuote[]
+  sourcingOrders        SourcingOrder[]
+  sourcingEvents        SourcingEvent[]
+  sourcingComments      SourcingComment[]
+  sourcingAttachments   SourcingAttachment[]
+  sourcingSlaRecords    SourcingSlaRecord[]
+  sourcingCostScenarios SourcingCostScenario[]
+  purchaseReceipts      PurchaseReceipt[]
+  supplierEvaluations   SupplierEvaluation[]
+  invitations           WorkspaceInvitation[]
 
   @@index([ownerId])
 }
 
 model WorkspaceMember {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  userId String @db.ObjectId
-  role String // admin | sourcer | warehouse | viewer
-  createdAt DateTime @default(now()) @db.Date
-  updatedAt DateTime? @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String    @db.ObjectId
+  userId      String    @db.ObjectId
+  role        String // admin | sourcer | warehouse | viewer
+  createdAt   DateTime  @default(now()) @db.Date
+  updatedAt   DateTime? @db.Date
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
   @@index([userId])
 }
 
 model WorkspaceInvitation {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  email String
-  name String?
-  tokenHash String @unique
-  status String @default("pending") // pending | accepted | revoked | expired
-  expiresAt DateTime @db.Date
-  sentAt DateTime @default(now()) @db.Date
-  acceptedAt DateTime? @db.Date
-  revokedAt DateTime? @db.Date
-  createdById String @db.ObjectId
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy User @relation("WorkspaceInvitationSender", fields: [createdById], references: [id])
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String    @db.ObjectId
+  email       String
+  name        String?
+  tokenHash   String    @unique
+  status      String    @default("pending") // pending | accepted | revoked | expired
+  expiresAt   DateTime  @db.Date
+  sentAt      DateTime  @default(now()) @db.Date
+  acceptedAt  DateTime? @db.Date
+  revokedAt   DateTime? @db.Date
+  createdById String    @db.ObjectId
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("WorkspaceInvitationSender", fields: [createdById], references: [id])
 
   @@index([workspaceId, status])
   @@index([email, status])
 }
 
 model SourcingCase {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  title String
-  description String?
-  photoUrls Json?
-  size String?
-  material String?
-  variant String?
-  specifications String?
-  referenceUrl String?
-  notes String?
-  requestedQuantity Int?
+  id                 String                 @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId        String                 @db.ObjectId
+  title              String
+  description        String?
+  photoUrls          Json?
+  size               String?
+  material           String?
+  variant            String?
+  specifications     String?
+  referenceUrl       String?
+  notes              String?
+  requestedQuantity  Int?
   targetUnitPriceMyr Float?
-  selectedQuoteId String? @db.ObjectId
-  route String @default("yiwu")
-  stage String @default("draft")
-  version Int @default(1)
-  assignedToId String? @db.ObjectId
-  nextAction String?
-  nextActionAt DateTime? @db.Date
-  slaDueAt DateTime? @db.Date
-  slaRule String?
-  createdById String @db.ObjectId
-  archivedAt DateTime? @db.Date
-  createdAt DateTime @default(now()) @db.Date
-  updatedAt DateTime? @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  quotes SourcingQuote[]
-  orders SourcingOrder[]
-  events SourcingEvent[]
-  comments SourcingComment[]
-  attachments SourcingAttachment[]
-  slaRecords SourcingSlaRecord[]
-  receipts PurchaseReceipt[]
+  selectedQuoteId    String?                @db.ObjectId
+  route              String                 @default("yiwu")
+  stage              String                 @default("draft")
+  version            Int                    @default(1)
+  assignedToId       String?                @db.ObjectId
+  nextAction         String?
+  nextActionAt       DateTime?              @db.Date
+  slaDueAt           DateTime?              @db.Date
+  slaRule            String?
+  createdById        String                 @db.ObjectId
+  archivedAt         DateTime?              @db.Date
+  createdAt          DateTime               @default(now()) @db.Date
+  updatedAt          DateTime?              @db.Date
+  workspace          Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  quotes             SourcingQuote[]
+  orders             SourcingOrder[]
+  events             SourcingEvent[]
+  comments           SourcingComment[]
+  attachments        SourcingAttachment[]
+  slaRecords         SourcingSlaRecord[]
+  costScenarios      SourcingCostScenario[]
+  receipts           PurchaseReceipt[]
 
   @@index([workspaceId, stage])
   @@index([workspaceId, assignedToId])
@@ -456,16 +463,16 @@ model SourcingCase {
 }
 
 model SourcingSlaRecord {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  caseId String @db.ObjectId
-  rule String // first_response | quote_submission | approval | shipment
-  ownerId String? @db.ObjectId
-  startedAt DateTime @db.Date
-  dueAt DateTime @db.Date
-  completedAt DateTime? @db.Date
-  onTime Boolean?
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id           String       @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId  String       @db.ObjectId
+  caseId       String       @db.ObjectId
+  rule         String // first_response | quote_submission | approval | shipment
+  ownerId      String?      @db.ObjectId
+  startedAt    DateTime     @db.Date
+  dueAt        DateTime     @db.Date
+  completedAt  DateTime?    @db.Date
+  onTime       Boolean?
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, rule, dueAt])
@@ -474,55 +481,66 @@ model SourcingSlaRecord {
 }
 
 model SourcingReminder {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  caseId String @db.ObjectId
-  userId String @db.ObjectId
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  caseId       String   @db.ObjectId
+  userId       String   @db.ObjectId
   reminderDate DateTime @db.Date
-  createdAt DateTime @default(now()) @db.Date
+  createdAt    DateTime @default(now()) @db.Date
 
   @@unique([caseId, userId, reminderDate])
   @@index([reminderDate])
 }
 
 model SourcingQuote {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  caseId String @db.ObjectId
+  id                   String       @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId          String       @db.ObjectId
+  caseId               String       @db.ObjectId
   // Stable supplier-offer identity; existing quotes are treated as their own group until backfilled.
-  quoteGroupId String? @db.ObjectId
-  revision Int
-  status String @default("draft")
-  supplierName String
-  supplierId String? @db.ObjectId
-  currency String @default("CNY")
-  items Json
-  unitPriceRmb Float?
-  unitPriceMyr Float?
-  fxRate Float?
-  fxRateDate DateTime? @db.Date
-  fxProvider String?
-  fxOverriddenById String? @db.ObjectId
-  fxOverrideReason String?
-  approvedAt DateTime? @db.Date
-  moq Int?
-  unitsPerCarton Int?
-  cartonDimensions String?
-  cartonWeightKg Float?
-  leadTimeDays Int?
-  validUntil DateTime? @db.Date
-  samplePhotoUrls Json?
-  paymentTerms String?
-  certifications Json?
-  complianceNotes String?
-  riskLevel String?
-  recommendation String?
-  priceBreaks Json?
-  notes String?
-  submittedAt DateTime? @db.Date
-  createdById String @db.ObjectId
-  createdAt DateTime @default(now()) @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  quoteGroupId         String?      @db.ObjectId
+  revision             Int
+  status               String       @default("draft")
+  supplierName         String
+  supplierId           String?      @db.ObjectId
+  currency             String       @default("CNY")
+  items                Json
+  unitPriceRmb         Float?
+  unitPriceMyr         Float?
+  piecesPerSellingUnit Int?
+  cartonLengthCm       Float?
+  cartonWidthCm        Float?
+  cartonHeightCm       Float?
+  piecesPerCarton      Int?
+  marketPriceMyr       Float?
+  marketPack           Int?
+  overrideCostMyr      Float?
+  // Captured at submission so historical quote decisions remain explainable.
+  costParamsSnapshot   Json?
+  landedCostSnapshot   Json?
+  fxRate               Float?
+  fxRateDate           DateTime?    @db.Date
+  fxProvider           String?
+  fxOverriddenById     String?      @db.ObjectId
+  fxOverrideReason     String?
+  approvedAt           DateTime?    @db.Date
+  moq                  Int?
+  unitsPerCarton       Int?
+  cartonDimensions     String?
+  cartonWeightKg       Float?
+  leadTimeDays         Int?
+  validUntil           DateTime?    @db.Date
+  samplePhotoUrls      Json?
+  paymentTerms         String?
+  certifications       Json?
+  complianceNotes      String?
+  riskLevel            String?
+  recommendation       String?
+  priceBreaks          Json?
+  notes                String?
+  submittedAt          DateTime?    @db.Date
+  createdById          String       @db.ObjectId
+  createdAt            DateTime     @default(now()) @db.Date
+  workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase         SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@unique([caseId, revision])
   @@index([workspaceId, caseId])
@@ -530,31 +548,32 @@ model SourcingQuote {
 }
 
 model SourcingOrder {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  caseId String @db.ObjectId
-  quoteId String @db.ObjectId
-  purchaseOrderId String? @unique @db.ObjectId
-  status String @default("confirmed")
-  createdById String @db.ObjectId
-  createdAt DateTime @default(now()) @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
-  receipts PurchaseReceipt[]
+  id                 String            @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId        String            @db.ObjectId
+  caseId             String            @db.ObjectId
+  quoteId            String            @db.ObjectId
+  purchaseOrderId    String?           @unique @db.ObjectId
+  landedCostSnapshot Json?
+  status             String            @default("confirmed")
+  createdById        String            @db.ObjectId
+  createdAt          DateTime          @default(now()) @db.Date
+  workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase       SourcingCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  purchaseOrder      PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id])
+  receipts           PurchaseReceipt[]
 
   @@index([workspaceId, caseId])
 }
 
 model SourcingEvent {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  caseId String @db.ObjectId
-  type String
-  actorId String @db.ObjectId
-  payload Json?
-  createdAt DateTime @default(now()) @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id           String       @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId  String       @db.ObjectId
+  caseId       String       @db.ObjectId
+  type         String
+  actorId      String       @db.ObjectId
+  payload      Json?
+  createdAt    DateTime     @default(now()) @db.Date
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
   @@index([caseId, createdAt])
@@ -562,36 +581,36 @@ model SourcingEvent {
 }
 
 model SourcingComment {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  caseId String @db.ObjectId
-  authorId String @db.ObjectId
-  body String
+  id               String       @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId      String       @db.ObjectId
+  caseId           String       @db.ObjectId
+  authorId         String       @db.ObjectId
+  body             String
   mentionedUserIds Json?
-  createdAt DateTime @default(now()) @db.Date
-  updatedAt DateTime? @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  author User @relation(fields: [authorId], references: [id])
+  createdAt        DateTime     @default(now()) @db.Date
+  updatedAt        DateTime?    @db.Date
+  workspace        Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase     SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author           User         @relation(fields: [authorId], references: [id])
 
   @@index([caseId, createdAt])
   @@index([workspaceId, createdAt])
 }
 
 model SourcingAttachment {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  caseId String @db.ObjectId
-  uploadedById String @db.ObjectId
-  fileName String
-  mimeType String
-  fileSize Int
-  url String
-  fileId String
-  createdAt DateTime @default(now()) @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id           String       @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId  String       @db.ObjectId
+  caseId       String       @db.ObjectId
+  uploadedById String       @db.ObjectId
+  fileName     String
+  mimeType     String
+  fileSize     Int
+  url          String
+  fileId       String
+  createdAt    DateTime     @default(now()) @db.Date
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  uploadedBy User @relation(fields: [uploadedById], references: [id])
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
 
   @@index([caseId, createdAt])
   @@index([workspaceId, createdAt])
@@ -599,63 +618,63 @@ model SourcingAttachment {
 }
 
 model PurchaseReceipt {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  purchaseOrderId String @db.ObjectId
-  sourcingOrderId String? @db.ObjectId
-  sourcingCaseId String? @db.ObjectId
-  warehouseId String @db.ObjectId
-  receivedById String @db.ObjectId
-  notes String?
-  actualFreightMyr Float @default(0)
-  actualDutyMyr Float @default(0)
-  actualTaxMyr Float @default(0)
-  actualOtherCostMyr Float @default(0)
-  actualLandedCostMyr Float @default(0)
-  finalizedAt DateTime @default(now()) @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  sourcingOrder SourcingOrder? @relation(fields: [sourcingOrderId], references: [id])
-  sourcingCase SourcingCase? @relation(fields: [sourcingCaseId], references: [id])
-  items PurchaseReceiptItem[]
+  id                  String                @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId         String                @db.ObjectId
+  purchaseOrderId     String                @db.ObjectId
+  sourcingOrderId     String?               @db.ObjectId
+  sourcingCaseId      String?               @db.ObjectId
+  warehouseId         String                @db.ObjectId
+  receivedById        String                @db.ObjectId
+  notes               String?
+  actualFreightMyr    Float                 @default(0)
+  actualDutyMyr       Float                 @default(0)
+  actualTaxMyr        Float                 @default(0)
+  actualOtherCostMyr  Float                 @default(0)
+  actualLandedCostMyr Float                 @default(0)
+  finalizedAt         DateTime              @default(now()) @db.Date
+  workspace           Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  purchaseOrder       PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  sourcingOrder       SourcingOrder?        @relation(fields: [sourcingOrderId], references: [id])
+  sourcingCase        SourcingCase?         @relation(fields: [sourcingCaseId], references: [id])
+  items               PurchaseReceiptItem[]
 
   @@index([workspaceId, purchaseOrderId])
 }
 
 model PurchaseReceiptItem {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  purchaseReceiptId String @db.ObjectId
-  purchaseOrderItemId String @db.ObjectId
-  productId String @db.ObjectId
-  acceptedQuantity Int @default(0)
-  damagedQuantity Int @default(0)
-  shortageQuantity Int @default(0)
-  qualityStatus String? // accepted | conditional | rejected
-  qualityNotes String?
-  inspectionPhotoUrls Json?
-  allocatedLandedCostMyr Float @default(0)
-  unitLandedCostMyr Float?
-  notes String?
-  receipt PurchaseReceipt @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+  id                     String          @id @default(auto()) @map("_id") @db.ObjectId
+  purchaseReceiptId      String          @db.ObjectId
+  purchaseOrderItemId    String          @db.ObjectId
+  productId              String          @db.ObjectId
+  acceptedQuantity       Int             @default(0)
+  damagedQuantity        Int             @default(0)
+  shortageQuantity       Int             @default(0)
+  qualityStatus          String? // accepted | conditional | rejected
+  qualityNotes           String?
+  inspectionPhotoUrls    Json?
+  allocatedLandedCostMyr Float           @default(0)
+  unitLandedCostMyr      Float?
+  notes                  String?
+  receipt                PurchaseReceipt @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
 
   @@index([purchaseReceiptId])
   @@index([purchaseOrderItemId])
 }
 
 model SupplierEvaluation {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  supplierId String @db.ObjectId
-  purchaseOrderId String? @db.ObjectId
-  qualityRating Int
-  timelinessRating Int
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId         String    @db.ObjectId
+  supplierId          String    @db.ObjectId
+  purchaseOrderId     String?   @db.ObjectId
+  qualityRating       Int
+  timelinessRating    Int
   communicationRating Int
-  valueRating Int
-  notes String?
-  createdById String @db.ObjectId
-  createdAt DateTime @default(now()) @db.Date
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  valueRating         Int
+  notes               String?
+  createdById         String    @db.ObjectId
+  createdAt           DateTime  @default(now()) @db.Date
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  supplier            Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, supplierId, createdAt])
   @@index([purchaseOrderId])
@@ -663,16 +682,37 @@ model SupplierEvaluation {
 
 // Reusable, workspace-scoped starting points for common sourcing requests.
 model SourcingTemplate {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  workspaceId String @db.ObjectId
-  name String
-  data Json
-  createdById String @db.ObjectId
-  createdAt DateTime @default(now()) @db.Date
-  updatedAt DateTime? @db.Date
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId String    @db.ObjectId
+  name        String
+  data        Json
+  createdById String    @db.ObjectId
+  createdAt   DateTime  @default(now()) @db.Date
+  updatedAt   DateTime? @db.Date
 
   @@unique([workspaceId, name])
   @@index([workspaceId])
+}
+
+// Admin-only, case-scoped what-if calculations. They never mutate the quote or PO.
+model SourcingCostScenario {
+  id                 String       @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId        String       @db.ObjectId
+  caseId             String       @db.ObjectId
+  quoteId            String       @db.ObjectId
+  name               String
+  inputs             Json
+  costConfigSnapshot Json
+  resultSnapshot     Json
+  createdById        String       @db.ObjectId
+  createdAt          DateTime     @default(now()) @db.Date
+  updatedAt          DateTime?    @db.Date
+  workspace          Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase       SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  createdBy          User         @relation("SourcingCostScenarioCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, caseId, updatedAt])
+  @@index([caseId, quoteId])
 }
 
 model VerificationToken {
@@ -682,51 +722,51 @@ model VerificationToken {
 }
 
 model ImportHistory {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId      String   @db.ObjectId // User who performed the import
-  importType  String   // Type of import: "products", "orders", "suppliers", "categories"
-  fileName    String   // Original file name
-  fileSize    Int      // File size in bytes
-  totalRows   Int      // Total rows in the file
-  successRows Int      // Number of successfully imported rows
-  failedRows  Int      // Number of failed rows
-  errors      Json?    // Array of error messages for failed rows
-  status      String   @default("completed") // Import status: "processing", "completed", "failed"
-  createdAt   DateTime @default(now()) @db.Date
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String    @db.ObjectId // User who performed the import
+  importType  String // Type of import: "products", "orders", "suppliers", "categories"
+  fileName    String // Original file name
+  fileSize    Int // File size in bytes
+  totalRows   Int // Total rows in the file
+  successRows Int // Number of successfully imported rows
+  failedRows  Int // Number of failed rows
+  errors      Json? // Array of error messages for failed rows
+  status      String    @default("completed") // Import status: "processing", "completed", "failed"
+  createdAt   DateTime  @default(now()) @db.Date
   completedAt DateTime? @db.Date // When import was completed
 }
 
 model Notification {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String   @db.ObjectId // User who receives the notification
-  type      String   // Notification type: "low_stock", "stock_out", "order_confirmation", "order_status_update", etc.
-  title     String   // Notification title
-  message   String   // Notification message/content
-  link      String?  // Optional link to related resource (e.g., /products/:id, /orders/:id)
-  read      Boolean  @default(false) // Whether notification has been read
-  createdAt DateTime @default(now()) @db.Date
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String    @db.ObjectId // User who receives the notification
+  type      String // Notification type: "low_stock", "stock_out", "order_confirmation", "order_status_update", etc.
+  title     String // Notification title
+  message   String // Notification message/content
+  link      String? // Optional link to related resource (e.g., /products/:id, /orders/:id)
+  read      Boolean   @default(false) // Whether notification has been read
+  createdAt DateTime  @default(now()) @db.Date
   readAt    DateTime? @db.Date // When notification was marked as read
-  metadata  Json?    // Optional metadata (productId, orderId, etc.)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade) // Relation to User model
+  metadata  Json? // Optional metadata (productId, orderId, etc.)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade) // Relation to User model
 
   @@index([userId, read, createdAt]) // Index for efficient querying by user, read status, and date
 }
 
 model SupportTicket {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  subject       String    // Ticket subject
-  description   String    // Ticket description/details
-  status        String    @default("open") // open, in_progress, resolved, closed
-  priority      String    @default("medium") // low, medium, high, urgent
-  userId        String    @db.ObjectId // Creator (user who opened the ticket)
-  assignedToId  String?   @db.ObjectId // Product owner / admin to handle (set on create by user)
-  productId     String?   @db.ObjectId // Optional link to product
-  orderId       String?   @db.ObjectId // Optional link to order
-  supplierId    String?   @db.ObjectId // Optional link to supplier
-  notes         String?   // Internal admin notes
-  createdAt     DateTime  @default(now()) @db.Date
-  updatedAt     DateTime? @db.Date // Manually managed
-  replies       SupportTicketReply[]
+  id           String               @id @default(auto()) @map("_id") @db.ObjectId
+  subject      String // Ticket subject
+  description  String // Ticket description/details
+  status       String               @default("open") // open, in_progress, resolved, closed
+  priority     String               @default("medium") // low, medium, high, urgent
+  userId       String               @db.ObjectId // Creator (user who opened the ticket)
+  assignedToId String?              @db.ObjectId // Product owner / admin to handle (set on create by user)
+  productId    String?              @db.ObjectId // Optional link to product
+  orderId      String?              @db.ObjectId // Optional link to order
+  supplierId   String?              @db.ObjectId // Optional link to supplier
+  notes        String? // Internal admin notes
+  createdAt    DateTime             @default(now()) @db.Date
+  updatedAt    DateTime?            @db.Date // Manually managed
+  replies      SupportTicketReply[]
 
   @@index([userId])
   @@index([status])
@@ -738,7 +778,7 @@ model SupportTicketReply {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   ticketId  String   @db.ObjectId
   userId    String   @db.ObjectId // Who wrote the reply
-  body      String   // Reply text
+  body      String // Reply text
   createdAt DateTime @default(now()) @db.Date
 
   supportTicket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -749,18 +789,18 @@ model SupportTicketReply {
 }
 
 model ProductReview {
-  id           String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId    String    @db.ObjectId // Product being reviewed
-  userId       String    @db.ObjectId // User who wrote the review
-  orderId      String?   @db.ObjectId // Order this review relates to (for one-review-per-purchase)
-  orderItemId  String?   @db.ObjectId // Optional: specific order line (one review per order line)
-  productName  String    // Snapshot at review time (for list display)
-  productSku   String?   // Snapshot at review time
-  rating       Int       // 1–5
-  comment      String    // Review text
-  status       String    @default("pending") // pending, approved, rejected
-  createdAt    DateTime  @default(now()) @db.Date
-  updatedAt    DateTime? @db.Date // Manually managed
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  productId   String    @db.ObjectId // Product being reviewed
+  userId      String    @db.ObjectId // User who wrote the review
+  orderId     String?   @db.ObjectId // Order this review relates to (for one-review-per-purchase)
+  orderItemId String?   @db.ObjectId // Optional: specific order line (one review per order line)
+  productName String // Snapshot at review time (for list display)
+  productSku  String? // Snapshot at review time
+  rating      Int // 1–5
+  comment     String // Review text
+  status      String    @default("pending") // pending, approved, rejected
+  createdAt   DateTime  @default(now()) @db.Date
+  updatedAt   DateTime? @db.Date // Manually managed
 
   @@index([productId])
   @@index([orderId, productId, userId])
@@ -775,10 +815,10 @@ model ProductReview {
 model SystemConfig {
   id          String    @id @default(auto()) @map("_id") @db.ObjectId
   key         String    @unique // Configuration key (e.g., "company_name", "low_stock_threshold")
-  value       String    // Configuration value (stored as string, parsed by app)
+  value       String // Configuration value (stored as string, parsed by app)
   type        String    @default("string") // Value type: string, number, boolean, json
-  label       String    // Human-readable label
-  description String?   // Description of the setting
+  label       String // Human-readable label
+  description String? // Description of the setting
   category    String    @default("general") // Setting category: general, email, shipping, payment, notifications
   isPublic    Boolean   @default(false) // Whether this setting can be exposed to client
   createdAt   DateTime  @default(now()) @db.Date
@@ -791,15 +831,15 @@ model SystemConfig {
 
 // Audit Log - for tracking user activities and system changes
 model AuditLog {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId      String    @db.ObjectId // User who performed the action
-  action      String    // Action type: create, update, delete, login, logout, etc.
-  entityType  String    // Entity type: product, order, invoice, user, etc.
-  entityId    String?   @db.ObjectId // Entity ID (if applicable)
-  details     Json?     // Additional details (JSON object with changes)
-  ipAddress   String?   // IP address of the user
-  userAgent   String?   // User agent string
-  createdAt   DateTime  @default(now()) @db.Date
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId // User who performed the action
+  action     String // Action type: create, update, delete, login, logout, etc.
+  entityType String // Entity type: product, order, invoice, user, etc.
+  entityId   String?  @db.ObjectId // Entity ID (if applicable)
+  details    Json? // Additional details (JSON object with changes)
+  ipAddress  String? // IP address of the user
+  userAgent  String? // User agent string
+  createdAt  DateTime @default(now()) @db.Date
 
   @@index([userId])
   @@index([action])
@@ -812,31 +852,31 @@ model AuditLog {
 // =============================================================================
 
 model ShopeeShop {
-  id             String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId         String    @db.ObjectId // Owner user
-  shopId         Int       // Shopee shop ID (assigned by Shopee)
-  shopName       String    // Shop display name
-  shopStatus     String    // Shop status from Shopee
-  region         String    // Shopee region (GLOBAL, CHINA, BRAZIL)
-  merchantId     Int?      // Merchant ID (for merchant-level operations)
-  isCb           Boolean?  // Cross-border flag
-  expireTime     DateTime? // Shop expiration time
-  accessToken    String    // Shopee access token (plaintext, same security model as env secrets)
-  refreshToken   String    // Shopee refresh token
-  tokenExpiry    DateTime? // When access_token expires (computed from expire_in)
-  lastSyncedAt   DateTime? // Last successful sync timestamp
-  lowStockThreshold Int @default(10) // Configurable per-shop low-stock threshold
-  createdAt      DateTime  @default(now()) @db.Date
-  updatedAt      DateTime? @db.Date
-  createdBy      String    @db.ObjectId
-  updatedBy      String?   @db.ObjectId
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  products       ShopeeProduct[]
-  orders         ShopeeOrder[]
-  syncLogs       ShopeeSyncLog[]
-  returns        ShopeeReturn[]
-  adsDaily       ShopeeAdsDailyPerformance[]
-  adsCampaignDaily ShopeeAdsCampaignDailyPerformance[]
+  id                String                              @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String                              @db.ObjectId // Owner user
+  shopId            Int // Shopee shop ID (assigned by Shopee)
+  shopName          String // Shop display name
+  shopStatus        String // Shop status from Shopee
+  region            String // Shopee region (GLOBAL, CHINA, BRAZIL)
+  merchantId        Int? // Merchant ID (for merchant-level operations)
+  isCb              Boolean? // Cross-border flag
+  expireTime        DateTime? // Shop expiration time
+  accessToken       String // Shopee access token (plaintext, same security model as env secrets)
+  refreshToken      String // Shopee refresh token
+  tokenExpiry       DateTime? // When access_token expires (computed from expire_in)
+  lastSyncedAt      DateTime? // Last successful sync timestamp
+  lowStockThreshold Int                                 @default(10) // Configurable per-shop low-stock threshold
+  createdAt         DateTime                            @default(now()) @db.Date
+  updatedAt         DateTime?                           @db.Date
+  createdBy         String                              @db.ObjectId
+  updatedBy         String?                             @db.ObjectId
+  user              User                                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products          ShopeeProduct[]
+  orders            ShopeeOrder[]
+  syncLogs          ShopeeSyncLog[]
+  returns           ShopeeReturn[]
+  adsDaily          ShopeeAdsDailyPerformance[]
+  adsCampaignDaily  ShopeeAdsCampaignDailyPerformance[]
 
   @@unique([userId, shopId])
   @@index([userId])
@@ -844,30 +884,30 @@ model ShopeeShop {
 }
 
 model ShopeeProduct {
-  id             String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId         String    @db.ObjectId // FK to ShopeeShop
-  userId         String    @db.ObjectId // Owner user
-  shopeeItemId   Int       // Shopee item ID (assigned by Shopee)
-  itemName       String    // Product name on Shopee
-  description    String?   // Product description
-  itemSku        String?   // Seller-input parent SKU (from getItemBaseInfo.item_sku)
-  categoryId     Int?      // Shopee category ID
-  price          Float     // Current/sale price (from price_info.current_price)
-  originalPrice  Float?    // Original/before-discount price (from price_info.original_price)
-  stock          Int       // Total stock (from stock_info_v2.summary_info.total_available_stock)
-  imageUrl       String?   // Primary image URL
-  imageUrls      Json?     // All image URLs (array)
-  status         String    // Item status (NORMAL, DELETED, etc.)
-  tierVariation  Json?     // Variation axes config (e.g. [{name: "Color", option_list: [...]}])
-  weight         Float?    // Weight in grams
-  dimension      Json?     // {length, width, height}
-  lastSyncedAt   DateTime? // Last sync timestamp
-  createdAt      DateTime  @default(now()) @db.Date
-  updatedAt      DateTime? @db.Date
-  createdBy      String    @db.ObjectId
-  updatedBy      String?   @db.ObjectId
-  shop           ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  variants       ShopeeProductVariant[]
+  id            String                 @id @default(auto()) @map("_id") @db.ObjectId
+  shopId        String                 @db.ObjectId // FK to ShopeeShop
+  userId        String                 @db.ObjectId // Owner user
+  shopeeItemId  Int // Shopee item ID (assigned by Shopee)
+  itemName      String // Product name on Shopee
+  description   String? // Product description
+  itemSku       String? // Seller-input parent SKU (from getItemBaseInfo.item_sku)
+  categoryId    Int? // Shopee category ID
+  price         Float // Current/sale price (from price_info.current_price)
+  originalPrice Float? // Original/before-discount price (from price_info.original_price)
+  stock         Int // Total stock (from stock_info_v2.summary_info.total_available_stock)
+  imageUrl      String? // Primary image URL
+  imageUrls     Json? // All image URLs (array)
+  status        String // Item status (NORMAL, DELETED, etc.)
+  tierVariation Json? // Variation axes config (e.g. [{name: "Color", option_list: [...]}])
+  weight        Float? // Weight in grams
+  dimension     Json? // {length, width, height}
+  lastSyncedAt  DateTime? // Last sync timestamp
+  createdAt     DateTime               @default(now()) @db.Date
+  updatedAt     DateTime?              @db.Date
+  createdBy     String                 @db.ObjectId
+  updatedBy     String?                @db.ObjectId
+  shop          ShopeeShop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants      ShopeeProductVariant[]
 
   @@unique([shopId, shopeeItemId])
   @@index([shopId])
@@ -877,29 +917,29 @@ model ShopeeProduct {
 }
 
 model ShopeeProductVariant {
-  id             String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId      String    @db.ObjectId // FK to ShopeeProduct
-  shopId         String    @db.ObjectId // Denormalized for direct queries
-  userId         String    @db.ObjectId
-  shopeeItemId   Int       // Denormalized parent item ID
-  itemSku        String?   // Denormalized parent SKU (from ShopeeProduct.itemSku)
-  modelId        Int       // Shopee model_id
-  modelName      String    // e.g. "Red / XL"
-  modelSku       String?   // Seller-input variant SKU
-  price          Float
-  originalPrice  Float?
-  stock          Int
-  status         String    // MODEL_NORMAL / MODEL_UNAVAILABLE
-  tierIndex      Json?     // [0, 1] indices into tier_variation
-  weight         Float?
-  dimension      Json?
-  lastSyncedAt   DateTime?
-  createdAt      DateTime  @default(now()) @db.Date
-  updatedAt      DateTime?
-  createdBy      String    @db.ObjectId
-  updatedBy      String?   @db.ObjectId
-  product        ShopeeProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
-  orderItems     ShopeeOrderItem[]
+  id            String            @id @default(auto()) @map("_id") @db.ObjectId
+  productId     String            @db.ObjectId // FK to ShopeeProduct
+  shopId        String            @db.ObjectId // Denormalized for direct queries
+  userId        String            @db.ObjectId
+  shopeeItemId  Int // Denormalized parent item ID
+  itemSku       String? // Denormalized parent SKU (from ShopeeProduct.itemSku)
+  modelId       Int // Shopee model_id
+  modelName     String // e.g. "Red / XL"
+  modelSku      String? // Seller-input variant SKU
+  price         Float
+  originalPrice Float?
+  stock         Int
+  status        String // MODEL_NORMAL / MODEL_UNAVAILABLE
+  tierIndex     Json? // [0, 1] indices into tier_variation
+  weight        Float?
+  dimension     Json?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime          @default(now()) @db.Date
+  updatedAt     DateTime?
+  createdBy     String            @db.ObjectId
+  updatedBy     String?           @db.ObjectId
+  product       ShopeeProduct     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems    ShopeeOrderItem[]
 
   @@unique([productId, modelId])
   @@index([modelSku])
@@ -910,49 +950,49 @@ model ShopeeProductVariant {
 }
 
 model ShopeeOrder {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId            String    @db.ObjectId // FK to ShopeeShop
-  userId            String    @db.ObjectId // Owner user
-  shopeeOrderId     String    @unique // Shopee order SN (e.g., 231204xxxxxx)
-  orderStatus       String    // UNPAID, READY_TO_SHIP, PROCESSED, SHIPPED, COMPLETED, CANCELLED
-  paymentStatus     String?   // Payment status from Shopee
-  totalAmount       Float     // Total order amount
-  currency          String?   // Currency code (SGD, MYR, etc.)
-  region            String?   // Country code from order (SG, MY, etc.) — NOT masked unlike shippingAddress
-  buyerUsername     String?   // Buyer's username
-  buyerEmail        String?   // Buyer's email (if available)
-  shippingAddress   Json?     // {name, phone, address, city, state, zip_code, country}
-  trackingNumber    String?   // Shopee tracking number
-  trackingCarrier   String?   // Logistics carrier
-  logisticsStatus   String?   // Logistics status
-  createdAt         DateTime  @default(now()) @db.Date
-  updatedAt         DateTime? @db.Date
-  createdBy         String    @db.ObjectId
-  updatedBy         String?   @db.ObjectId
-  lastSyncedAt      DateTime? // Last sync timestamp
+  id                   String            @id @default(auto()) @map("_id") @db.ObjectId
+  shopId               String            @db.ObjectId // FK to ShopeeShop
+  userId               String            @db.ObjectId // Owner user
+  shopeeOrderId        String            @unique // Shopee order SN (e.g., 231204xxxxxx)
+  orderStatus          String // UNPAID, READY_TO_SHIP, PROCESSED, SHIPPED, COMPLETED, CANCELLED
+  paymentStatus        String? // Payment status from Shopee
+  totalAmount          Float // Total order amount
+  currency             String? // Currency code (SGD, MYR, etc.)
+  region               String? // Country code from order (SG, MY, etc.) — NOT masked unlike shippingAddress
+  buyerUsername        String? // Buyer's username
+  buyerEmail           String? // Buyer's email (if available)
+  shippingAddress      Json? // {name, phone, address, city, state, zip_code, country}
+  trackingNumber       String? // Shopee tracking number
+  trackingCarrier      String? // Logistics carrier
+  logisticsStatus      String? // Logistics status
+  createdAt            DateTime          @default(now()) @db.Date
+  updatedAt            DateTime?         @db.Date
+  createdBy            String            @db.ObjectId
+  updatedBy            String?           @db.ObjectId
+  lastSyncedAt         DateTime? // Last sync timestamp
   // Shopee timestamps
-  shopeeCreatedAt   DateTime? // Original create time on Shopee
-  shopeeUpdatedAt   DateTime? // Original update time on Shopee
-  paidAt            DateTime? // Payment time
-  shippedAt         DateTime? // Shipping time
-  deliveredAt       DateTime? // Delivery time
-  completedAt       DateTime? // Completion time
-  cancelledAt       DateTime? // Cancellation time
+  shopeeCreatedAt      DateTime? // Original create time on Shopee
+  shopeeUpdatedAt      DateTime? // Original update time on Shopee
+  paidAt               DateTime? // Payment time
+  shippedAt            DateTime? // Shipping time
+  deliveredAt          DateTime? // Delivery time
+  completedAt          DateTime? // Completion time
+  cancelledAt          DateTime? // Cancellation time
   // Fee/commission tracking (from Shopee escrow detail)
-  commissionFee     Float?    @default(0) // Shopee platform commission
-  serviceFee        Float?    @default(0) // Shopee service fee
-  sellerTxnFee      Float?    @default(0) // Seller transaction fee
-  shippingFee       Float?    @default(0) // Actual shipping fee (from escrow)
-  estimatedShippingFee Float? @default(0) // Estimated shipping fee (from escrow) — compare with actual to find weight/dimension issues
-  sellerIncome      Float?    @default(0) // Net seller income after all fees
-  buyerPaymentMethod String?  // Payment method used by buyer
+  commissionFee        Float?            @default(0) // Shopee platform commission
+  serviceFee           Float?            @default(0) // Shopee service fee
+  sellerTxnFee         Float?            @default(0) // Seller transaction fee
+  shippingFee          Float?            @default(0) // Actual shipping fee (from escrow)
+  estimatedShippingFee Float?            @default(0) // Estimated shipping fee (from escrow) — compare with actual to find weight/dimension issues
+  sellerIncome         Float?            @default(0) // Net seller income after all fees
+  buyerPaymentMethod   String? // Payment method used by buyer
   // SLA / shipping deadline tracking (from getPackageDetail)
-  shipByDate        DateTime? // Ship-by deadline (Unix seconds from Shopee)
-  packageNumber     String?   // Shopee package number for logistics
-  fulfillmentStatus String?   // Package fulfillment status (e.g., LOGISTICS_READY)
-  daysToShip        Int?      // Days allowed to ship from order creation
-  shop              ShopeeShop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  items             ShopeeOrderItem[]
+  shipByDate           DateTime? // Ship-by deadline (Unix seconds from Shopee)
+  packageNumber        String? // Shopee package number for logistics
+  fulfillmentStatus    String? // Package fulfillment status (e.g., LOGISTICS_READY)
+  daysToShip           Int? // Days allowed to ship from order creation
+  shop                 ShopeeShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items                ShopeeOrderItem[]
 
   @@index([shopId])
   @@index([userId])
@@ -963,19 +1003,19 @@ model ShopeeOrder {
 }
 
 model ShopeeOrderItem {
-  id               String   @id @default(auto()) @map("_id") @db.ObjectId
-  orderId          String   @db.ObjectId // FK to ShopeeOrder
-  productId        String?  @db.ObjectId // Optional link to local Product (for cross-reference)
-  variantId        String?  @db.ObjectId // FK to ShopeeProductVariant (denormalized link)
-  shopeeModelId    Int?     // Shopee model ID (variant)
-  productName      String   // Product name snapshot
-  sku              String?  // SKU snapshot
-  quantity         Int      // Ordered quantity
-  price            Float    // Unit price
-  subtotal         Float    // quantity * price
-  createdAt        DateTime @default(now()) @db.Date
-  order            ShopeeOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variant          ShopeeProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  id            String                @id @default(auto()) @map("_id") @db.ObjectId
+  orderId       String                @db.ObjectId // FK to ShopeeOrder
+  productId     String?               @db.ObjectId // Optional link to local Product (for cross-reference)
+  variantId     String?               @db.ObjectId // FK to ShopeeProductVariant (denormalized link)
+  shopeeModelId Int? // Shopee model ID (variant)
+  productName   String // Product name snapshot
+  sku           String? // SKU snapshot
+  quantity      Int // Ordered quantity
+  price         Float // Unit price
+  subtotal      Float // quantity * price
+  createdAt     DateTime              @default(now()) @db.Date
+  order         ShopeeOrder           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant       ShopeeProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([productId])
@@ -983,19 +1023,19 @@ model ShopeeOrderItem {
 }
 
 model ShopeeSyncLog {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId           String    @db.ObjectId // FK to ShopeeShop
-  userId           String    @db.ObjectId // Who triggered the sync
-  syncType         String    // "products", "orders", "all"
-  status           String    @default("running") // "running", "completed", "completed_with_errors", "failed"
-  itemsSynced      Int       @default(0) // Total items processed
-  itemsCreated     Int       @default(0) // New items created
-  itemsUpdated     Int       @default(0) // Existing items updated
-  errors           Json?     // Array of error messages
-  startedAt        DateTime  @default(now()) @db.Date
-  completedAt      DateTime? @db.Date
-  triggeredBy      String    @default("manual") // "manual", "cron", "webhook"
-  shop             ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  shopId       String     @db.ObjectId // FK to ShopeeShop
+  userId       String     @db.ObjectId // Who triggered the sync
+  syncType     String // "products", "orders", "all"
+  status       String     @default("running") // "running", "completed", "completed_with_errors", "failed"
+  itemsSynced  Int        @default(0) // Total items processed
+  itemsCreated Int        @default(0) // New items created
+  itemsUpdated Int        @default(0) // Existing items updated
+  errors       Json? // Array of error messages
+  startedAt    DateTime   @default(now()) @db.Date
+  completedAt  DateTime?  @db.Date
+  triggeredBy  String     @default("manual") // "manual", "cron", "webhook"
+  shop         ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId])
   @@index([userId])
@@ -1005,37 +1045,37 @@ model ShopeeSyncLog {
 }
 
 model ShopeeReturn {
-  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId                String    @db.ObjectId
-  userId                String    @db.ObjectId
-  returnSn              String    @unique // Shopee return serial number
-  orderSn               String    // FK to ShopeeOrder.shopeeOrderId
-  status                String    // REQUESTED, PROCESSING, ACCEPTED, COMPLETED, CANCELLED
-  refundAmount          Float     @default(0)
-  currency              String?
-  reason                String?
-  textReason            String?
-  trackingNumber        String?
-  needsLogistics        Boolean   @default(false)
-  amountBeforeDiscount  Float?    @default(0)
-  negotiationStatus     String?
-  sellerProofStatus     String?
+  id                       String     @id @default(auto()) @map("_id") @db.ObjectId
+  shopId                   String     @db.ObjectId
+  userId                   String     @db.ObjectId
+  returnSn                 String     @unique // Shopee return serial number
+  orderSn                  String // FK to ShopeeOrder.shopeeOrderId
+  status                   String // REQUESTED, PROCESSING, ACCEPTED, COMPLETED, CANCELLED
+  refundAmount             Float      @default(0)
+  currency                 String?
+  reason                   String?
+  textReason               String?
+  trackingNumber           String?
+  needsLogistics           Boolean    @default(false)
+  amountBeforeDiscount     Float?     @default(0)
+  negotiationStatus        String?
+  sellerProofStatus        String?
   sellerCompensationStatus String?
-  returnRefundType      String?
-  returnSolution        Int?
-  returnRefundRequestType Int?
-  validationType        String?
-  returnShipDueDate     DateTime?
-  returnSellerDueDate   DateTime?
-  images                Json?     // Array of image URLs
-  items                 Json?     // Array of ReturnItem { model_id, name, images, amount, item_price }
-  buyerUsername         String?
-  buyerEmail            String?
-  shopeeCreatedAt       DateTime?
-  shopeeUpdatedAt       DateTime?
-  createdAt             DateTime  @default(now()) @db.Date
-  updatedAt             DateTime? @updatedAt @db.Date
-  shop                  ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  returnRefundType         String?
+  returnSolution           Int?
+  returnRefundRequestType  Int?
+  validationType           String?
+  returnShipDueDate        DateTime?
+  returnSellerDueDate      DateTime?
+  images                   Json? // Array of image URLs
+  items                    Json? // Array of ReturnItem { model_id, name, images, amount, item_price }
+  buyerUsername            String?
+  buyerEmail               String?
+  shopeeCreatedAt          DateTime?
+  shopeeUpdatedAt          DateTime?
+  createdAt                DateTime   @default(now()) @db.Date
+  updatedAt                DateTime?  @updatedAt @db.Date
+  shop                     ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId])
   @@index([orderSn])
@@ -1045,29 +1085,29 @@ model ShopeeReturn {
 
 // Shopee Ads - shop-level daily performance snapshot
 model ShopeeAdsDailyPerformance {
-  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
-  shopId              String   @db.ObjectId // FK ShopeeShop
-  userId              String   @db.ObjectId
-  date                DateTime @db.Date // midnight of the day
-  impressions        Int      @default(0)
-  clicks             Int      @default(0)
-  ctr                Float    @default(0)
-  directOrder        Int      @default(0)
-  broadOrder         Int      @default(0)
-  directGmv          Float    @default(0)
-  broadGmv           Float    @default(0)
-  expense            Float    @default(0) // ad spend
-  directRoas         Float    @default(0)
-  broadRoas          Float    @default(0)
-  directConversions  Float    @default(0)
-  broadConversions   Float    @default(0)
-  directItemSold     Int      @default(0)
-  broadItemSold      Int      @default(0)
-  costPerConversion  Float    @default(0)
-  totalBalance       Float?   // snapshot of ads credit balance that day
-  currency           String?  // Currency supplied by the ads performance response
-  syncedAt           DateTime @default(now()) @db.Date
-  shop               ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                String     @id @default(auto()) @map("_id") @db.ObjectId
+  shopId            String     @db.ObjectId // FK ShopeeShop
+  userId            String     @db.ObjectId
+  date              DateTime   @db.Date // midnight of the day
+  impressions       Int        @default(0)
+  clicks            Int        @default(0)
+  ctr               Float      @default(0)
+  directOrder       Int        @default(0)
+  broadOrder        Int        @default(0)
+  directGmv         Float      @default(0)
+  broadGmv          Float      @default(0)
+  expense           Float      @default(0) // ad spend
+  directRoas        Float      @default(0)
+  broadRoas         Float      @default(0)
+  directConversions Float      @default(0)
+  broadConversions  Float      @default(0)
+  directItemSold    Int        @default(0)
+  broadItemSold     Int        @default(0)
+  costPerConversion Float      @default(0)
+  totalBalance      Float? // snapshot of ads credit balance that day
+  currency          String? // Currency supplied by the ads performance response
+  syncedAt          DateTime   @default(now()) @db.Date
+  shop              ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, date])
   @@index([userId, shopId, date])
@@ -1076,32 +1116,32 @@ model ShopeeAdsDailyPerformance {
 
 // Shopee Ads - campaign-level daily performance snapshot
 model ShopeeAdsCampaignDailyPerformance {
-  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
-  shopId              String   @db.ObjectId
-  userId              String   @db.ObjectId
-  campaignId          String   // Shopee campaign_id (stringified number)
-  campaignName        String?
-  adType              String?  // auto | manual | gms
-  campaignPlacement   String?
-  date                DateTime @db.Date
-  impressions        Int      @default(0)
-  clicks             Int      @default(0)
-  ctr                Float    @default(0)
-  directOrder        Int      @default(0)
-  broadOrder         Int      @default(0)
-  directGmv          Float    @default(0)
-  broadGmv           Float    @default(0)
-  expense            Float    @default(0)
-  directRoas         Float    @default(0)
-  broadRoas          Float    @default(0)
-  directConversions  Float    @default(0)
-  broadConversions   Float    @default(0)
-  directItemSold     Int      @default(0)
-  broadItemSold      Int      @default(0)
-  costPerConversion  Float    @default(0)
-  currency           String?  // Currency supplied by the ads performance response
-  syncedAt           DateTime @default(now()) @db.Date
-  shop               ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  id                String     @id @default(auto()) @map("_id") @db.ObjectId
+  shopId            String     @db.ObjectId
+  userId            String     @db.ObjectId
+  campaignId        String // Shopee campaign_id (stringified number)
+  campaignName      String?
+  adType            String? // auto | manual | gms
+  campaignPlacement String?
+  date              DateTime   @db.Date
+  impressions       Int        @default(0)
+  clicks            Int        @default(0)
+  ctr               Float      @default(0)
+  directOrder       Int        @default(0)
+  broadOrder        Int        @default(0)
+  directGmv         Float      @default(0)
+  broadGmv          Float      @default(0)
+  expense           Float      @default(0)
+  directRoas        Float      @default(0)
+  broadRoas         Float      @default(0)
+  directConversions Float      @default(0)
+  broadConversions  Float      @default(0)
+  directItemSold    Int        @default(0)
+  broadItemSold     Int        @default(0)
+  costPerConversion Float      @default(0)
+  currency          String? // Currency supplied by the ads performance response
+  syncedAt          DateTime   @default(now()) @db.Date
+  shop              ShopeeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@unique([shopId, campaignId, date])
   @@index([userId, shopId, date])
@@ -1110,57 +1150,57 @@ model ShopeeAdsCampaignDailyPerformance {
 }
 
 model NotificationSetting {
-  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId             String    @unique @db.ObjectId // One setting per user
-  telegramBotToken   String?   // Telegram Bot API token
-  telegramChatId     String?   // Telegram chat/group ID
-  telegramEnabled    Boolean   @default(false) // Master toggle for Telegram notifications
-  createdAt          DateTime  @default(now()) @db.Date
-  updatedAt          DateTime? @updatedAt @db.Date
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String    @unique @db.ObjectId // One setting per user
+  telegramBotToken String? // Telegram Bot API token
+  telegramChatId   String? // Telegram chat/group ID
+  telegramEnabled  Boolean   @default(false) // Master toggle for Telegram notifications
+  createdAt        DateTime  @default(now()) @db.Date
+  updatedAt        DateTime? @updatedAt @db.Date
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model PurchaseOrder {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  poNumber      String    @unique
-  supplierId    String    @db.ObjectId
-  userId        String    @db.ObjectId
-  workspaceId   String?   @db.ObjectId
-  status        String    @default("draft") // draft, pending_approval, approved, rejected, ordered, shipped, received, cancelled
-  totalAmount   Float     @default(0)
-  currency      String    @default("MYR")
-  convertedTotalMyr Float?
-  fxRate Float?
-  fxRateDate DateTime? @db.Date
-  fxProvider String?
-  freightMyr Float? @default(0)
-  dutyMyr Float? @default(0)
-  taxMyr Float? @default(0)
-  insuranceMyr Float? @default(0)
-  localDeliveryMyr Float? @default(0)
+  id                    String              @id @default(auto()) @map("_id") @db.ObjectId
+  poNumber              String              @unique
+  supplierId            String              @db.ObjectId
+  userId                String              @db.ObjectId
+  workspaceId           String?             @db.ObjectId
+  status                String              @default("draft") // draft, pending_approval, approved, rejected, ordered, shipped, received, cancelled
+  totalAmount           Float               @default(0)
+  currency              String              @default("MYR")
+  convertedTotalMyr     Float?
+  fxRate                Float?
+  fxRateDate            DateTime?           @db.Date
+  fxProvider            String?
+  freightMyr            Float?              @default(0)
+  dutyMyr               Float?              @default(0)
+  taxMyr                Float?              @default(0)
+  insuranceMyr          Float?              @default(0)
+  localDeliveryMyr      Float?              @default(0)
   landedCostAdjustments Json?
-  notes         String?
-  trackingNumber  String?
-  trackingCarrier String?
-  trackingUrl     String?
-  estimatedDelivery DateTime? @db.Date
-  shippingNotes   String?
-  shippedAt     DateTime? @db.Date
-  approvedBy    String?   @db.ObjectId
-  approvedAt    DateTime? @db.Date
-  orderedAt     DateTime? @db.Date
-  receivedAt    DateTime? @db.Date
-  cancelledAt   DateTime? @db.Date
-  createdAt     DateTime  @default(now()) @db.Date
-  updatedAt     DateTime? @db.Date
-  createdBy     String    @db.ObjectId
-  updatedBy     String?   @db.ObjectId
-  supplier      Supplier  @relation(fields: [supplierId], references: [id])
-  items         PurchaseOrderItem[]
-  workspace     Workspace? @relation(fields: [workspaceId], references: [id])
-  sourcingOrder SourcingOrder?
-  receipts PurchaseReceipt[]
+  notes                 String?
+  trackingNumber        String?
+  trackingCarrier       String?
+  trackingUrl           String?
+  estimatedDelivery     DateTime?           @db.Date
+  shippingNotes         String?
+  shippedAt             DateTime?           @db.Date
+  approvedBy            String?             @db.ObjectId
+  approvedAt            DateTime?           @db.Date
+  orderedAt             DateTime?           @db.Date
+  receivedAt            DateTime?           @db.Date
+  cancelledAt           DateTime?           @db.Date
+  createdAt             DateTime            @default(now()) @db.Date
+  updatedAt             DateTime?           @db.Date
+  createdBy             String              @db.ObjectId
+  updatedBy             String?             @db.ObjectId
+  supplier              Supplier            @relation(fields: [supplierId], references: [id])
+  items                 PurchaseOrderItem[]
+  workspace             Workspace?          @relation(fields: [workspaceId], references: [id])
+  sourcingOrder         SourcingOrder?
+  receipts              PurchaseReceipt[]
 
   @@index([userId])
   @@index([supplierId])
@@ -1170,30 +1210,30 @@ model PurchaseOrder {
 }
 
 model ExchangeRate {
-  id String @id @default(auto()) @map("_id") @db.ObjectId
-  baseCurrency String
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  baseCurrency  String
   quoteCurrency String
-  rate Float
-  provider String
-  rateDate DateTime @db.Date
-  fetchedAt DateTime @db.Date
+  rate          Float
+  provider      String
+  rateDate      DateTime @db.Date
+  fetchedAt     DateTime @db.Date
 
   @@unique([baseCurrency, quoteCurrency, rateDate])
   @@index([fetchedAt])
 }
 
 model PurchaseOrderItem {
-  id              String        @id @default(auto()) @map("_id") @db.ObjectId
-  purchaseOrderId String        @db.ObjectId
-  productId       String        @db.ObjectId
-  productName     String
-  sku             String?
-  quantity        Int
-  quantityReceived Int         @default(0) // Quantity received so far (for partial receiving)
-  unitCost        Float
-  subtotal        Float
-  createdAt       DateTime      @default(now()) @db.Date
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  id               String        @id @default(auto()) @map("_id") @db.ObjectId
+  purchaseOrderId  String        @db.ObjectId
+  productId        String        @db.ObjectId
+  productName      String
+  sku              String?
+  quantity         Int
+  quantityReceived Int           @default(0) // Quantity received so far (for partial receiving)
+  unitCost         Float
+  subtotal         Float
+  createdAt        DateTime      @default(now()) @db.Date
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
 
   @@index([purchaseOrderId])
   @@index([productId])
@@ -1202,24 +1242,24 @@ model PurchaseOrderItem {
 // ─── Lazada Marketplace ───────────────────────────────────────────────────
 
 model LazadaShop {
-  id             String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId         String    @db.ObjectId
-  sellerId       String    // Lazada seller ID (from country_user_info)
-  sellerName     String    // Seller display name
-  countryCode    String    // Country code: my, sg, th, vn, id, ph, cb
-  accessToken    String
-  refreshToken   String
-  tokenExpiry    DateTime? // When access_token expires (10-day window)
-  refreshExpiry  DateTime? // When refresh_token expires (50-day window)
-  lastSyncedAt   DateTime?
-  lowStockThreshold Int    @default(10)
-  createdAt      DateTime  @default(now()) @db.Date
-  updatedAt      DateTime? @db.Date
-  createdBy      String    @db.ObjectId
-  updatedBy      String?   @db.ObjectId
-  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  products       LazadaProduct[]
-  orders         LazadaOrder[]
+  id                String          @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String          @db.ObjectId
+  sellerId          String // Lazada seller ID (from country_user_info)
+  sellerName        String // Seller display name
+  countryCode       String // Country code: my, sg, th, vn, id, ph, cb
+  accessToken       String
+  refreshToken      String
+  tokenExpiry       DateTime? // When access_token expires (10-day window)
+  refreshExpiry     DateTime? // When refresh_token expires (50-day window)
+  lastSyncedAt      DateTime?
+  lowStockThreshold Int             @default(10)
+  createdAt         DateTime        @default(now()) @db.Date
+  updatedAt         DateTime?       @db.Date
+  createdBy         String          @db.ObjectId
+  updatedBy         String?         @db.ObjectId
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products          LazadaProduct[]
+  orders            LazadaOrder[]
 
   @@unique([userId, sellerId])
   @@index([userId])
@@ -1227,27 +1267,27 @@ model LazadaShop {
 }
 
 model LazadaProduct {
-  id             String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId         String    @db.ObjectId
-  userId         String    @db.ObjectId
-  lazadaItemId   Int       // Lazada item_id
-  itemName       String
-  description    String?
-  sellerSku      String?
+  id              String                 @id @default(auto()) @map("_id") @db.ObjectId
+  shopId          String                 @db.ObjectId
+  userId          String                 @db.ObjectId
+  lazadaItemId    Int // Lazada item_id
+  itemName        String
+  description     String?
+  sellerSku       String?
   primaryCategory Int?
-  status         String    // active, inactive, deleted
-  price          Float
-  specialPrice   Float?
-  stock          Int       @default(0)
-  imageUrl       String?
-  images         Json?
-  weight         Float?
-  dimensions     Json?     // { width, height, length }
-  lastSyncedAt   DateTime?
-  createdAt      DateTime  @default(now()) @db.Date
-  updatedAt      DateTime? @db.Date
-  shop           LazadaShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  variants       LazadaProductVariant[]
+  status          String // active, inactive, deleted
+  price           Float
+  specialPrice    Float?
+  stock           Int                    @default(0)
+  imageUrl        String?
+  images          Json?
+  weight          Float?
+  dimensions      Json? // { width, height, length }
+  lastSyncedAt    DateTime?
+  createdAt       DateTime               @default(now()) @db.Date
+  updatedAt       DateTime?              @db.Date
+  shop            LazadaShop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants        LazadaProductVariant[]
 
   @@unique([shopId, lazadaItemId])
   @@index([shopId])
@@ -1257,25 +1297,25 @@ model LazadaProduct {
 }
 
 model LazadaProductVariant {
-  id              String          @id @default(auto()) @map("_id") @db.ObjectId
-  productId       String          @db.ObjectId
-  shopId          String          @db.ObjectId
-  userId          String          @db.ObjectId
-  lazadaItemId    Int
-  skuId           Int
-  sellerSku       String?
-  shopSku         String?
-  variation       String?
-  price           Float
-  specialPrice    Float?
-  stock           Int             @default(0)
-  available       Int?
-  status          String
-  images          Json?
-  lastSyncedAt    DateTime?
-  createdAt       DateTime        @default(now()) @db.Date
-  updatedAt       DateTime?
-  product         LazadaProduct   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id           String        @id @default(auto()) @map("_id") @db.ObjectId
+  productId    String        @db.ObjectId
+  shopId       String        @db.ObjectId
+  userId       String        @db.ObjectId
+  lazadaItemId Int
+  skuId        Int
+  sellerSku    String?
+  shopSku      String?
+  variation    String?
+  price        Float
+  specialPrice Float?
+  stock        Int           @default(0)
+  available    Int?
+  status       String
+  images       Json?
+  lastSyncedAt DateTime?
+  createdAt    DateTime      @default(now()) @db.Date
+  updatedAt    DateTime?
+  product      LazadaProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([productId, skuId])
   @@index([sellerSku])
@@ -1284,13 +1324,13 @@ model LazadaProductVariant {
 }
 
 model LazadaOrder {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId            String    @db.ObjectId
-  userId            String    @db.ObjectId
-  lazadaOrderId     String    @unique // Lazada order_id (numeric as string)
-  orderNumber       String?   // Lazada order_number
-  orderStatus       String    // pending, confirmed, packed, ready_to_ship, shipped, delivered, cancelled, returned
-  paymentStatus     String    @default("unpaid")
+  id                String            @id @default(auto()) @map("_id") @db.ObjectId
+  shopId            String            @db.ObjectId
+  userId            String            @db.ObjectId
+  lazadaOrderId     String            @unique // Lazada order_id (numeric as string)
+  orderNumber       String? // Lazada order_number
+  orderStatus       String // pending, confirmed, packed, ready_to_ship, shipped, delivered, cancelled, returned
+  paymentStatus     String            @default("unpaid")
   totalAmount       Float
   shippingFee       Float?
   currency          String?
@@ -1309,9 +1349,9 @@ model LazadaOrder {
   deliveredAt       DateTime?
   completedAt       DateTime?
   cancelledAt       DateTime?
-  createdAt         DateTime  @default(now()) @db.Date
-  updatedAt         DateTime? @db.Date
-  shop              LazadaShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt         DateTime          @default(now()) @db.Date
+  updatedAt         DateTime?         @db.Date
+  shop              LazadaShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   items             LazadaOrderItem[]
 
   @@index([shopId])
@@ -1322,26 +1362,26 @@ model LazadaOrder {
 }
 
 model LazadaOrderItem {
-  id              String    @id @default(auto()) @map("_id") @db.ObjectId
-  orderId         String    @db.ObjectId
-  shopId          String    @db.ObjectId
-  lazadaOrderItemId Int     // Lazada order_item_id
-  itemId          Int?      // Lazada item_id
-  skuId           String?
-  sellerSku       String?
-  shopSku         String?
-  productName     String
-  variation       String?
-  quantity        Int
-  price           Float
-  paidPrice       Float?
-  itemPrice       Float?
-  currency        String?
-  status          String
-  shipmentProvider String?
-  trackingNumber  String?
-  createdAt       DateTime  @default(now()) @db.Date
-  order           LazadaOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
+  orderId           String      @db.ObjectId
+  shopId            String      @db.ObjectId
+  lazadaOrderItemId Int // Lazada order_item_id
+  itemId            Int? // Lazada item_id
+  skuId             String?
+  sellerSku         String?
+  shopSku           String?
+  productName       String
+  variation         String?
+  quantity          Int
+  price             Float
+  paidPrice         Float?
+  itemPrice         Float?
+  currency          String?
+  status            String
+  shipmentProvider  String?
+  trackingNumber    String?
+  createdAt         DateTime    @default(now()) @db.Date
+  order             LazadaOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([shopId])
@@ -1351,19 +1391,19 @@ model LazadaOrderItem {
 // ─── Generic Sync Log (multi-channel) ─────────────────────────────────────
 
 model SyncLog {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId           String    @db.ObjectId // FK to ShopeeShop or LazadaShop
-  userId           String    @db.ObjectId
-  channel          String    @default("shopee") // "shopee" | "lazada" | "tiktok"
-  syncType         String    // "products", "orders", "all"
-  status           String    @default("running") // "running", "completed", "completed_with_errors", "failed"
-  itemsSynced      Int       @default(0)
-  itemsCreated     Int       @default(0)
-  itemsUpdated     Int       @default(0)
-  errors           Json?
-  startedAt        DateTime  @default(now()) @db.Date
-  completedAt      DateTime? @db.Date
-  triggeredBy      String    @default("manual") // "manual", "cron", "webhook"
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId       String    @db.ObjectId // FK to ShopeeShop or LazadaShop
+  userId       String    @db.ObjectId
+  channel      String    @default("shopee") // "shopee" | "lazada" | "tiktok"
+  syncType     String // "products", "orders", "all"
+  status       String    @default("running") // "running", "completed", "completed_with_errors", "failed"
+  itemsSynced  Int       @default(0)
+  itemsCreated Int       @default(0)
+  itemsUpdated Int       @default(0)
+  errors       Json?
+  startedAt    DateTime  @default(now()) @db.Date
+  completedAt  DateTime? @db.Date
+  triggeredBy  String    @default("manual") // "manual", "cron", "webhook"
 
   @@index([shopId])
   @@index([userId])
@@ -1375,26 +1415,26 @@ model SyncLog {
 // ─── TikTok Shop Integration ────────────────────────────────────────────────
 
 model TikTokShop {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId            String    @db.ObjectId
-  shopId            String    // TikTok shop ID (string from API)
-  shopCipher        String    // Required for shop-level API calls
+  id                String          @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String          @db.ObjectId
+  shopId            String // TikTok shop ID (string from API)
+  shopCipher        String // Required for shop-level API calls
   shopName          String
-  region            String?   // GB, US, ID, etc.
-  sellerType        String?   // CROSS_BORDER, LOCAL
-  shopCode          String?   // Shop code from authorization
-  openId            String?   // TikTok open_id for the seller
+  region            String? // GB, US, ID, etc.
+  sellerType        String? // CROSS_BORDER, LOCAL
+  shopCode          String? // Shop code from authorization
+  openId            String? // TikTok open_id for the seller
   accessToken       String
   refreshToken      String
   tokenExpiry       DateTime? // When access_token expires (7-day window)
   refreshExpiry     DateTime? // When refresh_token expires
   lastSyncedAt      DateTime?
-  lowStockThreshold Int       @default(10)
-  createdAt         DateTime  @default(now()) @db.Date
-  updatedAt         DateTime? @db.Date
-  createdBy         String    @db.ObjectId
-  updatedBy         String?   @db.ObjectId
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lowStockThreshold Int             @default(10)
+  createdAt         DateTime        @default(now()) @db.Date
+  updatedAt         DateTime?       @db.Date
+  createdBy         String          @db.ObjectId
+  updatedBy         String?         @db.ObjectId
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   products          TikTokProduct[]
   orders            TikTokOrder[]
 
@@ -1404,24 +1444,24 @@ model TikTokShop {
 }
 
 model TikTokProduct {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId            String    @db.ObjectId
-  userId            String    @db.ObjectId
-  tiktokProductId   String    // TikTok product ID
-  title             String
-  description       String?
-  categoryId        String?
-  mainImageUrl      String?
-  status            String    // ACTIVATE, DRAFT, UNDER_REVIEW, FAILED, FROZEN, DEACTIVATE
-  auditStatus       String?   // PASS, PENDING, FAILED
-  hasDraft          Boolean?  @default(false)
-  lastSyncedAt      DateTime?
-  createdAt         DateTime  @default(now()) @db.Date
-  updatedAt         DateTime? @db.Date
-  createdBy         String    @db.ObjectId
-  updatedBy         String?   @db.ObjectId
-  shop              TikTokShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  variants          TikTokProductVariant[]
+  id              String                 @id @default(auto()) @map("_id") @db.ObjectId
+  shopId          String                 @db.ObjectId
+  userId          String                 @db.ObjectId
+  tiktokProductId String // TikTok product ID
+  title           String
+  description     String?
+  categoryId      String?
+  mainImageUrl    String?
+  status          String // ACTIVATE, DRAFT, UNDER_REVIEW, FAILED, FROZEN, DEACTIVATE
+  auditStatus     String? // PASS, PENDING, FAILED
+  hasDraft        Boolean?               @default(false)
+  lastSyncedAt    DateTime?
+  createdAt       DateTime               @default(now()) @db.Date
+  updatedAt       DateTime?              @db.Date
+  createdBy       String                 @db.ObjectId
+  updatedBy       String?                @db.ObjectId
+  shop            TikTokShop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants        TikTokProductVariant[]
 
   @@unique([shopId, tiktokProductId])
   @@index([shopId])
@@ -1431,26 +1471,26 @@ model TikTokProduct {
 }
 
 model TikTokProductVariant {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId         String    @db.ObjectId
-  shopId            String    @db.ObjectId
-  userId            String    @db.ObjectId
-  tiktokSkuId       String    // TikTok SKU ID
-  sellerSku         String?
-  price             Float
-  originalPrice     Float?
-  currency          String?
-  totalQuantity     Int       @default(0)
-  imageUrl          String?
-  status            String    // NORMAL, DELETED, NOT_SALE
-  salesAttrs        Json?     // Array of {attribute_id, attribute_name, attribute_value_id, attribute_value_name}
-  lastSyncedAt      DateTime?
-  createdAt         DateTime  @default(now()) @db.Date
-  updatedAt         DateTime? @db.Date
-  createdBy         String    @db.ObjectId
-  updatedBy         String?   @db.ObjectId
-  product           TikTokProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
-  orderItems        TikTokOrderItem[]
+  id            String            @id @default(auto()) @map("_id") @db.ObjectId
+  productId     String            @db.ObjectId
+  shopId        String            @db.ObjectId
+  userId        String            @db.ObjectId
+  tiktokSkuId   String // TikTok SKU ID
+  sellerSku     String?
+  price         Float
+  originalPrice Float?
+  currency      String?
+  totalQuantity Int               @default(0)
+  imageUrl      String?
+  status        String // NORMAL, DELETED, NOT_SALE
+  salesAttrs    Json? // Array of {attribute_id, attribute_name, attribute_value_id, attribute_value_name}
+  lastSyncedAt  DateTime?
+  createdAt     DateTime          @default(now()) @db.Date
+  updatedAt     DateTime?         @db.Date
+  createdBy     String            @db.ObjectId
+  updatedBy     String?           @db.ObjectId
+  product       TikTokProduct     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems    TikTokOrderItem[]
 
   @@unique([productId, tiktokSkuId])
   @@index([shopId])
@@ -1460,34 +1500,34 @@ model TikTokProductVariant {
 }
 
 model TikTokOrder {
-  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId              String    @db.ObjectId
-  userId              String    @db.ObjectId
-  tiktokOrderId       String    @unique // TikTok order ID
-  orderStatus         String    // UNPAID, ON_HOLD, AWAITING_SHIPMENT, PARTIALLY_SHIPPING, AWAITING_COLLECTION, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED
-  cancelReason        String?
-  trackingNumber      String?
-  shippingProvider    String?
-  fulfillmentType     String?   // FULFILLMENT_BY_SELLER, FULFILLMENT_BY_TIKTOK
-  shippingType        String?   // TIKTOK_SHIPPING, SELLER_SHIPPING
-  currency            String?   // Payment currency supplied by TikTok
-  payment             Json?     // Flattened payment object {currency, total_product_price, total_shipping_fee, platform_fee, seller_income, buyer_payment, tax, etc.}
-  recipientAddress    Json?     // {name, phone, email, address_detail, region_code, state, city, district, postal_code}
-  isCod               Boolean?  @default(false)
-  buyerUserId         String?
-  buyerEmail          String?
-  buyerNickname       String?
-  sellerNote          String?
-  buyerMessage        String?
-  tiktokCreatedAt     DateTime?
-  tiktokUpdatedAt     DateTime?
-  paidTime            DateTime?
-  cancelTime          DateTime?
-  deliveryTime        DateTime?
-  createdAt           DateTime  @default(now()) @db.Date
-  updatedAt           DateTime? @db.Date
-  shop                TikTokShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  items               TikTokOrderItem[]
+  id               String            @id @default(auto()) @map("_id") @db.ObjectId
+  shopId           String            @db.ObjectId
+  userId           String            @db.ObjectId
+  tiktokOrderId    String            @unique // TikTok order ID
+  orderStatus      String // UNPAID, ON_HOLD, AWAITING_SHIPMENT, PARTIALLY_SHIPPING, AWAITING_COLLECTION, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED
+  cancelReason     String?
+  trackingNumber   String?
+  shippingProvider String?
+  fulfillmentType  String? // FULFILLMENT_BY_SELLER, FULFILLMENT_BY_TIKTOK
+  shippingType     String? // TIKTOK_SHIPPING, SELLER_SHIPPING
+  currency         String? // Payment currency supplied by TikTok
+  payment          Json? // Flattened payment object {currency, total_product_price, total_shipping_fee, platform_fee, seller_income, buyer_payment, tax, etc.}
+  recipientAddress Json? // {name, phone, email, address_detail, region_code, state, city, district, postal_code}
+  isCod            Boolean?          @default(false)
+  buyerUserId      String?
+  buyerEmail       String?
+  buyerNickname    String?
+  sellerNote       String?
+  buyerMessage     String?
+  tiktokCreatedAt  DateTime?
+  tiktokUpdatedAt  DateTime?
+  paidTime         DateTime?
+  cancelTime       DateTime?
+  deliveryTime     DateTime?
+  createdAt        DateTime          @default(now()) @db.Date
+  updatedAt        DateTime?         @db.Date
+  shop             TikTokShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items            TikTokOrderItem[]
 
   @@index([shopId])
   @@index([userId])
@@ -1497,29 +1537,29 @@ model TikTokOrder {
 }
 
 model TikTokOrderItem {
-  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
-  orderId               String    @db.ObjectId
-  shopId                String    @db.ObjectId
-  variantId             String?   @db.ObjectId // Optional FK to TikTokProductVariant
-  tiktokOrderLineItemId String    // TikTok order line item ID
-  productId             String?   // TikTok product ID (not our local ID)
-  skuId                 String?   // TikTok SKU ID
+  id                    String                @id @default(auto()) @map("_id") @db.ObjectId
+  orderId               String                @db.ObjectId
+  shopId                String                @db.ObjectId
+  variantId             String?               @db.ObjectId // Optional FK to TikTokProductVariant
+  tiktokOrderLineItemId String // TikTok order line item ID
+  productId             String? // TikTok product ID (not our local ID)
+  skuId                 String? // TikTok SKU ID
   productName           String
   skuName               String?
   sellerSku             String?
   productImageUrl       String?
   quantity              Int
-  originalPrice         Float     // Pre-discount unit price
-  price                 Float     // Actual unit price after discount
-  discount              Float?    @default(0)
+  originalPrice         Float // Pre-discount unit price
+  price                 Float // Actual unit price after discount
+  discount              Float?                @default(0)
   subtotalAmount        Float
-  taxAmount             Float?    @default(0)
-  refundAmount          Float?    @default(0)
-  currency              String?   // Line-item currency supplied by TikTok
-  isGift                Boolean?  @default(false)
-  saleAttrs             Json?     // Array of {attribute_id, attribute_name, attribute_value_name}
-  createdAt             DateTime  @default(now()) @db.Date
-  order                 TikTokOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  taxAmount             Float?                @default(0)
+  refundAmount          Float?                @default(0)
+  currency              String? // Line-item currency supplied by TikTok
+  isGift                Boolean?              @default(false)
+  saleAttrs             Json? // Array of {attribute_id, attribute_name, attribute_value_name}
+  createdAt             DateTime              @default(now()) @db.Date
+  order                 TikTokOrder           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variant               TikTokProductVariant? @relation(fields: [variantId], references: [id])
 
   @@index([orderId])
@@ -1531,17 +1571,17 @@ model TikTokOrderItem {
 // ─── Shopify Integration ───────────────────────────────────────────────────
 
 model ShopifyShop {
-  id                String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId            String    @db.ObjectId
-  shopDomain        String    @unique
+  id                String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String           @db.ObjectId
+  shopDomain        String           @unique
   shopName          String
   accessToken       String
   scopes            String
   lastSyncedAt      DateTime?
-  lowStockThreshold Int       @default(10)
-  createdAt         DateTime  @default(now()) @db.Date
-  updatedAt         DateTime? @db.Date
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lowStockThreshold Int              @default(10)
+  createdAt         DateTime         @default(now()) @db.Date
+  updatedAt         DateTime?        @db.Date
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   products          ShopifyProduct[]
   orders            ShopifyOrder[]
 
@@ -1549,9 +1589,9 @@ model ShopifyShop {
 }
 
 model ShopifyProduct {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId           String    @db.ObjectId
-  userId           String    @db.ObjectId
+  id               String                  @id @default(auto()) @map("_id") @db.ObjectId
+  shopId           String                  @db.ObjectId
+  userId           String                  @db.ObjectId
   shopifyProductId String
   title            String
   handle           String
@@ -1559,14 +1599,14 @@ model ShopifyProduct {
   vendor           String?
   productType      String?
   status           String
-  tags             String[]  @default([])
-  totalInventory   Int       @default(0)
-  tracksInventory  Boolean   @default(true)
+  tags             String[]                @default([])
+  totalInventory   Int                     @default(0)
+  tracksInventory  Boolean                 @default(true)
   featuredImageUrl String?
   lastSyncedAt     DateTime?
-  createdAt        DateTime  @default(now()) @db.Date
-  updatedAt        DateTime? @db.Date
-  shop             ShopifyShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt        DateTime                @default(now()) @db.Date
+  updatedAt        DateTime?               @db.Date
+  shop             ShopifyShop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
   variants         ShopifyProductVariant[]
 
   @@unique([shopId, shopifyProductId])
@@ -1576,23 +1616,23 @@ model ShopifyProduct {
 }
 
 model ShopifyProductVariant {
-  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
-  productId          String    @db.ObjectId
-  shopifyVariantId   String
-  title              String
-  displayName        String?
-  sku                String?
-  barcode            String?
-  price              Float
-  compareAtPrice     Float?
-  currency           String?   // Currency supplied by Shopify's MoneyV2 price fields
-  inventoryQuantity  Int       @default(0)
-  inventoryPolicy    String?
-  position           Int?
-  availableForSale   Boolean   @default(false)
-  createdAt          DateTime  @default(now()) @db.Date
-  updatedAt          DateTime? @db.Date
-  product            ShopifyProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id                String         @id @default(auto()) @map("_id") @db.ObjectId
+  productId         String         @db.ObjectId
+  shopifyVariantId  String
+  title             String
+  displayName       String?
+  sku               String?
+  barcode           String?
+  price             Float
+  compareAtPrice    Float?
+  currency          String? // Currency supplied by Shopify's MoneyV2 price fields
+  inventoryQuantity Int            @default(0)
+  inventoryPolicy   String?
+  position          Int?
+  availableForSale  Boolean        @default(false)
+  createdAt         DateTime       @default(now()) @db.Date
+  updatedAt         DateTime?      @db.Date
+  product           ShopifyProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([productId, shopifyVariantId])
   @@index([productId])
@@ -1600,38 +1640,38 @@ model ShopifyProductVariant {
 }
 
 model ShopifyOrder {
-  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
-  shopId                String    @db.ObjectId
-  userId                String    @db.ObjectId
-  shopifyOrderId        String    @unique
-  orderName             String
-  orderStatus           String
-  financialStatus       String?
-  fulfillmentStatus     String
-  totalAmount           Float
-  subtotalAmount        Float
-  shippingAmount        Float     @default(0)
-  taxAmount             Float?
-  currency              String
-  test                  Boolean   @default(false)
-  confirmed             Boolean   @default(false)
-  note                  String?
-  tags                  String[]  @default([])
-  customerEmail         String?
-  customerFirstName     String?
-  customerLastName      String?
-  shippingAddress       Json?
-  cancelReason          String?
-  shopifyCreatedAt      DateTime?
-  shopifyUpdatedAt      DateTime?
-  processedAt           DateTime?
-  closedAt              DateTime?
-  cancelledAt           DateTime?
-  lastSyncedAt          DateTime?
-  createdAt             DateTime  @default(now()) @db.Date
-  updatedAt             DateTime? @db.Date
-  shop                  ShopifyShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  items                 ShopifyOrderItem[]
+  id                String             @id @default(auto()) @map("_id") @db.ObjectId
+  shopId            String             @db.ObjectId
+  userId            String             @db.ObjectId
+  shopifyOrderId    String             @unique
+  orderName         String
+  orderStatus       String
+  financialStatus   String?
+  fulfillmentStatus String
+  totalAmount       Float
+  subtotalAmount    Float
+  shippingAmount    Float              @default(0)
+  taxAmount         Float?
+  currency          String
+  test              Boolean            @default(false)
+  confirmed         Boolean            @default(false)
+  note              String?
+  tags              String[]           @default([])
+  customerEmail     String?
+  customerFirstName String?
+  customerLastName  String?
+  shippingAddress   Json?
+  cancelReason      String?
+  shopifyCreatedAt  DateTime?
+  shopifyUpdatedAt  DateTime?
+  processedAt       DateTime?
+  closedAt          DateTime?
+  cancelledAt       DateTime?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime           @default(now()) @db.Date
+  updatedAt         DateTime?          @db.Date
+  shop              ShopifyShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items             ShopifyOrderItem[]
 
   @@index([shopId])
   @@index([userId])
@@ -1640,10 +1680,10 @@ model ShopifyOrder {
 }
 
 model ShopifyOrderItem {
-  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
-  orderId             String    @db.ObjectId
-  shopId              String    @db.ObjectId
-  variantId           String?   @db.ObjectId
+  id                  String       @id @default(auto()) @map("_id") @db.ObjectId
+  orderId             String       @db.ObjectId
+  shopId              String       @db.ObjectId
+  variantId           String?      @db.ObjectId
   shopifyLineId       String
   name                String
   title               String
@@ -1653,8 +1693,8 @@ model ShopifyOrderItem {
   sku                 String?
   price               Float
   discountedPrice     Float?
-  currency            String?   // Original unit-price currency supplied by Shopify
-  createdAt           DateTime  @default(now()) @db.Date
+  currency            String? // Original unit-price currency supplied by Shopify
+  createdAt           DateTime     @default(now()) @db.Date
   order               ShopifyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])

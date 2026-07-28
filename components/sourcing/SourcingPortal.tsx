@@ -6,41 +6,634 @@ import { Plus, Search, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useIsRestoring } from "@tanstack/react-query";
-import { useBulkUpdateSourcingCases, useCreateSupplierEvaluation, useImportSourcingCases, useSourcingAnalytics, useSourcingCases, useSourcingMembers, useSourcingSlaPerformance, useSourcingWorkspaces, useSupplierScorecard } from "@/hooks/queries";
+import {
+  useBulkUpdateSourcingCases,
+  useCreateSupplierEvaluation,
+  useImportSourcingCases,
+  useSourcingAnalytics,
+  useSourcingCases,
+  useSourcingMembers,
+  useSourcingSlaPerformance,
+  useSourcingWorkspaces,
+  useSupplierScorecard,
+} from "@/hooks/queries";
 import { SourcingSlaSettings } from "./SourcingSlaSettings";
+import { SourcingCostSettings } from "./SourcingCostSettings";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
-const dueLabel = (item: { nextAction?: string | null; nextActionAt?: string | null; slaDueAt?: string | null }) => {
+const dueLabel = (item: {
+  nextAction?: string | null;
+  nextActionAt?: string | null;
+  slaDueAt?: string | null;
+}) => {
   const dueAt = item.slaDueAt || item.nextActionAt;
   if (!dueAt) return item.nextAction || "No next action";
   return `${item.nextAction || "Action"}: ${new Date(dueAt).toLocaleDateString()}${new Date(dueAt) < new Date() ? " overdue" : ""}`;
 };
-export default function SourcingPortal({ basePath = "/sourcing", manageMembers = false }: { basePath?: string; manageMembers?: boolean }) {
+export default function SourcingPortal({
+  basePath = "/sourcing",
+  manageMembers = false,
+}: {
+  basePath?: string;
+  manageMembers?: boolean;
+}) {
   const isRestoring = useIsRestoring();
-  const { data: workspaces = [], isLoading: loadingWorkspaces, error: workspaceError } = useSourcingWorkspaces();
-  const [workspaceId, setWorkspaceId] = useState(""); const activeWorkspace = workspaceId || workspaces[0]?.id || "";
-  const { data: cases = [], isLoading, error } = useSourcingCases(activeWorkspace);
+  const {
+    data: workspaces = [],
+    isLoading: loadingWorkspaces,
+    error: workspaceError,
+  } = useSourcingWorkspaces();
+  const [workspaceId, setWorkspaceId] = useState("");
+  const activeWorkspace = workspaceId || workspaces[0]?.id || "";
+  const {
+    data: cases = [],
+    isLoading,
+    error,
+  } = useSourcingCases(activeWorkspace);
   const { data: members = [] } = useSourcingMembers(activeWorkspace, true);
   const { data: analytics } = useSourcingAnalytics(activeWorkspace);
   const { data: slaPerformance } = useSourcingSlaPerformance(activeWorkspace);
   const { data: scorecard = [] } = useSupplierScorecard(activeWorkspace);
   const evaluationMutation = useCreateSupplierEvaluation();
-  const importMutation = useImportSourcingCases(); const bulkMutation = useBulkUpdateSourcingCases();
-  const [evaluation, setEvaluation] = useState({ supplierId: "", qualityRating: "5", timelinessRating: "5", communicationRating: "5", valueRating: "5", notes: "" });
-  const [search, setSearch] = useState(""); const [stage, setStage] = useState("all"); const [assignee, setAssignee] = useState("all"); const [actionFilter, setActionFilter] = useState("all"); const [selected, setSelected] = useState<string[]>([]); const [bulkAssignee, setBulkAssignee] = useState(""); const [bulkDue, setBulkDue] = useState(""); const [preview, setPreview] = useState<{ valid: number; errors: { row: number; message: string }[] } | null>(null);
-  const filtered = cases.filter((item: any) => { const due = item.slaDueAt || item.nextActionAt; const overdue = due && new Date(due) < new Date(); return (stage === "all" || item.stage === stage) && (assignee === "all" || item.assignedToId === assignee) && (actionFilter === "all" || (actionFilter === "overdue" ? overdue : actionFilter === "needs_action" ? !!due : !!item.slaDueAt)) && item.title.toLowerCase().includes(search.toLowerCase()); });
-  const canAssign = workspaces.find((w: any) => w.id === activeWorkspace)?.canAssign ?? false;
+  const importMutation = useImportSourcingCases();
+  const bulkMutation = useBulkUpdateSourcingCases();
+  const [evaluation, setEvaluation] = useState({
+    supplierId: "",
+    qualityRating: "5",
+    timelinessRating: "5",
+    communicationRating: "5",
+    valueRating: "5",
+    notes: "",
+  });
+  const [search, setSearch] = useState("");
+  const [stage, setStage] = useState("all");
+  const [assignee, setAssignee] = useState("all");
+  const [actionFilter, setActionFilter] = useState("all");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [bulkDue, setBulkDue] = useState("");
+  const [preview, setPreview] = useState<{
+    valid: number;
+    errors: { row: number; message: string }[];
+  } | null>(null);
+  const filtered = cases.filter((item: any) => {
+    const due = item.slaDueAt || item.nextActionAt;
+    const overdue = due && new Date(due) < new Date();
+    return (
+      (stage === "all" || item.stage === stage) &&
+      (assignee === "all" || item.assignedToId === assignee) &&
+      (actionFilter === "all" ||
+        (actionFilter === "overdue"
+          ? overdue
+          : actionFilter === "needs_action"
+            ? !!due
+            : !!item.slaDueAt)) &&
+      item.title.toLowerCase().includes(search.toLowerCase())
+    );
+  });
+  const canAssign =
+    workspaces.find((w: any) => w.id === activeWorkspace)?.canAssign ?? false;
   // Persisted query restoration can synchronously replace an SSR-empty cache. Keep the shell stable until it finishes.
-  if (isRestoring || loadingWorkspaces) return <main className="mx-auto max-w-6xl p-6"><div className="h-36 animate-pulse rounded-xl bg-muted" /></main>;
-  if (workspaceError) return <main className="p-6 text-destructive">Unable to load sourcing workspaces.</main>;
-   return <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6"><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-bold">Sourcing</h1><p className="text-muted-foreground">Source products, compare supplier quotes, and hand off approved orders.</p></div><div className="flex gap-2">{manageMembers && <Button variant="outline" asChild><Link href={`${basePath}/members`}>Manage sourcers</Link></Button>}{canAssign && <Button asChild><Link href={activeWorkspace ? `${basePath}/new?workspaceId=${activeWorkspace}` : `${basePath}/new`}><Plus /> New sourcing case</Link></Button>}</div></div>
-    {!workspaces.length ? <Card><CardContent className="p-6 text-muted-foreground">You are not a member of a sourcing workspace.</CardContent></Card> : <>{canAssign && <Card><CardContent className="flex flex-wrap items-center gap-3 p-4"><label className="flex items-center gap-2 text-sm font-medium"><Upload className="h-4 w-4" />Import CSV/XLSX<Input className="w-56" type="file" accept=".csv,.xlsx" onChange={async (event) => { const file = event.target.files?.[0]; if (!file || !activeWorkspace) return; const form = new FormData(); form.set("workspaceId", activeWorkspace); form.set("file", file); const result = await importMutation.mutateAsync(form); setPreview(result); }} /></label>{preview && <span className="text-sm text-muted-foreground">{preview.valid} valid rows, {preview.errors.length} errors {preview.errors[0] ? `(${preview.errors[0].message})` : ""}</span>} {preview && preview.valid > 0 && preview.errors.length === 0 && <Button size="sm" isLoading={importMutation.isPending} onClick={async () => { const input = document.querySelector<HTMLInputElement>('input[type=file]'); const file = input?.files?.[0]; if (!file) return; const form = new FormData(); form.set("workspaceId", activeWorkspace); form.set("file", file); form.set("commit", "true"); await importMutation.mutateAsync(form); setPreview(null); }}>Import valid cases</Button>}</CardContent></Card>}<div className="grid gap-3 sm:grid-cols-3"><Select value={activeWorkspace} onValueChange={setWorkspaceId}><SelectTrigger><SelectValue placeholder="Workspace" /></SelectTrigger><SelectContent>{workspaces.map((workspace: { id: string; name: string }) => <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>)}</SelectContent></Select><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search requests" /></div><Select value={stage} onValueChange={setStage}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All stages</SelectItem>{["draft", "sourcing", "changes_requested", "quoted", "approved", "ordered", "shipped", "received", "rejected", "cannot_source", "archived"].map((value) => <SelectItem key={value} value={value}>{stageLabel(value)}</SelectItem>)}</SelectContent></Select>{canAssign && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger><SelectValue placeholder="Assignee" /></SelectTrigger><SelectContent><SelectItem value="all">All assignees</SelectItem>{members.map((member: any) => <SelectItem key={member.userId || member.id} value={member.userId || member.id}>{member.user?.name || member.user?.email || member.name || member.email}</SelectItem>)}</SelectContent></Select>}<Select value={actionFilter} onValueChange={setActionFilter}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All actions</SelectItem><SelectItem value="needs_action">Has next action</SelectItem><SelectItem value="overdue">Overdue</SelectItem><SelectItem value="sla">Has SLA</SelectItem></SelectContent></Select></div>
-    {canAssign && selected.length > 0 && <Card><CardContent className="flex flex-wrap items-end gap-3 p-4"><b>{selected.length} selected</b><Select value={bulkAssignee} onValueChange={setBulkAssignee}><SelectTrigger className="w-48"><SelectValue placeholder="Reassign to" /></SelectTrigger><SelectContent>{members.map((member: any) => <SelectItem key={member.userId || member.id} value={member.userId || member.id}>{member.user?.name || member.user?.email || member.name || member.email}</SelectItem>)}</SelectContent></Select><Input className="w-52" type="datetime-local" value={bulkDue} onChange={(event) => setBulkDue(event.target.value)} /><Button isLoading={bulkMutation.isPending} onClick={async () => { await bulkMutation.mutateAsync({ workspaceId: activeWorkspace, caseIds: selected, ...(bulkAssignee ? { assignedToId: bulkAssignee } : {}), ...(bulkDue ? { nextActionAt: new Date(bulkDue).toISOString() } : {}) }); setSelected([]); }}>Apply bulk update</Button></CardContent></Card>}
-    {analytics && <div className="grid gap-3 sm:grid-cols-4"><Card><CardContent className="p-4 text-sm"><b>{analytics.totalCases}</b><p className="text-muted-foreground">Total cases</p></CardContent></Card><Card><CardContent className="p-4 text-sm"><b>{analytics.submittedQuotes}</b><p className="text-muted-foreground">Submitted quotes</p></CardContent></Card><Card><CardContent className="p-4 text-sm"><b>{analytics.overdueCases}</b><p className="text-muted-foreground">Overdue SLA</p></CardContent></Card><Card><CardContent className="p-4 text-sm"><b>{analytics.averageCycleHours == null ? "-" : `${Math.round(analytics.averageCycleHours)}h`}</b><p className="text-muted-foreground">Avg completed cycle</p></CardContent></Card></div>}
-    {slaPerformance && <Card><CardContent className="space-y-3 p-4 text-sm"><div className="grid gap-3 sm:grid-cols-3"><p><b>{slaPerformance.onTimeRate == null ? "-" : `${Math.round(slaPerformance.onTimeRate * 100)}%`}</b><span className="block text-muted-foreground">SLA on-time rate</span></p><p><b>{slaPerformance.breachCount}</b><span className="block text-muted-foreground">SLA breaches</span></p><p><b>{slaPerformance.openBreachCount}</b><span className="block text-muted-foreground">Currently overdue</span></p></div>{slaPerformance.waitingByOwner.length > 0 && <div className="border-t pt-3"><b>Time waiting by owner</b>{slaPerformance.waitingByOwner.map((owner: any) => <p key={owner.ownerId} className="mt-1 text-muted-foreground">{owner.ownerName}: {Math.round(owner.waitingHours)}h across {owner.openCount} open SLA{owner.openCount === 1 ? "" : "s"}</p>)}</div>}</CardContent></Card>}
-    {workspaces.find((workspace: any) => workspace.id === activeWorkspace)?.canAssign && <SourcingSlaSettings key={activeWorkspace} workspaceId={activeWorkspace} members={members} />}
-    {canAssign && scorecard.length > 0 && <Card><CardContent className="space-y-3 p-4 text-sm"><b>Supplier scorecard</b>{scorecard.slice(0, 3).map((supplier: any) => <p key={supplier.supplierId}>{supplier.supplierName}: {supplier.defectRate == null ? "No receipt quality data" : `${(supplier.defectRate * 100).toFixed(1)}% defects`} · {supplier.leadTimeDays == null ? "No lead-time data" : `${supplier.leadTimeDays.toFixed(1)}d lead time`} · {supplier.onTimeRate == null ? "No delivery target" : `${(supplier.onTimeRate * 100).toFixed(0)}% on time`} · {supplier.averageRatings.quality == null ? "Not evaluated" : `${supplier.averageRatings.quality.toFixed(1)}/5 quality`}</p>)}{canAssign && <form className="grid gap-2 border-t pt-3 sm:grid-cols-6" onSubmit={(event) => { event.preventDefault(); if (!evaluation.supplierId) return; evaluationMutation.mutate({ workspaceId: activeWorkspace, ...evaluation, qualityRating: Number(evaluation.qualityRating), timelinessRating: Number(evaluation.timelinessRating), communicationRating: Number(evaluation.communicationRating), valueRating: Number(evaluation.valueRating) }, { onSuccess: () => setEvaluation({ supplierId: "", qualityRating: "5", timelinessRating: "5", communicationRating: "5", valueRating: "5", notes: "" }) }); }}><Select value={evaluation.supplierId} onValueChange={(supplierId) => setEvaluation((current) => ({ ...current, supplierId }))}><SelectTrigger><SelectValue placeholder="Supplier" /></SelectTrigger><SelectContent>{scorecard.map((supplier: any) => <SelectItem key={supplier.supplierId} value={supplier.supplierId}>{supplier.supplierName}</SelectItem>)}</SelectContent></Select>{([['qualityRating', 'Quality'], ['timelinessRating', 'Timeliness'], ['communicationRating', 'Communication'], ['valueRating', 'Value']] as const).map(([field, label]) => <Select key={field} value={evaluation[field]} onValueChange={(value) => setEvaluation((current) => ({ ...current, [field]: value }))}><SelectTrigger><SelectValue placeholder={label} /></SelectTrigger><SelectContent>{[1, 2, 3, 4, 5].map((rating) => <SelectItem key={rating} value={String(rating)}>{label} {rating}/5</SelectItem>)}</SelectContent></Select>)}<Button type="submit" disabled={!evaluation.supplierId || evaluationMutation.isPending}>Save evaluation</Button><Input className="sm:col-span-6" value={evaluation.notes} onChange={(event) => setEvaluation((current) => ({ ...current, notes: event.target.value }))} maxLength={2000} placeholder="Optional post-order evaluation notes" /></form>}</CardContent></Card>}
-    {error ? <Card><CardContent className="p-6 text-destructive">Unable to load sourcing cases.</CardContent></Card> : isLoading ? <div className="space-y-3">{[1, 2, 3].map((key) => <div key={key} className="h-20 animate-pulse rounded-xl bg-muted" />)}</div> : !filtered.length ? <Card><CardContent className="p-8 text-center text-muted-foreground">No sourcing cases match these filters.</CardContent></Card> : <div className="overflow-hidden rounded-xl border"><div className="hidden grid-cols-[2fr_repeat(6,1fr)] gap-3 border-b bg-muted/40 px-4 py-3 text-xs font-medium uppercase text-muted-foreground md:grid"><span>Request</span><span>Stage</span><span>Route</span><span>Assignee</span><span>Next action</span><span>Latest quote</span><span>Updated</span></div>{filtered.map((item: any) => { const quote = item.quotes?.[0]; const isDue = item.slaDueAt || item.nextActionAt ? new Date(item.slaDueAt || item.nextActionAt) < new Date() : false; return <Link key={item.id} href={`${basePath}/${item.id}`} className="grid gap-2 border-b px-4 py-4 last:border-0 hover:bg-muted/40 md:grid-cols-[2fr_repeat(6,1fr)]"><strong>{item.title}</strong><span className="capitalize text-sm">{stageLabel(item.stage)}</span><span className="capitalize text-sm">{item.route || "yiwu"}</span><span className="text-sm text-muted-foreground">{item.assignee?.name || item.assignee?.email || "Unassigned"}</span><span className={`text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}>{dueLabel(item)}</span><span className="text-sm text-muted-foreground">{quote ? `r${quote.revision} ${quote.status}` : "No quote"}</span><span className="text-sm text-muted-foreground">{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : new Date(item.createdAt).toLocaleDateString()}</span></Link>; })}</div>}</>}</main>;
+  if (isRestoring || loadingWorkspaces)
+    return (
+      <main className="mx-auto max-w-6xl p-6">
+        <div className="h-36 animate-pulse rounded-xl bg-muted" />
+      </main>
+    );
+  if (workspaceError)
+    return (
+      <main className="p-6 text-destructive">
+        Unable to load sourcing workspaces.
+      </main>
+    );
+  return (
+    <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Sourcing</h1>
+          <p className="text-muted-foreground">
+            Source products, compare supplier quotes, and hand off approved
+            orders.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {manageMembers && (
+            <Button variant="outline" asChild>
+              <Link href={`${basePath}/members`}>Manage sourcers</Link>
+            </Button>
+          )}
+          {canAssign && (
+            <Button asChild>
+              <Link
+                href={
+                  activeWorkspace
+                    ? `${basePath}/new?workspaceId=${activeWorkspace}`
+                    : `${basePath}/new`
+                }
+              >
+                <Plus /> New sourcing case
+              </Link>
+            </Button>
+          )}
+        </div>
+      </div>
+      {!workspaces.length ? (
+        <Card>
+          <CardContent className="p-6 text-muted-foreground">
+            You are not a member of a sourcing workspace.
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {canAssign && (
+            <Card>
+              <CardContent className="flex flex-wrap items-center gap-3 p-4">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <Upload className="h-4 w-4" />
+                  Import CSV/XLSX
+                  <Input
+                    className="w-56"
+                    type="file"
+                    accept=".csv,.xlsx"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (!file || !activeWorkspace) return;
+                      const form = new FormData();
+                      form.set("workspaceId", activeWorkspace);
+                      form.set("file", file);
+                      const result = await importMutation.mutateAsync(form);
+                      setPreview(result);
+                    }}
+                  />
+                </label>
+                {preview && (
+                  <span className="text-sm text-muted-foreground">
+                    {preview.valid} valid rows, {preview.errors.length} errors{" "}
+                    {preview.errors[0] ? `(${preview.errors[0].message})` : ""}
+                  </span>
+                )}{" "}
+                {preview &&
+                  preview.valid > 0 &&
+                  preview.errors.length === 0 && (
+                    <Button
+                      size="sm"
+                      isLoading={importMutation.isPending}
+                      onClick={async () => {
+                        const input =
+                          document.querySelector<HTMLInputElement>(
+                            "input[type=file]",
+                          );
+                        const file = input?.files?.[0];
+                        if (!file) return;
+                        const form = new FormData();
+                        form.set("workspaceId", activeWorkspace);
+                        form.set("file", file);
+                        form.set("commit", "true");
+                        await importMutation.mutateAsync(form);
+                        setPreview(null);
+                      }}
+                    >
+                      Import valid cases
+                    </Button>
+                  )}
+              </CardContent>
+            </Card>
+          )}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Select value={activeWorkspace} onValueChange={setWorkspaceId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Workspace" />
+              </SelectTrigger>
+              <SelectContent>
+                {workspaces.map((workspace: { id: string; name: string }) => (
+                  <SelectItem key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search requests"
+              />
+            </div>
+            <Select value={stage} onValueChange={setStage}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All stages</SelectItem>
+                {[
+                  "draft",
+                  "sourcing",
+                  "changes_requested",
+                  "quoted",
+                  "approved",
+                  "ordered",
+                  "shipped",
+                  "received",
+                  "rejected",
+                  "cannot_source",
+                  "archived",
+                ].map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {stageLabel(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {canAssign && (
+              <Select value={assignee} onValueChange={setAssignee}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Assignee" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All assignees</SelectItem>
+                  {members.map((member: any) => (
+                    <SelectItem
+                      key={member.userId || member.id}
+                      value={member.userId || member.id}
+                    >
+                      {member.user?.name ||
+                        member.user?.email ||
+                        member.name ||
+                        member.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Select value={actionFilter} onValueChange={setActionFilter}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All actions</SelectItem>
+                <SelectItem value="needs_action">Has next action</SelectItem>
+                <SelectItem value="overdue">Overdue</SelectItem>
+                <SelectItem value="sla">Has SLA</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {canAssign && selected.length > 0 && (
+            <Card>
+              <CardContent className="flex flex-wrap items-end gap-3 p-4">
+                <b>{selected.length} selected</b>
+                <Select value={bulkAssignee} onValueChange={setBulkAssignee}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Reassign to" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {members
+                      .filter((member: any) => member.role === "sourcer")
+                      .map((member: any) => (
+                        <SelectItem
+                          key={member.userId || member.id}
+                          value={member.userId || member.id}
+                        >
+                          {member.user?.name ||
+                            member.user?.email ||
+                            member.name ||
+                            member.email}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  className="w-52"
+                  type="datetime-local"
+                  value={bulkDue}
+                  onChange={(event) => setBulkDue(event.target.value)}
+                />
+                <Button
+                  isLoading={bulkMutation.isPending}
+                  onClick={async () => {
+                    await bulkMutation.mutateAsync({
+                      workspaceId: activeWorkspace,
+                      caseIds: selected,
+                      ...(bulkAssignee ? { assignedToId: bulkAssignee } : {}),
+                      ...(bulkDue
+                        ? { nextActionAt: new Date(bulkDue).toISOString() }
+                        : {}),
+                    });
+                    setSelected([]);
+                  }}
+                >
+                  Apply bulk update
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+          {analytics && (
+            <div className="grid gap-3 sm:grid-cols-4">
+              <Card>
+                <CardContent className="p-4 text-sm">
+                  <b>{analytics.totalCases}</b>
+                  <p className="text-muted-foreground">Total cases</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4 text-sm">
+                  <b>{analytics.submittedQuotes}</b>
+                  <p className="text-muted-foreground">Submitted quotes</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4 text-sm">
+                  <b>{analytics.overdueCases}</b>
+                  <p className="text-muted-foreground">Overdue SLA</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4 text-sm">
+                  <b>
+                    {analytics.averageCycleHours == null
+                      ? "-"
+                      : `${Math.round(analytics.averageCycleHours)}h`}
+                  </b>
+                  <p className="text-muted-foreground">Avg completed cycle</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+          {slaPerformance && (
+            <Card>
+              <CardContent className="space-y-3 p-4 text-sm">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <p>
+                    <b>
+                      {slaPerformance.onTimeRate == null
+                        ? "-"
+                        : `${Math.round(slaPerformance.onTimeRate * 100)}%`}
+                    </b>
+                    <span className="block text-muted-foreground">
+                      SLA on-time rate
+                    </span>
+                  </p>
+                  <p>
+                    <b>{slaPerformance.breachCount}</b>
+                    <span className="block text-muted-foreground">
+                      SLA breaches
+                    </span>
+                  </p>
+                  <p>
+                    <b>{slaPerformance.openBreachCount}</b>
+                    <span className="block text-muted-foreground">
+                      Currently overdue
+                    </span>
+                  </p>
+                </div>
+                {slaPerformance.waitingByOwner.length > 0 && (
+                  <div className="border-t pt-3">
+                    <b>Time waiting by owner</b>
+                    {slaPerformance.waitingByOwner.map((owner: any) => (
+                      <p
+                        key={owner.ownerId}
+                        className="mt-1 text-muted-foreground"
+                      >
+                        {owner.ownerName}: {Math.round(owner.waitingHours)}h
+                        across {owner.openCount} open SLA
+                        {owner.openCount === 1 ? "" : "s"}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          {canAssign && (
+            <div className="flex flex-wrap gap-2">
+              <SourcingSlaSettings
+                key={activeWorkspace}
+                workspaceId={activeWorkspace}
+                members={members}
+              />
+              <SourcingCostSettings
+                key={`cost-${activeWorkspace}`}
+                workspaceId={activeWorkspace}
+              />
+            </div>
+          )}
+          {scorecard.length > 0 && (
+            <Card>
+              <CardContent className="space-y-3 p-4 text-sm">
+                <b>Supplier scorecard</b>
+                {scorecard.slice(0, 3).map((supplier: any) => (
+                  <p key={supplier.supplierId}>
+                    {supplier.supplierName}:{" "}
+                    {supplier.defectRate == null
+                      ? "No receipt quality data"
+                      : `${(supplier.defectRate * 100).toFixed(1)}% defects`}{" "}
+                    ·{" "}
+                    {supplier.leadTimeDays == null
+                      ? "No lead-time data"
+                      : `${supplier.leadTimeDays.toFixed(1)}d lead time`}{" "}
+                    ·{" "}
+                    {supplier.onTimeRate == null
+                      ? "No delivery target"
+                      : `${(supplier.onTimeRate * 100).toFixed(0)}% on time`}{" "}
+                    ·{" "}
+                    {supplier.averageRatings.quality == null
+                      ? "Not evaluated"
+                      : `${supplier.averageRatings.quality.toFixed(1)}/5 quality`}
+                  </p>
+                ))}
+                {canAssign && (
+                  <form
+                    className="grid gap-2 border-t pt-3 sm:grid-cols-6"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!evaluation.supplierId) return;
+                      evaluationMutation.mutate(
+                        {
+                          workspaceId: activeWorkspace,
+                          ...evaluation,
+                          qualityRating: Number(evaluation.qualityRating),
+                          timelinessRating: Number(evaluation.timelinessRating),
+                          communicationRating: Number(
+                            evaluation.communicationRating,
+                          ),
+                          valueRating: Number(evaluation.valueRating),
+                        },
+                        {
+                          onSuccess: () =>
+                            setEvaluation({
+                              supplierId: "",
+                              qualityRating: "5",
+                              timelinessRating: "5",
+                              communicationRating: "5",
+                              valueRating: "5",
+                              notes: "",
+                            }),
+                        },
+                      );
+                    }}
+                  >
+                    <Select
+                      value={evaluation.supplierId}
+                      onValueChange={(supplierId) =>
+                        setEvaluation((current) => ({ ...current, supplierId }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Supplier" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {scorecard.map((supplier: any) => (
+                          <SelectItem
+                            key={supplier.supplierId}
+                            value={supplier.supplierId}
+                          >
+                            {supplier.supplierName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {(
+                      [
+                        ["qualityRating", "Quality"],
+                        ["timelinessRating", "Timeliness"],
+                        ["communicationRating", "Communication"],
+                        ["valueRating", "Value"],
+                      ] as const
+                    ).map(([field, label]) => (
+                      <Select
+                        key={field}
+                        value={evaluation[field]}
+                        onValueChange={(value) =>
+                          setEvaluation((current) => ({
+                            ...current,
+                            [field]: value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={label} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[1, 2, 3, 4, 5].map((rating) => (
+                            <SelectItem key={rating} value={String(rating)}>
+                              {label} {rating}/5
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ))}
+                    <Button
+                      type="submit"
+                      disabled={
+                        !evaluation.supplierId || evaluationMutation.isPending
+                      }
+                    >
+                      Save evaluation
+                    </Button>
+                    <Input
+                      className="sm:col-span-6"
+                      value={evaluation.notes}
+                      onChange={(event) =>
+                        setEvaluation((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      maxLength={2000}
+                      placeholder="Optional post-order evaluation notes"
+                    />
+                  </form>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          {error ? (
+            <Card>
+              <CardContent className="p-6 text-destructive">
+                Unable to load sourcing cases.
+              </CardContent>
+            </Card>
+          ) : isLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((key) => (
+                <div
+                  key={key}
+                  className="h-20 animate-pulse rounded-xl bg-muted"
+                />
+              ))}
+            </div>
+          ) : !filtered.length ? (
+            <Card>
+              <CardContent className="p-8 text-center text-muted-foreground">
+                No sourcing cases match these filters.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="overflow-hidden rounded-xl border">
+              <div className="hidden grid-cols-[2fr_repeat(6,1fr)] gap-3 border-b bg-muted/40 px-4 py-3 text-xs font-medium uppercase text-muted-foreground md:grid">
+                <span>Request</span>
+                <span>Stage</span>
+                <span>Route</span>
+                <span>Assignee</span>
+                <span>Next action</span>
+                <span>Latest quote</span>
+                <span>Updated</span>
+              </div>
+              {filtered.map((item: any) => {
+                const quote = item.quotes?.[0];
+                const isDue =
+                  item.slaDueAt || item.nextActionAt
+                    ? new Date(item.slaDueAt || item.nextActionAt) < new Date()
+                    : false;
+                return (
+                  <Link
+                    key={item.id}
+                    href={`${basePath}/${item.id}`}
+                    className="grid gap-2 border-b px-4 py-4 last:border-0 hover:bg-muted/40 md:grid-cols-[2fr_repeat(6,1fr)]"
+                  >
+                    <strong>{item.title}</strong>
+                    <span className="capitalize text-sm">
+                      {stageLabel(item.stage)}
+                    </span>
+                    <span className="capitalize text-sm">
+                      {item.route || "yiwu"}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {item.assignee?.name ||
+                        item.assignee?.email ||
+                        "Unassigned"}
+                    </span>
+                    <span
+                      className={`text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                    >
+                      {dueLabel(item)}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {quote
+                        ? `r${quote.revision} ${quote.status}`
+                        : "No quote"}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {item.updatedAt
+                        ? new Date(item.updatedAt).toLocaleDateString()
+                        : new Date(item.createdAt).toLocaleDateString()}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </main>
+  );
 }

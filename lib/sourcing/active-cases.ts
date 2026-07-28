@@ -10,3 +10,13 @@ export const activeAssignedCasesWhere = (
   archivedAt: null,
   stage: { notIn: ["ordered", "shipped", "received", "rejected", "cannot_source"] },
 });
+
+export const activeAssignedCasesForUserWhere = (
+  assignedToId: string,
+): Prisma.SourcingCaseWhereInput => ({
+  assignedToId,
+  archivedAt: null,
+  stage: {
+    notIn: ["ordered", "shipped", "received", "rejected", "cannot_source"],
+  },
+});

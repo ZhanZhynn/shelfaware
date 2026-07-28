@@ -28,7 +28,11 @@ import {
   type SourcingCaseInput,
 } from "@/lib/validations/sourcing";
 
-export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?: string }) {
+export default function SourcingCaseForm({
+  basePath = "/sourcing",
+}: {
+  basePath?: string;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const { data: workspaces = [] } = useSourcingWorkspaces();
@@ -118,16 +122,61 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
               "Product/request name",
               "e.g. Linen storage basket",
             )}
-            {templates.length > 0 && <label className="grid gap-1 text-sm font-medium">Start from template<Select onValueChange={(id) => { const template: any = templates.find((entry: any) => entry.id === id); if (template?.data) Object.entries(template.data).forEach(([key, value]) => form.setValue(key as keyof SourcingCaseInput, value as never)); }}><SelectTrigger><SelectValue placeholder="Choose a saved template" /></SelectTrigger><SelectContent>{templates.map((template: any) => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent></Select></label>}
+            {templates.length > 0 && (
+              <label className="grid gap-1 text-sm font-medium">
+                Start from template
+                <Select
+                  onValueChange={(id) => {
+                    const template: any = templates.find(
+                      (entry: any) => entry.id === id,
+                    );
+                    if (template?.data)
+                      Object.entries(template.data).forEach(([key, value]) =>
+                        form.setValue(
+                          key as keyof SourcingCaseInput,
+                          value as never,
+                        ),
+                      );
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a saved template" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((template: any) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
             {field("size", "Size")}
             {field("material", "Material")}
-             {field("variant", "Variant")}
-             {field("requestedQuantity", "Requested quantity", "number")}
-             {field("targetUnitPriceMyr", "Target unit cost (RM)", "number")}
-             {field("referenceUrl", "Reference URL", "https://")}
+            {field("variant", "Variant")}
+            {field("requestedQuantity", "Requested quantity", "number")}
+            {field("targetUnitPriceMyr", "Target unit cost (RM)", "number")}
+            {field("referenceUrl", "Reference URL", "https://")}
           </CardContent>
         </Card>
-        {duplicates.length > 0 && <Card><CardHeader><CardTitle>Possible duplicate requests</CardTitle></CardHeader><CardContent className="space-y-2 text-sm">{duplicates.map((item: any) => <p key={item.id}><span className="font-medium">{item.title}</span><span className="ml-2 capitalize text-muted-foreground">{item.stage.replaceAll("_", " ")}</span></p>)}</CardContent></Card>}
+        {duplicates.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Possible duplicate requests</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {duplicates.map((item: any) => (
+                <p key={item.id}>
+                  <span className="font-medium">{item.title}</span>
+                  <span className="ml-2 capitalize text-muted-foreground">
+                    {item.stage.replaceAll("_", " ")}
+                  </span>
+                </p>
+              ))}
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Specification</CardTitle>
@@ -189,9 +238,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
                   <SelectContent>
                     <SelectItem value="unassigned">Unassigned</SelectItem>
                     {members
-                      .filter((member: any) =>
-                        ["admin", "sourcer"].includes(member.role),
-                      )
+                      .filter((member: any) => member.role === "sourcer")
                       .map((member: any) => (
                         <SelectItem key={member.id} value={member.id}>
                           {member.name || member.email}
@@ -204,7 +251,40 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
           </CardContent>
         </Card>
         <div className="flex justify-end gap-3">
-          <div className="flex gap-2"><Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Template name" /><Button type="button" variant="outline" disabled={!workspaceId || !templateName.trim()} isLoading={createTemplate.isPending} onClick={async () => { const values = form.getValues(); await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, description: values.description, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr, route: values.route } }); setTemplateName(""); }}>Save template</Button></div>
+          <div className="flex gap-2">
+            <Input
+              value={templateName}
+              onChange={(event) => setTemplateName(event.target.value)}
+              placeholder="Template name"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!workspaceId || !templateName.trim()}
+              isLoading={createTemplate.isPending}
+              onClick={async () => {
+                const values = form.getValues();
+                await createTemplate.mutateAsync({
+                  workspaceId,
+                  name: templateName,
+                  data: {
+                    title: values.title,
+                    description: values.description,
+                    size: values.size,
+                    material: values.material,
+                    variant: values.variant,
+                    specifications: values.specifications,
+                    requestedQuantity: values.requestedQuantity,
+                    targetUnitPriceMyr: values.targetUnitPriceMyr,
+                    route: values.route,
+                  },
+                });
+                setTemplateName("");
+              }}
+            >
+              Save template
+            </Button>
+          </div>
           <Button type="submit" variant="outline" isLoading={create.isPending}>
             Save draft
           </Button>

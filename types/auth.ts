@@ -12,6 +12,7 @@ export interface User {
   image?: string; // Profile image URL (from Google OAuth or other sources)
   /** Role for access: user, admin, supplier, client, retailer. Defaults to "user" when not set. */
   role?: string;
+  isSuperAdmin?: boolean;
 }
 
 /**
@@ -51,6 +52,7 @@ export interface LoginResponse {
   userName: string;
   userEmail: string;
   userRole?: string; // user | admin | supplier | client | retailer; defaults to "user"
+  isSuperAdmin?: boolean;
 }
 
 /**

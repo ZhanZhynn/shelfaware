@@ -17,10 +17,18 @@ describe("sourcing workflow semantics", () => {
       false,
     );
     expect(canEditQuote("sourcer", false, "me", "me", "quoted")).toBe(false);
+    expect(canEditQuote("admin", false, "me", "me", "changes_requested")).toBe(
+      false,
+    );
+    expect(canEditQuote("admin", true, "me", "me", "changes_requested")).toBe(
+      true,
+    );
   });
   it("uses a legacy quote ID as its offer group until it is backfilled", () => {
     expect(quoteGroupKey({ id: "legacy", quoteGroupId: null })).toBe("legacy");
-    expect(quoteGroupKey({ id: "revision", quoteGroupId: "offer" })).toBe("offer");
+    expect(quoteGroupKey({ id: "revision", quoteGroupId: "offer" })).toBe(
+      "offer",
+    );
   });
   it("validates one-product request and structured RMB quote input", () => {
     expect(
@@ -115,8 +123,20 @@ describe("sourcing workflow semantics", () => {
         fxRateOverride: 0.61,
       }).success,
     ).toBe(false);
-    expect(sourcingCommandSchema.safeParse({ action: "approve", version: 1 }).success).toBe(false);
-    expect(sourcingCommandSchema.safeParse({ action: "create_quote", version: 1 }).success).toBe(false);
-    expect(sourcingCommandSchema.safeParse({ action: "save_quote", version: 1, quote: { supplierName: "Yiwu Co", unitPriceRmb: 1 } }).success).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({ action: "approve", version: 1 })
+        .success,
+    ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({ action: "create_quote", version: 1 })
+        .success,
+    ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "save_quote",
+        version: 1,
+        quote: { supplierName: "Yiwu Co", unitPriceRmb: 1 },
+      }).success,
+    ).toBe(false);
   });
 });

@@ -4,15 +4,20 @@ import { prisma } from "@/prisma/client";
 import { deleteSourcingAttachmentFromImageKit, uploadSourcingAttachmentToImageKit } from "@/lib/imagekit";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { invalidateAllServerCaches } from "@/lib/cache";
-import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
+import {
+  requireAssignedSourcer,
+  requireWorkspaceRole,
+  SourcingAccessError,
+} from "@/lib/sourcing/auth";
 import { validateSourcingAttachment } from "@/lib/sourcing/attachments";
 
 async function caseForUser(request: NextRequest, id: string) {
   const user = await getSessionFromRequest(request);
   if (!user) throw new SourcingAccessError("Unauthorized", 401);
-  const sourcingCase = await prisma.sourcingCase.findUnique({ where: { id }, select: { id: true, workspaceId: true } });
+  const sourcingCase = await prisma.sourcingCase.findUnique({ where: { id }, select: { id: true, workspaceId: true, assignedToId: true } });
   if (!sourcingCase) throw new SourcingAccessError("Sourcing case not found", 404);
   await requireWorkspaceRole(user, sourcingCase.workspaceId, ["admin", "sourcer"]);
+  requireAssignedSourcer(user, sourcingCase.assignedToId);
   return { user, sourcingCase };
 }
 

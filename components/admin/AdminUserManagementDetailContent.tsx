@@ -150,6 +150,7 @@ function getDisplayUsername(u: UserForAdmin): string {
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "user", label: "User" },
   { value: "admin", label: "Admin" },
+  { value: "sourcer", label: "Sourcer" },
   { value: "supplier", label: "Supplier" },
   { value: "client", label: "Client" },
   { value: "retailer", label: "Retailer" },
@@ -179,7 +180,7 @@ export default function AdminUserManagementDetailContent() {
   const updateMutation = useUpdateUser();
   const deleteMutation = useDeleteUser();
   const isOwner = currentUser?.id != null && currentUser.id === id;
-  const canDelete = isOwner;
+  const canDelete = currentUser?.role === "admin" && !isOwner;
 
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
@@ -223,7 +224,7 @@ export default function AdminUserManagementDetailContent() {
   const handleApprove = useCallback(() => {
     if (!id) return;
     updateMutation.mutate(
-      { id, data: { status: "approved", role: "admin" } },
+      { id, data: { status: "approved", role: "user" } },
       {
         onSuccess: () => {
           // Refresh the user data to reflect the new status
@@ -237,6 +238,7 @@ export default function AdminUserManagementDetailContent() {
     if (!id) return;
     updateMutation.mutate({ id, data: { status: "rejected" } });
   }, [id, updateMutation]);
+
 
   if (isError || (!isLoading && !user)) {
     return (
@@ -395,7 +397,7 @@ export default function AdminUserManagementDetailContent() {
                     htmlFor="um-role"
                     className="text-gray-600 dark:text-gray-400"
                   >
-                    Role
+                    Global role
                   </Label>
                   <DeferredSelectGate
                     placeholder={
@@ -407,10 +409,12 @@ export default function AdminUserManagementDetailContent() {
                         )}
                         aria-hidden
                       >
-                        {u.role
-                          ? (ROLE_OPTIONS.find((o) => o.value === u.role)
-                              ?.label ?? u.role)
-                          : "(none)"}
+                        {u.role === "admin"
+                          ? u.isSuperAdmin
+                            ? "Super admin"
+                            : "Admin"
+                          : (ROLE_OPTIONS.find((o) => o.value === u.role)
+                              ?.label ?? "(none)")}
                       </div>
                     }
                   >
@@ -615,7 +619,8 @@ export default function AdminUserManagementDetailContent() {
                 </h3>
                 <p className="text-xs text-gray-600 dark:text-gray-400">
                   This user has registered and is awaiting admin approval.
-                  Approve to grant admin access, or reject to deny access.
+                  Approve to grant regular user access, or reject to deny
+                  access.
                 </p>
               </div>
             </div>
@@ -665,8 +670,9 @@ export default function AdminUserManagementDetailContent() {
                 Danger Zone
               </h3>
               <p className="text-xs text-gray-600 dark:text-gray-400">
-                Permanently delete this user. Only the account owner can delete
-                their account. This action cannot be undone.
+                Permanently delete this user. Super admins cannot delete their
+                own account or the final remaining Super admin. This action
+                cannot be undone.
               </p>
             </div>
           </div>

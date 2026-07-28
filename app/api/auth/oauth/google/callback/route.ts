@@ -282,7 +282,9 @@ export async function GET(request: NextRequest) {
        const roleDest = wantsSourcing
          ? (await hasSourcingAccess(user) ? (user.role === "admin" ? sourcingDestination(user) : safeSourcingDestination(callback)) : "/login/sourcing?error=no_sourcing_access")
          :
-        user.role === "client"
+         user.role === "admin"
+           ? "/admin"
+           : user.role === "client"
           ? "/client"
           : user.role === "supplier"
             ? "/supplier"

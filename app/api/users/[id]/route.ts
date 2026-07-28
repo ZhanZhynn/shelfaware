@@ -17,11 +17,8 @@ import { updateUserAdminSchema } from "@/lib/validations";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { createAuditLog } from "@/prisma/audit-log";
 import { prisma } from "@/prisma/client";
-import type {
-  UserForAdmin,
-  UserOverview,
-  UpdateUserAdminInput,
-} from "@/types";
+import { activeAssignedCasesForUserWhere } from "@/lib/sourcing/active-cases";
+import type { UserForAdmin, UserOverview, UpdateUserAdminInput } from "@/types";
 
 function transform(
   r: Awaited<ReturnType<typeof getUserById>> & {},
@@ -32,10 +29,15 @@ function transform(
     name: r.name,
     username: r.username,
     role: r.role as UserForAdmin["role"],
+    isSuperAdmin: r.isSuperAdmin,
     status: (r.status ?? "approved") as UserForAdmin["status"],
     image: r.image,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt?.toISOString() ?? null,
+    workspaceAdminOf: r.workspaceMemberships.map((membership) => ({
+      workspaceId: membership.workspaceId,
+      workspaceName: membership.workspace.name,
+    })),
   };
 }
 
@@ -215,13 +217,50 @@ export async function PUT(
     }
 
     const data = parsed.data;
+    if (
+      existing.role === "admin" &&
+      existing.isSuperAdmin &&
+      ((data.role !== undefined && data.role !== "admin") ||
+        data.isSuperAdmin === false)
+    ) {
+      const superAdminCount = await prisma.user.count({
+        where: { role: "admin", isSuperAdmin: true },
+      });
+      if (superAdminCount <= 1)
+        return NextResponse.json(
+          { error: "At least one Super admin must remain" },
+          { status: 409 },
+        );
+    }
+    if (
+      existing.role === "sourcer" &&
+      data.role !== undefined &&
+      data.role !== "sourcer"
+    ) {
+      const activeCaseCount = await prisma.sourcingCase.count({
+        where: activeAssignedCasesForUserWhere(id),
+      });
+      if (activeCaseCount)
+        return NextResponse.json(
+          {
+            error: `Cannot change this Sourcer's role while they have ${activeCaseCount} active assigned sourcing case${activeCaseCount === 1 ? "" : "s"}. Reassign those cases first.`,
+          },
+          { status: 409 },
+        );
+    }
+    if (data.isSuperAdmin !== undefined && !session.isSuperAdmin) {
+      return NextResponse.json(
+        { error: "Only Super admins can change Super admin access" },
+        { status: 403 },
+      );
+    }
     const updatePayload: UpdateUserAdminInput = {};
     if (data.role !== undefined) updatePayload.role = data.role;
     if (data.name !== undefined) updatePayload.name = data.name;
+    if (data.isSuperAdmin !== undefined) updatePayload.isSuperAdmin = data.isSuperAdmin;
     if ("status" in data && data.status !== undefined) {
       updatePayload.status = data.status;
     }
-
     const updated = await updateUserAdmin(id, updatePayload);
 
     createAuditLog({
@@ -281,8 +320,34 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
-
-    const deleted = await deleteUserAdmin(id);
+    if (existing.role === "admin" && existing.isSuperAdmin) {
+      if (!session.isSuperAdmin)
+        return NextResponse.json(
+          { error: "Only Super admins can delete a Super admin" },
+          { status: 403 },
+        );
+      const superAdminCount = await prisma.user.count({
+        where: { role: "admin", isSuperAdmin: true },
+      });
+      if (superAdminCount <= 1)
+        return NextResponse.json(
+          { error: "At least one Super admin must remain" },
+          { status: 409 },
+        );
+    }
+    if (existing.role === "sourcer") {
+      const activeCaseCount = await prisma.sourcingCase.count({
+        where: activeAssignedCasesForUserWhere(id),
+      });
+      if (activeCaseCount)
+        return NextResponse.json(
+          {
+            error: `Cannot delete this Sourcer while they have ${activeCaseCount} active assigned sourcing case${activeCaseCount === 1 ? "" : "s"}. Reassign those cases first.`,
+          },
+          { status: 409 },
+        );
+    }
+    const deleted = await deleteUserAdmin(id, session.id);
 
     createAuditLog({
       userId: session.id,

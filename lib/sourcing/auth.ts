@@ -11,12 +11,22 @@ export class SourcingAccessError extends Error {
 }
 
 export async function requireWorkspaceRole(
-  user: { id: string; role: string | null },
+  user: { id: string; role: string | null; isSuperAdmin?: boolean },
   workspaceId: string,
   allowed: readonly WorkspaceRole[],
 ) {
-  // Global admins retain operational access while workspace roles govern everyone else.
-  if (user.role === "admin") return { role: "admin" as WorkspaceRole, globalAdmin: true };
+  // Admins use the shared workspace; only Super admins have the quote override.
+  if (user.role === "admin")
+    return {
+      role: "admin" as WorkspaceRole,
+      // Existing admin accounts predate the flag and remain Super admins.
+      globalAdmin: user.isSuperAdmin ?? true,
+    };
+  if (user.role === "sourcer") {
+    if (!allowed.includes("sourcer"))
+      throw new SourcingAccessError("Your sourcing role cannot perform this action");
+    return { role: "sourcer" as WorkspaceRole, globalAdmin: false };
+  }
   const membership = await prisma.workspaceMember.findUnique({
     where: { workspaceId_userId: { workspaceId, userId: user.id } },
     select: { role: true },
@@ -28,6 +38,14 @@ export async function requireWorkspaceRole(
     throw new SourcingAccessError("Your workspace role cannot perform this action");
   }
   return { role: membership.role as WorkspaceRole, globalAdmin: false };
+}
+
+export function requireAssignedSourcer(
+  user: { id: string; role: string | null },
+  assignedToId: string | null,
+) {
+  if (user.role === "sourcer" && assignedToId !== user.id)
+    throw new SourcingAccessError("This sourcing case is not assigned to you");
 }
 
 export async function requireGlobalAdmin(user: { role: string | null }) {

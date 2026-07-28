@@ -5,7 +5,11 @@ import { prisma } from "@/prisma/client";
 import { invalidateAllServerCaches } from "@/lib/cache";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
-import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
+import {
+  requireAssignedSourcer,
+  requireWorkspaceRole,
+  SourcingAccessError,
+} from "@/lib/sourcing/auth";
 import { sourcingCommentSchema } from "@/lib/validations/sourcing";
 import { deliverSourcingNotification } from "@/lib/sourcing/notifications";
 
@@ -22,6 +26,7 @@ async function caseForUser(request: NextRequest, id: string) {
   const sourcingCase = await prisma.sourcingCase.findUnique({ where: { id }, select: { id: true, title: true, workspaceId: true, assignedToId: true } });
   if (!sourcingCase) throw new SourcingAccessError("Sourcing case not found", 404);
   await requireWorkspaceRole(user, sourcingCase.workspaceId, ["admin", "sourcer"]);
+  requireAssignedSourcer(user, sourcingCase.assignedToId);
   return { user, sourcingCase };
 }
 
@@ -39,8 +44,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const limited = await withRateLimit(request, defaultRateLimits.strict, `sourcing:comments:${user.id}`);
     if (limited) return limited;
     const input = sourcingCommentSchema.parse(await request.json());
-    const membershipCount = input.mentionedUserIds.length ? await prisma.workspaceMember.count({ where: { workspaceId: sourcingCase.workspaceId, userId: { in: input.mentionedUserIds } } }) : 0;
-    if (membershipCount !== input.mentionedUserIds.length) throw new SourcingAccessError("Mentioned users must be workspace members", 400);
+    const mentionedUserCount = input.mentionedUserIds.length
+      ? await prisma.user.count({
+          where: {
+            id: { in: input.mentionedUserIds },
+            role: { in: ["admin", "sourcer"] },
+            status: "approved",
+          },
+        })
+      : 0;
+    if (mentionedUserCount !== input.mentionedUserIds.length)
+      throw new SourcingAccessError("Mentioned users must be approved Admins or Sourcers", 400);
     const comment = await prisma.$transaction(async (tx) => {
       const created = await tx.sourcingComment.create({ data: { caseId: sourcingCase.id, workspaceId: sourcingCase.workspaceId, authorId: user.id, body: input.body, mentionedUserIds: input.mentionedUserIds }, include: commentInclude });
       await tx.sourcingEvent.create({ data: { caseId: sourcingCase.id, workspaceId: sourcingCase.workspaceId, actorId: user.id, type: "comment_created", payload: { commentId: created.id, mentionedUserIds: input.mentionedUserIds } } });

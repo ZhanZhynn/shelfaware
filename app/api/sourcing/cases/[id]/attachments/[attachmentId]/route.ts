@@ -3,16 +3,21 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { deleteSourcingAttachmentFromImageKit } from "@/lib/imagekit";
 import { invalidateAllServerCaches } from "@/lib/cache";
-import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
+import {
+  requireAssignedSourcer,
+  requireWorkspaceRole,
+  SourcingAccessError,
+} from "@/lib/sourcing/auth";
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string; attachmentId: string }> }) {
   try {
     const user = await getSessionFromRequest(request);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { id, attachmentId } = await params;
-    const sourcingCase = await prisma.sourcingCase.findUnique({ where: { id }, select: { id: true, workspaceId: true } });
+    const sourcingCase = await prisma.sourcingCase.findUnique({ where: { id }, select: { id: true, workspaceId: true, assignedToId: true } });
     if (!sourcingCase) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
     await requireWorkspaceRole(user, sourcingCase.workspaceId, ["admin", "sourcer"]);
+    requireAssignedSourcer(user, sourcingCase.assignedToId);
     const attachment = await prisma.sourcingAttachment.findFirst({ where: { id: attachmentId, caseId: sourcingCase.id, uploadedById: user.id } });
     if (!attachment) return NextResponse.json({ error: "Attachment not found or you do not own it" }, { status: 404 });
     await deleteSourcingAttachmentFromImageKit(attachment.fileId);

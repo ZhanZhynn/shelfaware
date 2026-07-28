@@ -28,6 +28,9 @@ export default async function HomeRoute({
   if (user.role === "supplier") {
     redirect("/supplier");
   }
+  if (user.role === "admin") {
+    redirect("/admin");
+  }
   if (user.role !== "admin" && (await hasSourcingAccess(user))) {
     redirect("/sourcing");
   }

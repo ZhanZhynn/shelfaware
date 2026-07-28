@@ -68,6 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           email: parsed.userEmail || parsed.email,
           image: parsed.image || parsed.picture || null, // Support both image and picture (backward compatibility)
           role: parsed.userRole ?? parsed.role ?? "user",
+          isSuperAdmin: parsed.isSuperAdmin,
         });
         setIsLoggedIn(true);
       } catch (error) {
@@ -109,6 +110,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             (session as { picture?: string }).picture ||
             undefined,
           role: (session as { role?: string }).role ?? "user",
+          isSuperAdmin: (session as { isSuperAdmin?: boolean }).isSuperAdmin,
         });
         localStorage.setItem("isAuth", "true");
         localStorage.setItem("isLoggedIn", "true");
@@ -196,6 +198,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         name: result.userName,
         email: result.userEmail,
         role: result.userRole ?? "user",
+        isSuperAdmin: result.isSuperAdmin,
       };
 
       // Wipe all cached queries from the previous session so the new user

@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const user = await getSessionFromRequest(request); if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const workspaceId = new URL(request.url).searchParams.get("workspaceId"); if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     await requireWorkspaceRole(user, workspaceId, ["admin", "sourcer"]);
+    if (user.role === "sourcer") return NextResponse.json([]);
     const [orders, evaluations] = await Promise.all([
       prisma.purchaseOrder.findMany({ where: { workspaceId }, include: { supplier: { select: { id: true, name: true } }, items: { select: { quantity: true } }, receipts: { select: { finalizedAt: true, items: { select: { acceptedQuantity: true, damagedQuantity: true, shortageQuantity: true } } } } } }),
       prisma.supplierEvaluation.findMany({ where: { workspaceId } }),

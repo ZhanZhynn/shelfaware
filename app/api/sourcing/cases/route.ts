@@ -23,7 +23,14 @@ export async function GET(request: NextRequest) {
     const workspaceId = new URL(request.url).searchParams.get("workspaceId");
     if (!workspaceId) return NextResponse.json({ error: "workspaceId is required" }, { status: 400 });
     await requireWorkspaceRole(user, workspaceId, ["admin", "sourcer"]);
-    const cases = await prisma.sourcingCase.findMany({ where: { workspaceId }, include: sourcingListInclude, orderBy: { updatedAt: "desc" } });
+    const cases = await prisma.sourcingCase.findMany({
+      where: {
+        workspaceId,
+        ...(user.role === "sourcer" ? { assignedToId: user.id } : {}),
+      },
+      include: sourcingListInclude,
+      orderBy: { updatedAt: "desc" },
+    });
     const assigneeIds = [...new Set(cases.flatMap((item) => item.assignedToId ? [item.assignedToId] : []))];
     const assignees = assigneeIds.length ? await prisma.user.findMany({ where: { id: { in: assigneeIds } }, select: { id: true, name: true, email: true } }) : [];
     const assigneeById = new Map(assignees.map((assignee) => [assignee.id, assignee]));

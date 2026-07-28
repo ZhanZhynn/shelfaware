@@ -28,6 +28,8 @@ function getRoleColor(role: string | null): string {
       return "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300";
     case "supplier":
       return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300";
+    case "sourcer":
+      return "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300";
     case "client":
       return "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300";
     case "retailer":
@@ -158,7 +160,13 @@ export function createUserManagementColumns(
       header: ({ column }) => <SortableHeader column={column} label="Role" />,
       cell: ({ row }) => {
         const r = row.original.role ?? "user";
-        return <Badge className={getRoleColor(r)}>{r}</Badge>;
+        const label =
+          r === "admin" ? (row.original.isSuperAdmin ? "Super admin" : "Admin") : r;
+        return (
+          <div className="space-y-1">
+            <Badge className={getRoleColor(r)}>{label}</Badge>
+          </div>
+        );
       },
     },
     {

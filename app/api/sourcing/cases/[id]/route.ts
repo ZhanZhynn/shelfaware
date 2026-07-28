@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
-import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
+import {
+  requireAssignedSourcer,
+  requireWorkspaceRole,
+  SourcingAccessError,
+} from "@/lib/sourcing/auth";
 import { canEditQuote } from "@/lib/sourcing/workflow";
 import { getCurrentExchangeRate } from "@/lib/exchange-rates/service";
 import { sourcingPurchaseOrderEstimate } from "@/lib/sourcing/purchase-order-currency";
@@ -17,6 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const item = await prisma.sourcingCase.findUnique({ where: { id: (await params).id }, include: { quotes: { orderBy: { revision: "desc" } }, orders: { include: { purchaseOrder: { include: { items: true, supplier: { select: { id: true, name: true } } } } } }, events: { orderBy: { createdAt: "desc" } }, comments: { include: { author: { select: { id: true, name: true, email: true, image: true } } }, orderBy: { createdAt: "asc" } }, attachments: { orderBy: { createdAt: "desc" } } } });
     if (!item) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
     const access = await requireWorkspaceRole(user, item.workspaceId, ["admin", "sourcer"]);
+    requireAssignedSourcer(user, item.assignedToId);
     const canAdmin = access.globalAdmin || access.role === "admin";
     const assignee = item.assignedToId ? await prisma.user.findUnique({ where: { id: item.assignedToId }, select: { name: true, email: true } }) : null;
     const currentCnyMyrRate = await getCurrentExchangeRate("CNY", "MYR");

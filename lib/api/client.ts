@@ -1010,10 +1010,7 @@ class ApiClient {
    * Purchase Orders API methods
    */
   purchaseOrders = {
-    getAll: async (params?: {
-      status?: string;
-      supplierId?: string;
-    }) => {
+    getAll: async (params?: { status?: string; supplierId?: string }) => {
       const searchParams = new URLSearchParams();
       if (params?.status) searchParams.set("status", params.status);
       if (params?.supplierId) searchParams.set("supplierId", params.supplierId);
@@ -1137,45 +1134,299 @@ class ApiClient {
   };
 
   sourcing = {
-    workspaces: async () => this.client.get(API_ENDPOINTS.sourcing.workspaces).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    members: async (workspaceId: string) => this.client.get(API_ENDPOINTS.sourcing.members(workspaceId)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    suppliers: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.suppliers.base}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    cases: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.cases}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    case: async (id: string) => this.client.get(API_ENDPOINTS.sourcing.case(id)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    comments: async (id: string) => this.client.get(API_ENDPOINTS.sourcing.comments(id)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    addComment: async (id: string, data: { body: string; mentionedUserIds?: string[] }) => this.client.post(API_ENDPOINTS.sourcing.comments(id), data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    create: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.cases, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    updateNextAction: async (id: string, data: Record<string, unknown>) => this.client.patch(API_ENDPOINTS.sourcing.case(id), data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    command: async (id: string, data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.commands(id), data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    attachments: async (id: string) => this.client.get(API_ENDPOINTS.sourcing.attachments(id)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    workspaces: async () =>
+      this.client
+        .get(API_ENDPOINTS.sourcing.workspaces)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    members: async (workspaceId: string) =>
+      this.client
+        .get(API_ENDPOINTS.sourcing.members(workspaceId))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    suppliers: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.suppliers.base}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    cases: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.cases}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    case: async (id: string) =>
+      this.client
+        .get(API_ENDPOINTS.sourcing.case(id))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    comments: async (id: string) =>
+      this.client
+        .get(API_ENDPOINTS.sourcing.comments(id))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    addComment: async (
+      id: string,
+      data: { body: string; mentionedUserIds?: string[] },
+    ) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.comments(id), data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    create: async (data: Record<string, unknown>) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.cases, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    updateNextAction: async (id: string, data: Record<string, unknown>) =>
+      this.client
+        .patch(API_ENDPOINTS.sourcing.case(id), data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    command: async (id: string, data: Record<string, unknown>) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.commands(id), data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    attachments: async (id: string) =>
+      this.client
+        .get(API_ENDPOINTS.sourcing.attachments(id))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
     uploadAttachment: async (id: string, file: File) => {
       const formData = new FormData();
       formData.append("file", file);
-      return this.client.post(API_ENDPOINTS.sourcing.attachments(id), formData).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText }));
+      return this.client
+        .post(API_ENDPOINTS.sourcing.attachments(id), formData)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        }));
     },
-    deleteAttachment: async (id: string, attachmentId: string) => this.client.delete(API_ENDPOINTS.sourcing.attachment(id, attachmentId)).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    templates: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.templates}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    createTemplate: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.templates, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    duplicates: async (workspaceId: string, title: string) => this.client.get(`${API_ENDPOINTS.sourcing.duplicates}?workspaceId=${encodeURIComponent(workspaceId)}&title=${encodeURIComponent(title)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    analytics: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.analytics}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    slaSettings: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.slaSettings}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    updateSlaSettings: async (workspaceId: string, data: Record<string, unknown>) => this.client.put(`${API_ENDPOINTS.sourcing.slaSettings}?workspaceId=${encodeURIComponent(workspaceId)}`, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    slaPerformance: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.slaPerformance}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    supplierScorecard: async (workspaceId: string) => this.client.get(`${API_ENDPOINTS.sourcing.supplierScorecard}?workspaceId=${encodeURIComponent(workspaceId)}`).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    landedCost: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.landedCost, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    createSupplierEvaluation: async (data: Record<string, unknown>) => this.client.post(API_ENDPOINTS.sourcing.supplierEvaluations, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    import: async (data: FormData) => this.client.post(API_ENDPOINTS.sourcing.import, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
-    bulk: async (data: Record<string, unknown>) => this.client.patch(API_ENDPOINTS.sourcing.bulk, data).then((response) => ({ data: response.data, status: response.status, statusText: response.statusText })),
+    deleteAttachment: async (id: string, attachmentId: string) =>
+      this.client
+        .delete(API_ENDPOINTS.sourcing.attachment(id, attachmentId))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    templates: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.templates}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    createTemplate: async (data: Record<string, unknown>) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.templates, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    duplicates: async (workspaceId: string, title: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.duplicates}?workspaceId=${encodeURIComponent(workspaceId)}&title=${encodeURIComponent(title)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    analytics: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.analytics}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    slaSettings: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.slaSettings}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    updateSlaSettings: async (
+      workspaceId: string,
+      data: Record<string, unknown>,
+    ) =>
+      this.client
+        .put(
+          `${API_ENDPOINTS.sourcing.slaSettings}?workspaceId=${encodeURIComponent(workspaceId)}`,
+          data,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    costSettings: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.costSettings}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    updateCostSettings: async (
+      workspaceId: string,
+      data: Record<string, unknown>,
+    ) =>
+      this.client
+        .put(
+          `${API_ENDPOINTS.sourcing.costSettings}?workspaceId=${encodeURIComponent(workspaceId)}`,
+          data,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    costScenarios: async (caseId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.costScenarios}?caseId=${encodeURIComponent(caseId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    createCostScenario: async (data: Record<string, unknown>) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.costScenarios, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    updateCostScenario: async (id: string, data: Record<string, unknown>) =>
+      this.client
+        .put(API_ENDPOINTS.sourcing.costScenario(id), data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    deleteCostScenario: async (id: string) =>
+      this.client
+        .delete(API_ENDPOINTS.sourcing.costScenario(id))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    slaPerformance: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.slaPerformance}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    supplierScorecard: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.supplierScorecard}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    landedCost: async (data: Record<string, unknown>) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.landedCost, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    createSupplierEvaluation: async (data: Record<string, unknown>) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.supplierEvaluations, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    import: async (data: FormData) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.import, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    bulk: async (data: Record<string, unknown>) =>
+      this.client
+        .patch(API_ENDPOINTS.sourcing.bulk, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
   };
 
   /**
    * Executive KPI API methods
    */
   executiveKpi = {
-    get: async (params?: {
-      dateFrom?: string;
-      dateTo?: string;
-    }) => {
+    get: async (params?: { dateFrom?: string; dateTo?: string }) => {
       const searchParams = new URLSearchParams();
       if (params?.dateFrom) searchParams.set("dateFrom", params.dateFrom);
       if (params?.dateTo) searchParams.set("dateTo", params.dateTo);
@@ -1193,8 +1444,8 @@ class ApiClient {
   };
 
   /**
-    * Lazada API methods
-    */
+   * Lazada API methods
+   */
   lazada = {
     getAuthUrl: async (): Promise<ApiResponse<{ url: string }>> => {
       const response = await this.client.get<{ url: string }>(
@@ -1207,17 +1458,19 @@ class ApiClient {
       };
     },
 
-    getShops: async (): Promise<ApiResponse<Array<{
-      id: string;
-      sellerId: string;
-      sellerName: string;
-      countryCode: string | null;
-      lastSyncedAt: string | null;
-      createdAt: string;
-    }>>> => {
-      const response = await this.client.get(
-        API_ENDPOINTS.lazada.shops,
-      );
+    getShops: async (): Promise<
+      ApiResponse<
+        Array<{
+          id: string;
+          sellerId: string;
+          sellerName: string;
+          countryCode: string | null;
+          lastSyncedAt: string | null;
+          createdAt: string;
+        }>
+      >
+    > => {
+      const response = await this.client.get(API_ENDPOINTS.lazada.shops);
       return {
         data: response.data,
         status: response.status,
@@ -1231,22 +1484,24 @@ class ApiClient {
       limit?: number;
       search?: string;
       status?: string;
-    }): Promise<ApiResponse<{
-      products: Array<{
-        id: string;
-        lazadaItemId: number;
-        itemName: string;
-        sellerSku: string | null;
-        status: string;
-        price: number;
-        stock: number;
-        imageUrl: string | null;
-      }>;
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>> => {
+    }): Promise<
+      ApiResponse<{
+        products: Array<{
+          id: string;
+          lazadaItemId: number;
+          itemName: string;
+          sellerSku: string | null;
+          status: string;
+          price: number;
+          stock: number;
+          imageUrl: string | null;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>
+    > => {
       const searchParams = new URLSearchParams();
       if (params?.sellerId) searchParams.set("sellerId", params.sellerId);
       if (params?.page) searchParams.set("page", String(params.page));
@@ -1270,22 +1525,28 @@ class ApiClient {
       page?: number;
       limit?: number;
       status?: string;
-    }): Promise<ApiResponse<{
-      orders: Array<{
-        id: string;
-        lazadaOrderId: string;
-        orderNumber: string | null;
-        orderStatus: string;
-        totalAmount: number;
-        customerFirstName: string | null;
-        lazadaCreatedAt: string | null;
-        items: Array<{ productName: string; quantity: number; price: number }>;
-      }>;
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>> => {
+    }): Promise<
+      ApiResponse<{
+        orders: Array<{
+          id: string;
+          lazadaOrderId: string;
+          orderNumber: string | null;
+          orderStatus: string;
+          totalAmount: number;
+          customerFirstName: string | null;
+          lazadaCreatedAt: string | null;
+          items: Array<{
+            productName: string;
+            quantity: number;
+            price: number;
+          }>;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>
+    > => {
       const searchParams = new URLSearchParams();
       if (params?.sellerId) searchParams.set("sellerId", params.sellerId);
       if (params?.page) searchParams.set("page", String(params.page));
@@ -1317,18 +1578,22 @@ class ApiClient {
 
     getSyncLogs: async (
       sellerId?: string,
-    ): Promise<ApiResponse<Array<{
-      id: string;
-      syncType: string;
-      status: string;
-      itemsSynced: number;
-      itemsCreated: number;
-      itemsUpdated: number;
-      errors: string[] | null;
-      triggeredBy: string;
-      startedAt: string;
-      completedAt: string | null;
-    }>>> => {
+    ): Promise<
+      ApiResponse<
+        Array<{
+          id: string;
+          syncType: string;
+          status: string;
+          itemsSynced: number;
+          itemsCreated: number;
+          itemsUpdated: number;
+          errors: string[] | null;
+          triggeredBy: string;
+          startedAt: string;
+          completedAt: string | null;
+        }>
+      >
+    > => {
       const url = sellerId
         ? `${API_ENDPOINTS.lazada.syncLogs}?sellerId=${sellerId}`
         : API_ENDPOINTS.lazada.syncLogs;
@@ -1344,15 +1609,17 @@ class ApiClient {
       sellerId?: string,
       dateFrom?: string,
       dateTo?: string,
-    ): Promise<ApiResponse<{
-      totalProducts: number;
-      totalOrders: number;
-      totalRevenue: number;
-      averageOrderValue: number;
-      ordersByStatus: Record<string, number>;
-      topProducts: { name: string; revenue: number; quantity: number }[];
-      lastSyncedAt: string | null;
-    }>> => {
+    ): Promise<
+      ApiResponse<{
+        totalProducts: number;
+        totalOrders: number;
+        totalRevenue: number;
+        averageOrderValue: number;
+        ordersByStatus: Record<string, number>;
+        topProducts: { name: string; revenue: number; quantity: number }[];
+        lastSyncedAt: string | null;
+      }>
+    > => {
       const params = new URLSearchParams();
       if (sellerId) params.set("sellerId", sellerId);
       if (dateFrom) params.set("dateFrom", dateFrom);
@@ -1439,8 +1706,8 @@ class ApiClient {
   };
 
   /**
-    * TikTok Shop API methods
-    */
+   * TikTok Shop API methods
+   */
   tiktok = {
     getAuthUrl: async (): Promise<ApiResponse<{ url: string }>> => {
       const response = await this.client.get<{ url: string }>(
@@ -1453,18 +1720,20 @@ class ApiClient {
       };
     },
 
-    getShops: async (): Promise<ApiResponse<Array<{
-      id: string;
-      shopId: string;
-      shopName: string;
-      region: string | null;
-      sellerType: string | null;
-      lastSyncedAt: string | null;
-      createdAt: string;
-    }>>> => {
-      const response = await this.client.get(
-        API_ENDPOINTS.tiktok.shops,
-      );
+    getShops: async (): Promise<
+      ApiResponse<
+        Array<{
+          id: string;
+          shopId: string;
+          shopName: string;
+          region: string | null;
+          sellerType: string | null;
+          lastSyncedAt: string | null;
+          createdAt: string;
+        }>
+      >
+    > => {
+      const response = await this.client.get(API_ENDPOINTS.tiktok.shops);
       return {
         data: response.data,
         status: response.status,
@@ -1478,21 +1747,23 @@ class ApiClient {
       limit?: number;
       search?: string;
       status?: string;
-    }): Promise<ApiResponse<{
-      products: Array<{
-        id: string;
-        tiktokProductId: string;
-        title: string;
-        status: string;
-        mainImageUrl: string | null;
-        auditStatus: string | null;
-        variants: Array<{ price: number; totalQuantity: number }>;
-      }>;
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>> => {
+    }): Promise<
+      ApiResponse<{
+        products: Array<{
+          id: string;
+          tiktokProductId: string;
+          title: string;
+          status: string;
+          mainImageUrl: string | null;
+          auditStatus: string | null;
+          variants: Array<{ price: number; totalQuantity: number }>;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>
+    > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
       if (params?.page) searchParams.set("page", String(params.page));
@@ -1516,21 +1787,23 @@ class ApiClient {
       page?: number;
       limit?: number;
       status?: string;
-    }): Promise<ApiResponse<{
-      orders: Array<{
-        id: string;
-        tiktokOrderId: string;
-        orderStatus: string;
-        buyerNickname: string | null;
-        totalAmount?: number;
-        payment?: Record<string, unknown>;
-        tiktokCreatedAt: string | null;
-      }>;
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>> => {
+    }): Promise<
+      ApiResponse<{
+        orders: Array<{
+          id: string;
+          tiktokOrderId: string;
+          orderStatus: string;
+          buyerNickname: string | null;
+          totalAmount?: number;
+          payment?: Record<string, unknown>;
+          tiktokCreatedAt: string | null;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>
+    > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
       if (params?.page) searchParams.set("page", String(params.page));
@@ -1552,10 +1825,7 @@ class ApiClient {
       shopId: string;
       syncType?: "products" | "orders" | "all";
     }): Promise<ApiResponse<unknown>> => {
-      const response = await this.client.post(
-        API_ENDPOINTS.tiktok.sync,
-        data,
-      );
+      const response = await this.client.post(API_ENDPOINTS.tiktok.sync, data);
       return {
         data: response.data,
         status: response.status,
@@ -1565,18 +1835,22 @@ class ApiClient {
 
     getSyncLogs: async (
       shopId?: string,
-    ): Promise<ApiResponse<Array<{
-      id: string;
-      syncType: string;
-      status: string;
-      itemsSynced: number;
-      itemsCreated: number;
-      itemsUpdated: number;
-      errors: string[] | null;
-      triggeredBy: string;
-      startedAt: string;
-      completedAt: string | null;
-    }>>> => {
+    ): Promise<
+      ApiResponse<
+        Array<{
+          id: string;
+          syncType: string;
+          status: string;
+          itemsSynced: number;
+          itemsCreated: number;
+          itemsUpdated: number;
+          errors: string[] | null;
+          triggeredBy: string;
+          startedAt: string;
+          completedAt: string | null;
+        }>
+      >
+    > => {
       const url = shopId
         ? `${API_ENDPOINTS.tiktok.syncLogs}?shopId=${shopId}`
         : API_ENDPOINTS.tiktok.syncLogs;
@@ -1592,15 +1866,17 @@ class ApiClient {
       shopId?: string,
       dateFrom?: string,
       dateTo?: string,
-    ): Promise<ApiResponse<{
-      totalProducts: number;
-      totalOrders: number;
-      totalRevenue: number;
-      averageOrderValue: number;
-      ordersByStatus: Record<string, number>;
-      topProducts: { name: string; revenue: number; quantity: number }[];
-      lastSyncedAt: string | null;
-    }>> => {
+    ): Promise<
+      ApiResponse<{
+        totalProducts: number;
+        totalOrders: number;
+        totalRevenue: number;
+        averageOrderValue: number;
+        ordersByStatus: Record<string, number>;
+        topProducts: { name: string; revenue: number; quantity: number }[];
+        lastSyncedAt: string | null;
+      }>
+    > => {
       const params = new URLSearchParams();
       if (shopId) params.set("shopId", shopId);
       if (dateFrom) params.set("dateFrom", dateFrom);
@@ -1690,7 +1966,9 @@ class ApiClient {
    * Shopify API methods
    */
   shopify = {
-    getAuthUrl: async (shop: string): Promise<ApiResponse<{ url: string; state: string }>> => {
+    getAuthUrl: async (
+      shop: string,
+    ): Promise<ApiResponse<{ url: string; state: string }>> => {
       const response = await this.client.get<{ url: string; state: string }>(
         `${API_ENDPOINTS.shopify.auth}?shop=${encodeURIComponent(shop)}`,
       );
@@ -1701,17 +1979,19 @@ class ApiClient {
       };
     },
 
-    getShops: async (): Promise<ApiResponse<Array<{
-      id: string;
-      shopDomain: string;
-      shopName: string;
-      scopes: string;
-      lastSyncedAt: string | null;
-      createdAt: string;
-    }>>> => {
-      const response = await this.client.get(
-        API_ENDPOINTS.shopify.shops,
-      );
+    getShops: async (): Promise<
+      ApiResponse<
+        Array<{
+          id: string;
+          shopDomain: string;
+          shopName: string;
+          scopes: string;
+          lastSyncedAt: string | null;
+          createdAt: string;
+        }>
+      >
+    > => {
+      const response = await this.client.get(API_ENDPOINTS.shopify.shops);
       return {
         data: response.data,
         status: response.status,
@@ -1725,20 +2005,22 @@ class ApiClient {
       limit?: number;
       search?: string;
       status?: string;
-    }): Promise<ApiResponse<{
-      products: Array<{
-        id: string;
-        shopifyProductId: string;
-        title: string;
-        status: string;
-        featuredImageUrl: string | null;
-        variants: Array<{ price: number; inventoryQuantity: number }>;
-      }>;
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>> => {
+    }): Promise<
+      ApiResponse<{
+        products: Array<{
+          id: string;
+          shopifyProductId: string;
+          title: string;
+          status: string;
+          featuredImageUrl: string | null;
+          variants: Array<{ price: number; inventoryQuantity: number }>;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>
+    > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
       if (params?.page) searchParams.set("page", String(params.page));
@@ -1762,22 +2044,24 @@ class ApiClient {
       page?: number;
       limit?: number;
       status?: string;
-    }): Promise<ApiResponse<{
-      orders: Array<{
-        id: string;
-        shopifyOrderId: string;
-        orderName: string;
-        orderStatus: string;
-        financialStatus: string | null;
-        totalAmount: number;
-        currency: string;
-        createdAt: string | null;
-      }>;
-      total: number;
-      page: number;
-      limit: number;
-      totalPages: number;
-    }>> => {
+    }): Promise<
+      ApiResponse<{
+        orders: Array<{
+          id: string;
+          shopifyOrderId: string;
+          orderName: string;
+          orderStatus: string;
+          financialStatus: string | null;
+          totalAmount: number;
+          currency: string;
+          createdAt: string | null;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+      }>
+    > => {
       const searchParams = new URLSearchParams();
       if (params?.shopId) searchParams.set("shopId", params.shopId);
       if (params?.page) searchParams.set("page", String(params.page));
@@ -1799,10 +2083,7 @@ class ApiClient {
       shopId: string;
       syncType?: "products" | "orders" | "all";
     }): Promise<ApiResponse<unknown>> => {
-      const response = await this.client.post(
-        API_ENDPOINTS.shopify.sync,
-        data,
-      );
+      const response = await this.client.post(API_ENDPOINTS.shopify.sync, data);
       return {
         data: response.data,
         status: response.status,
@@ -1812,18 +2093,22 @@ class ApiClient {
 
     getSyncLogs: async (
       shopId?: string,
-    ): Promise<ApiResponse<Array<{
-      id: string;
-      syncType: string;
-      status: string;
-      itemsSynced: number;
-      itemsCreated: number;
-      itemsUpdated: number;
-      errors: string[] | null;
-      triggeredBy: string;
-      startedAt: string;
-      completedAt: string | null;
-    }>>> => {
+    ): Promise<
+      ApiResponse<
+        Array<{
+          id: string;
+          syncType: string;
+          status: string;
+          itemsSynced: number;
+          itemsCreated: number;
+          itemsUpdated: number;
+          errors: string[] | null;
+          triggeredBy: string;
+          startedAt: string;
+          completedAt: string | null;
+        }>
+      >
+    > => {
       const url = shopId
         ? `${API_ENDPOINTS.shopify.syncLogs}?shopId=${shopId}`
         : API_ENDPOINTS.shopify.syncLogs;
@@ -1839,15 +2124,17 @@ class ApiClient {
       shopId?: string,
       dateFrom?: string,
       dateTo?: string,
-    ): Promise<ApiResponse<{
-      totalProducts: number;
-      totalOrders: number;
-      totalRevenue: number;
-      averageOrderValue: number;
-      ordersByStatus: Record<string, number>;
-      topProducts: { name: string; revenue: number; quantity: number }[];
-      lastSyncedAt: string | null;
-    }>> => {
+    ): Promise<
+      ApiResponse<{
+        totalProducts: number;
+        totalOrders: number;
+        totalRevenue: number;
+        averageOrderValue: number;
+        ordersByStatus: Record<string, number>;
+        topProducts: { name: string; revenue: number; quantity: number }[];
+        lastSyncedAt: string | null;
+      }>
+    > => {
       const params = new URLSearchParams();
       if (shopId) params.set("shopId", shopId);
       if (dateFrom) params.set("dateFrom", dateFrom);
@@ -1934,13 +2221,10 @@ class ApiClient {
   };
 
   /**
-    * Shopee Ads API methods
-    */
+   * Shopee Ads API methods
+   */
   shopeeAds = {
-    get: async (params?: {
-      dateFrom?: string;
-      dateTo?: string;
-    }) => {
+    get: async (params?: { dateFrom?: string; dateTo?: string }) => {
       const searchParams = new URLSearchParams();
       if (params?.dateFrom) searchParams.set("dateFrom", params.dateFrom);
       if (params?.dateTo) searchParams.set("dateTo", params.dateTo);
@@ -1958,16 +2242,25 @@ class ApiClient {
   };
 
   /**
-    * Receiving API methods (warehouse stock-in by scan)
-    */
+   * Receiving API methods (warehouse stock-in by scan)
+   */
   receiving = {
     create: async (data: {
       warehouseId: string;
       poId?: string;
-      items: { productId: string; sku?: string; quantity: number; poItemId?: string; notes?: string }[];
+      items: {
+        productId: string;
+        sku?: string;
+        quantity: number;
+        poItemId?: string;
+        notes?: string;
+      }[];
       notes?: string;
     }) => {
-      const response = await this.client.post(API_ENDPOINTS.receiving.base, data);
+      const response = await this.client.post(
+        API_ENDPOINTS.receiving.base,
+        data,
+      );
       return {
         data: response.data,
         status: response.status,
@@ -1983,7 +2276,8 @@ class ApiClient {
     }) => {
       const searchParams = new URLSearchParams();
       if (params?.productId) searchParams.set("productId", params.productId);
-      if (params?.warehouseId) searchParams.set("warehouseId", params.warehouseId);
+      if (params?.warehouseId)
+        searchParams.set("warehouseId", params.warehouseId);
       if (params?.sourceType) searchParams.set("sourceType", params.sourceType);
       if (params?.limit) searchParams.set("limit", String(params.limit));
       const qs = searchParams.toString();
@@ -2000,8 +2294,8 @@ class ApiClient {
   };
 
   /**
-    * Portal API methods (external supplier/client portals)
-    */
+   * Portal API methods (external supplier/client portals)
+   */
   portal = {
     getSupplierDashboard: async (): Promise<
       ApiResponse<SupplierPortalDashboard>

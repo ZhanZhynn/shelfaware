@@ -23,6 +23,14 @@ describe("sourcing read access", () => {
     await expect(requireWorkspaceRole({ id: "admin", role: "admin" }, "workspace", ["admin", "sourcer"])).resolves.toMatchObject({ globalAdmin: true });
   });
 
+  it("allows regular admins without granting quote override access", async () => {
+    await expect(requireWorkspaceRole({ id: "admin", role: "admin", isSuperAdmin: false }, "workspace", ["admin", "sourcer"])).resolves.toMatchObject({ role: "admin", globalAdmin: false });
+  });
+
+  it("allows global sourcers without a workspace membership", async () => {
+    await expect(requireWorkspaceRole({ id: "sourcer", role: "sourcer" }, "workspace", ["admin", "sourcer"])).resolves.toMatchObject({ role: "sourcer", globalAdmin: false });
+  });
+
   it.each(["warehouse", "viewer"])("rejects %s from sourcing payloads", async (role) => {
     mocks.findUnique.mockResolvedValue({ role });
     await expect(requireWorkspaceRole({ id: "member", role: "user" }, "workspace", ["admin", "sourcer"])).rejects.toBeInstanceOf(SourcingAccessError);

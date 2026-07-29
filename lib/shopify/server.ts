@@ -382,6 +382,9 @@ export async function persistShopConnection(
 
 export const PRODUCTS_QUERY = `
   query GetProducts($first: Int!, $after: String, $query: String) {
+    shop {
+      currencyCode
+    }
     products(first: $first, after: $after, query: $query) {
       nodes {
         id
@@ -404,8 +407,8 @@ export const PRODUCTS_QUERY = `
             displayName
             sku
             barcode
-            price { amount currencyCode }
-            compareAtPrice { amount currencyCode }
+            price
+            compareAtPrice
             inventoryQuantity
             inventoryPolicy
             position

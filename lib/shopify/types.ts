@@ -71,6 +71,7 @@ export interface ShopifyProductNode {
   featuredImage: { url: string } | null;
   createdAt: string;
   updatedAt: string;
+  currencyCode: string;
   variants: { nodes: ShopifyProductVariantNode[] };
 }
 
@@ -80,8 +81,8 @@ export interface ShopifyProductVariantNode {
   displayName: string;
   sku: string | null;
   barcode: string | null;
-  price: MoneyV2;
-  compareAtPrice: MoneyV2 | null;
+  price: string;
+  compareAtPrice: string | null;
   inventoryQuantity: number | null;
   inventoryPolicy: "DENY" | "CONTINUE";
   position: number;
@@ -89,6 +90,7 @@ export interface ShopifyProductVariantNode {
 }
 
 export interface ShopifyProductsResponse {
+  shop: { currencyCode: string };
   products: {
     nodes: ShopifyProductNode[];
     pageInfo: PageInfo;

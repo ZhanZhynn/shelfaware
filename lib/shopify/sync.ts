@@ -166,9 +166,11 @@ export async function syncShopifyProducts(
               displayName: variant.displayName,
               sku: variant.sku,
               barcode: variant.barcode,
-              price: parseMoney(variant.price.amount),
-              compareAtPrice: variant.compareAtPrice ? parseMoney(variant.compareAtPrice.amount) : null,
-              currency: variant.price.currencyCode,
+              price: parseMoney(variant.price),
+              compareAtPrice: variant.compareAtPrice
+                ? parseMoney(variant.compareAtPrice)
+                : null,
+              currency: product.currencyCode,
               inventoryQuantity: variant.inventoryQuantity ?? 0,
               inventoryPolicy: variant.inventoryPolicy,
               position: variant.position,

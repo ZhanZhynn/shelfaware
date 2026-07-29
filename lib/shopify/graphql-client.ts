@@ -41,7 +41,12 @@ export async function fetchAllProducts(
       variables,
     );
 
-    allProducts.push(...data.products.nodes);
+    allProducts.push(
+      ...data.products.nodes.map((product) => ({
+        ...product,
+        currencyCode: data.shop.currencyCode,
+      })),
+    );
     hasNextPage = data.products.pageInfo.hasNextPage;
     cursor = data.products.pageInfo.endCursor;
     pageCount++;

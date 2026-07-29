@@ -3,6 +3,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 import { normalizeSupplierName } from "@/lib/suppliers/normalization";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,9 +15,18 @@ export async function GET(request: NextRequest) {
     const excludeId = params.get("excludeId") ?? undefined;
     if (!name || name.length < 2) return NextResponse.json([]);
     if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
+    const dataScope = workspaceId ? null : await getAdminDataScope(session);
     const normalizedName = normalizeSupplierName(name);
     const suppliers = await prisma.supplier.findMany({
-      where: { ...(workspaceId ? { workspaceId } : { userId: session.id }), ...(excludeId ? { id: { not: excludeId } } : {}), normalizedName },
+      where: {
+        ...(workspaceId
+          ? { workspaceId }
+          : dataScope!.sharedAdmin
+            ? { userId: { in: dataScope!.ownerIds } }
+            : { userId: session.id }),
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+        normalizedName,
+      },
       select: { id: true, name: true, status: true, contactEmail: true, country: true },
       take: 8,
     });

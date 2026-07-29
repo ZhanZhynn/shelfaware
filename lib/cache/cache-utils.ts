@@ -314,12 +314,12 @@ export const cacheKeys = {
     pattern: "dashboard:*",
   },
 
-  /**
-   * Business Insights page cache keys — per-user (userId)
-   */
+  /** Business Insights page cache keys, scoped to the current data domain. */
   businessInsights: {
-    combinedInsights: (userId: string) =>
-      `businessInsights:combinedInsights:${userId}`,
+    products: (scope: string) => `businessInsights:products:${scope}`,
+    orders: (scope: string) => `businessInsights:orders:${scope}`,
+    combinedInsights: (scope: string) =>
+      `businessInsights:combinedInsights:${scope}`,
     pattern: "businessInsights:*",
   },
 
@@ -360,12 +360,10 @@ export const cacheKeys = {
     pattern: "portal:*",
   },
 
-  /**
-   * ABC Analysis cache keys
-   */
+  /** ABC Analysis cache keys, scoped to the current data domain. */
   abcAnalysis: {
-    report: (userId: string, params?: string) =>
-      `abc-analysis:${userId}:${params || "default"}`,
+    report: (scope: string, params?: string) =>
+      `abc-analysis:${scope}:${params || "default"}`,
     pattern: "abc-analysis:*",
   },
 

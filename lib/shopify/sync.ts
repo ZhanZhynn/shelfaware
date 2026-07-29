@@ -79,6 +79,7 @@ function extractIdFromGid(gid: string): string {
 export async function syncShopifyProducts(
   shopId: string,
   userId: string,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -97,7 +98,7 @@ export async function syncShopifyProducts(
     setActiveShop(shop.shopDomain);
 
     return await runWithSyncLog(
-      { shopId: shop.id, userId, channel: "shopify", syncType: "products" },
+      { shopId: shop.id, userId: actorId, channel: "shopify", syncType: "products" },
       async () => {
       const errors: string[] = [];
       let synced = 0;
@@ -218,6 +219,7 @@ export async function syncShopifyOrders(
   shopId: string,
   userId: string,
   daysBack?: number,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -236,7 +238,7 @@ export async function syncShopifyOrders(
     setActiveShop(shop.shopDomain);
 
     return await runWithSyncLog(
-      { shopId: shop.id, userId, channel: "shopify", syncType: "orders" },
+      { shopId: shop.id, userId: actorId, channel: "shopify", syncType: "orders" },
       async () => {
       const errors: string[] = [];
       let synced = 0;
@@ -374,11 +376,12 @@ export async function syncShopifyOrders(
 export async function syncShopifyAll(
   shopId: string,
   userId: string,
+  actorId = userId,
 ): Promise<{
   products: Awaited<ReturnType<typeof syncShopifyProducts>>;
   orders: Awaited<ReturnType<typeof syncShopifyOrders>>;
 }> {
-  const products = await syncShopifyProducts(shopId, userId);
-  const orders = await syncShopifyOrders(shopId, userId);
+  const products = await syncShopifyProducts(shopId, userId, actorId);
+  const orders = await syncShopifyOrders(shopId, userId, undefined, actorId);
   return { products, orders };
 }

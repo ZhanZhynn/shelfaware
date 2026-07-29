@@ -248,10 +248,11 @@ export async function ensureInvoiceForPaidOrder(
  */
 export async function getInvoicesByUser(
   userId: string,
-  filters?: InvoiceFilters
+  filters?: InvoiceFilters,
+  ownerIds?: string[],
 ): Promise<Prisma.InvoiceGetPayload<Record<string, never>>[]> {
   const where: Prisma.InvoiceWhereInput = {
-    userId,
+    userId: ownerIds ? { in: ownerIds } : userId,
   };
 
   // Filter by search term (searches invoice number and notes)

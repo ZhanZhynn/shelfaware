@@ -336,9 +336,9 @@ export async function getOrdersContainingProductOwnerProducts(
 /**
  * Get order by ID for admin (any order by id).
  */
-export async function getOrderByIdForAdmin(orderId: string) {
+export async function getOrderByIdForAdmin(orderId: string, ownerIds: string[]) {
   return prisma.order.findFirst({
-    where: { id: orderId },
+    where: { id: orderId, userId: { in: ownerIds } },
     include: {
       items: {
         include: {

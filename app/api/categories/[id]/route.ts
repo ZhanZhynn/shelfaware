@@ -11,6 +11,7 @@ import { getCache, setCache, invalidateCache, cacheKeys } from "@/lib/cache";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/categories/:id
@@ -39,9 +40,21 @@ export async function GET(
     const userId = session.id;
     const isAdmin = session.role === "admin";
     const isClient = session.role === "client";
+    const dataScope = await getAdminDataScope(session);
+
+    const accessCategory = await prisma.category.findUnique({
+      where: { id },
+      select: { userId: true, workspaceId: true },
+    });
+    if (!accessCategory || (isAdmin && !accessCategory.workspaceId && !dataScope.ownerIds.includes(accessCategory.userId))) {
+      return NextResponse.json({ error: "Category not found" }, { status: 404 });
+    }
+    if (!isAdmin && !isClient && accessCategory.userId !== userId) {
+      return NextResponse.json({ error: "Category not found" }, { status: 404 });
+    }
 
     // Check cache first
-    const cacheKey = cacheKeys.categories.detail(id);
+    const cacheKey = `${cacheKeys.categories.detail(id)}:${dataScope.cacheScope}`;
     const cachedCategory = await getCache<unknown>(cacheKey);
     if (cachedCategory) {
       logger.info(`✅ Cache hit for category: ${cacheKey}`);
@@ -53,7 +66,13 @@ export async function GET(
 
     // Fetch category (admin or client: any by id; else own by userId)
     const category =
-      isAdmin || isClient
+      isAdmin
+        ? await prisma.category.findFirst({
+            where: accessCategory.workspaceId
+              ? { id, workspaceId: accessCategory.workspaceId }
+              : { id, userId: { in: dataScope.ownerIds } },
+          })
+        : isClient
         ? await prisma.category.findUnique({ where: { id } })
         : await getCategoryById(id, userId);
 
@@ -65,7 +84,13 @@ export async function GET(
     const products = await prisma.product.findMany({
       where: mergeProductListWhere({
         categoryId: category.id,
-        ...(isClient ? {} : { userId }), // Client: all products in category; admin: only user's products
+        ...(isClient
+          ? {}
+          : accessCategory.workspaceId
+            ? { workspaceId: accessCategory.workspaceId }
+            : isAdmin
+              ? { userId: { in: dataScope.ownerIds } }
+              : { userId }),
       }),
       include: {
         orderItems: {

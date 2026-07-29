@@ -2,7 +2,7 @@
  * Server-side data for admin Dashboard (Analytics) page
  * Aggregates counts, revenue, trends, and recent activity across all entities.
  * Only import from server code (e.g. app/admin/insights/page.tsx, GET /api/dashboard).
- * getDashboardForAdmin(userId) returns DashboardStats; uses Redis cache when available.
+ * getDashboardForAdmin(userId, dataScope) returns DashboardStats; uses Redis cache when available.
  * Supplier count includes demo supplier (getDemoSupplierUserId) so list and dashboard match.
  */
 
@@ -11,6 +11,7 @@ import { prisma } from "@/prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
 import { getDemoSupplierUserId } from "@/prisma/supplier";
 import { getFinancialCurrencyContext } from "@/lib/server/financial-currency";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 import type {
   DashboardStats,
   DashboardCounts,
@@ -77,18 +78,18 @@ function getTwelveMonthsAgo(): Date {
   return d;
 }
 
-/** Prisma where clause for resources owned by this user (products, categories, etc.). */
-const userScope = (userId: string) => ({ userId });
+/** Prisma where clause for resources owned by the active data domain. */
+const userScope = (ownerIds: string[]) => ({ userId: { in: ownerIds } });
 
-/** Store-wide order IDs: self (created by userId) + client orders (contain products owned by userId). */
-async function getStoreOrderIds(productOwnerUserId: string): Promise<string[]> {
+/** Store-wide order IDs: owner-created orders + client orders for owner products. */
+async function getStoreOrderIds(ownerIds: string[]): Promise<string[]> {
   const [selfOrders, clientOrderItems] = await Promise.all([
     prisma.order.findMany({
-      where: { userId: productOwnerUserId },
+      where: { userId: { in: ownerIds } },
       select: { id: true },
     }),
     prisma.orderItem.findMany({
-      where: { product: { userId: productOwnerUserId } },
+      where: { product: { userId: { in: ownerIds } } },
       select: { orderId: true },
       distinct: ["orderId"],
     }),
@@ -99,19 +100,24 @@ async function getStoreOrderIds(productOwnerUserId: string): Promise<string[]> {
   return Array.from(ids);
 }
 
-export async function getDashboardForAdmin(userId: string): Promise<DashboardStats> {
-  const cacheKey = `${cacheKeys.dashboard.overview(userId)}:currency-v3`;
+export async function getDashboardForAdmin(
+  userId: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds" | "cacheScope">,
+): Promise<DashboardStats> {
+  const ownerIds = dataScope?.ownerIds ?? [userId];
+  const cacheScope = dataScope?.cacheScope ?? userId;
+  const cacheKey = `${cacheKeys.dashboard.overview(cacheScope)}:currency-v4`;
   const cached = await getCache<DashboardStats>(cacheKey);
   if (cached) return cached;
 
   const demoUserId = await getDemoSupplierUserId();
   const whereSuppliers =
     demoUserId != null
-      ? { OR: [{ userId }, { userId: demoUserId }] }
-      : userScope(userId);
+      ? { OR: [{ userId: { in: ownerIds } }, { userId: demoUserId }] }
+      : userScope(ownerIds);
 
   const since = getTwelveMonthsAgo();
-  const whereUser = userScope(userId);
+  const whereUser = userScope(ownerIds);
   const currency = await getFinancialCurrencyContext(userId);
 
   const userProductIds = (
@@ -125,7 +131,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
       ? { productId: { in: userProductIds } }
       : { productId: { in: [] } };
 
-  const storeOrderIds = await getStoreOrderIds(userId);
+  const storeOrderIds = await getStoreOrderIds(ownerIds);
   const whereStoreOrders = storeOrderIds.length > 0 ? { id: { in: storeOrderIds } } : { id: { in: [] } };
   const whereInvoiceForStore = storeOrderIds.length > 0 ? { orderId: { in: storeOrderIds } } : { orderId: { in: [] } };
 
@@ -133,7 +139,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     storeOrderIds.length > 0
       ? (
           await prisma.order.findMany({
-            where: { userId, id: { in: storeOrderIds } },
+            where: { userId: { in: ownerIds }, id: { in: storeOrderIds } },
             select: { id: true },
           })
         ).map((o) => o.id)
@@ -172,7 +178,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     prisma.order.count({ where: whereStoreOrders }),
     prisma.invoice.count({ where: whereInvoiceForStore }),
     prisma.warehouse.count({ where: whereUser }),
-    prisma.supportTicket.count({ where: { assignedToId: userId } }),
+    prisma.supportTicket.count({ where: { assignedToId: { in: ownerIds } } }),
     prisma.productReview.count({ where: reviewWhere }),
     prisma.order.count({
       where: { ...whereStoreOrders, paymentStatus: "refunded" },
@@ -209,7 +215,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
       take: 10,
     }),
     prisma.supportTicket.findMany({
-      where: { assignedToId: userId },
+      where: { assignedToId: { in: ownerIds } },
       select: { id: true, subject: true, status: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: 10,
@@ -305,7 +311,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
     prisma.category.count({ where: { ...whereUser, status: false } }),
     prisma.supportTicket.groupBy({
       by: ["status"],
-      where: { assignedToId: userId },
+      where: { assignedToId: { in: ownerIds } },
       _count: { id: true },
     }),
     prisma.productReview.groupBy({
@@ -317,7 +323,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
 
   // ── Shopee order analytics ─────────────────────────────────────────────────
   const shopeeShops = await prisma.shopeeShop.findMany({
-    where: { userId },
+    where: { userId: { in: ownerIds } },
     select: { id: true },
   });
   const shopeeShopIds = shopeeShops.map((s) => s.id);
@@ -373,7 +379,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
 
   // ── Lazada order analytics ─────────────────────────────────────────────────
   const lazadaShops = await prisma.lazadaShop.findMany({
-    where: { userId },
+    where: { userId: { in: ownerIds } },
     select: { id: true },
   });
   const lazadaShopIds = lazadaShops.map((s) => s.id);
@@ -722,7 +728,7 @@ export async function getDashboardForAdmin(userId: string): Promise<DashboardSta
   };
 
   const selfOrderCount = selfOrderIds.length;
-  const revenueSelf = sumOrders((order) => order.userId === userId && order.status !== "cancelled");
+  const revenueSelf = sumOrders((order) => ownerIds.includes(order.userId) && order.status !== "cancelled");
   const selfOthersBreakdown: DashboardSelfOthersBreakdown = {
     orderSelfCount: selfOrderCount,
     orderOthersCount: ordersCount - selfOrderCount,

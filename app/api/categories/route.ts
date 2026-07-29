@@ -14,6 +14,7 @@ import {
   updateCategoryBodySchema,
 } from "@/lib/validations/category";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/categories
@@ -29,9 +30,14 @@ export async function GET(request: NextRequest) {
     const userId = session.id;
     const workspaceId = new URL(request.url).searchParams.get("workspaceId") || undefined;
     if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
+    const dataScope = workspaceId ? null : await getAdminDataScope(session);
 
     const categories = await prisma.category.findMany({
-      where: workspaceId ? { workspaceId } : { userId },
+      where: workspaceId
+        ? { workspaceId }
+        : dataScope!.sharedAdmin
+          ? { userId: { in: dataScope!.ownerIds } }
+          : { userId },
     });
 
     return NextResponse.json(categories);
@@ -158,8 +164,11 @@ export async function PUT(request: NextRequest) {
     }
     if (existingCategory.workspaceId) {
       await requireWorkspaceRole(session, existingCategory.workspaceId, ["admin", "sourcer"]);
-    } else if (existingCategory.userId !== userId && session.role !== "admin") {
-      return NextResponse.json({ error: "Category not found or unauthorized" }, { status: 404 });
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existingCategory.userId)) {
+        return NextResponse.json({ error: "Category not found or unauthorized" }, { status: 404 });
+      }
     }
 
     // Prepare update data with new optional fields
@@ -249,8 +258,11 @@ export async function DELETE(request: NextRequest) {
     }
     if (existingCategory.workspaceId) {
       await requireWorkspaceRole(session, existingCategory.workspaceId, ["admin", "sourcer"]);
-    } else if (existingCategory.userId !== userId && session.role !== "admin") {
-      return NextResponse.json({ error: "Category not found or unauthorized" }, { status: 404 });
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existingCategory.userId)) {
+        return NextResponse.json({ error: "Category not found or unauthorized" }, { status: 404 });
+      }
     }
 
     await prisma.category.delete({

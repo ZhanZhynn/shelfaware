@@ -6,6 +6,7 @@
  */
 
 import { getCache, setCache, cacheKeys } from "@/lib/cache";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 import { prisma } from "@/prisma/client";
 import type { MarketSource } from "@/types/marketplace";
 
@@ -69,15 +70,26 @@ const CACHE_TTL = 300; // 5 minutes
  */
 export async function getCombinedInsightsForUser(
   userId: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds" | "cacheScope">,
 ): Promise<CombinedInsights> {
-  const cacheKey = cacheKeys.businessInsights.combinedInsights(userId);
+  const cacheKey = cacheKeys.businessInsights.combinedInsights(
+    dataScope?.cacheScope ?? userId,
+  );
   const cached = await getCache<CombinedInsights>(cacheKey);
   if (cached) return cached;
 
-  // Get user's marketplace shop IDs
+  const ownerIds = dataScope?.ownerIds ?? [userId];
+
+  // Get marketplace shop IDs belonging to the current data scope.
   const [shopeeShops, lazadaShops] = await Promise.all([
-    prisma.shopeeShop.findMany({ where: { userId }, select: { id: true } }),
-    prisma.lazadaShop.findMany({ where: { userId }, select: { id: true } }),
+    prisma.shopeeShop.findMany({
+      where: { userId: { in: ownerIds } },
+      select: { id: true },
+    }),
+    prisma.lazadaShop.findMany({
+      where: { userId: { in: ownerIds } },
+      select: { id: true },
+    }),
   ]);
   const shopeeShopIds = shopeeShops.map((s) => s.id);
   const lazadaShopIds = lazadaShops.map((s) => s.id);
@@ -95,7 +107,7 @@ export async function getCombinedInsightsForUser(
     lazadaTopRaw,
   ] = await Promise.all([
     prisma.order.findMany({
-      where: { userId },
+      where: { userId: { in: ownerIds } },
       select: {
         id: true,
         status: true,

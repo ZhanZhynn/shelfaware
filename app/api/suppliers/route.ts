@@ -16,6 +16,7 @@ import {
 } from "@/lib/validations/supplier";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 import { normalizeSupplierName } from "@/lib/suppliers/normalization";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/suppliers
@@ -35,14 +36,25 @@ export async function GET(request: NextRequest) {
     const isClient = session.role === "client";
     const workspaceId = new URL(request.url).searchParams.get("workspaceId") || undefined;
     if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
+    const dataScope = workspaceId ? null : await getAdminDataScope(session);
+    const demoUserId = await getDemoSupplierUserId();
 
     const suppliers = workspaceId
       ? await prisma.supplier.findMany({ where: { workspaceId }, orderBy: { name: "asc" } })
       : isClient
       ? await prisma.supplier.findMany({ where: { userId } })
+      : dataScope!.sharedAdmin
+      ? await prisma.supplier.findMany({
+          where: {
+            OR: [
+              { userId: { in: dataScope!.ownerIds } },
+              ...(demoUserId ? [{ userId: demoUserId }] : []),
+            ],
+          },
+          orderBy: { name: "asc" },
+        })
       : await getSuppliersForAdminIncludingDemo(userId);
 
-    const demoUserId = await getDemoSupplierUserId();
     const withFlags = suppliers.map((s) => ({
       ...s,
       createdAt: s.createdAt.toISOString(),
@@ -176,8 +188,11 @@ export async function PUT(request: NextRequest) {
     }
     if (existingSupplier.workspaceId) {
       await requireWorkspaceRole(session, existingSupplier.workspaceId, ["admin", "sourcer"]);
-    } else if (existingSupplier.userId !== userId && session.role !== "admin") {
-      return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existingSupplier.userId)) {
+        return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
+      }
     }
 
     // Prepare update data with new optional fields
@@ -285,8 +300,11 @@ export async function DELETE(request: NextRequest) {
     }
     if (existingSupplier.workspaceId) {
       await requireWorkspaceRole(session, existingSupplier.workspaceId, ["admin", "sourcer"]);
-    } else if (existingSupplier.userId !== userId && session.role !== "admin") {
-      return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existingSupplier.userId)) {
+        return NextResponse.json({ error: "Supplier not found or unauthorized" }, { status: 404 });
+      }
     }
 
     const [products, purchaseOrders, sourcingQuotes, tickets, evaluations] = await Promise.all([

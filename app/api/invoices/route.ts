@@ -14,6 +14,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
 import type { CreateInvoiceInput, InvoiceFilters } from "@/types";
 import { resolveTransactionCurrency } from "@/lib/money";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/invoices
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
 
     const userId = session.id;
     const isClient = session.role === "client";
+    const dataScope = await getAdminDataScope(session);
     const { searchParams } = new URL(request.url);
 
     // Build filters from query parameters
@@ -58,7 +60,9 @@ export async function GET(request: NextRequest) {
     // Check cache first (client list uses separate cache key)
     const cacheKey = cacheKeys.invoices.list({
       ...(filters as Record<string, unknown>),
-      ...(isClient ? { byClient: true, userId } : {}),
+      ...(isClient
+        ? { byClient: true, userId }
+        : { userId: dataScope.sharedAdmin ? dataScope.cacheScope : userId }),
     });
     const cachedInvoices = await getCache(cacheKey);
 
@@ -70,7 +74,11 @@ export async function GET(request: NextRequest) {
     // Fetch invoices: client sees only their own (clientId = userId), admin/user see created by them
     const invoices = isClient
       ? await getInvoicesByClientId(userId, filters)
-      : await getInvoicesByUser(userId, filters);
+      : await getInvoicesByUser(
+          userId,
+          filters,
+          dataScope.sharedAdmin ? dataScope.ownerIds : undefined,
+        );
 
     // For client role, resolve the actual issuer (product owner) from order items
     let issuerMap = new Map<string, { name: string | null; email: string }>();

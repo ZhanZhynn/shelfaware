@@ -10,6 +10,7 @@ import { shopeeProductListQuerySchema } from "@/lib/validations/shopee";
 import { getCache, setCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,7 +22,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
+    const cacheScope = marketplaceCacheScope(session);
     const { searchParams } = new URL(request.url);
 
     const query = {
@@ -43,24 +45,23 @@ export async function GET(request: NextRequest) {
     const { shopId, page, limit, search, status } = validationResult.data;
     const skip = (page - 1) * limit;
 
-    const cacheKey = cacheKeys.shopee.products(shopId || "all", { page, limit, search, status });
+    const cacheKey = `${cacheKeys.shopee.products(shopId || "all", { page, limit, search, status })}:${cacheScope}`;
     const cached = await getCache(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId: { in: ownerIds } };
     let lowStockThreshold = 10; // default
     // shopId from URL is the Shopee numeric ID — look up the ObjectId
     if (shopId) {
       const shop = await prisma.shopeeShop.findFirst({
-        where: { shopId: Number(shopId), userId },
+        where: { shopId: Number(shopId), userId: { in: ownerIds } },
         select: { id: true, lowStockThreshold: true },
       });
-      if (shop) {
-        where.shopId = shop.id;
-        lowStockThreshold = shop.lowStockThreshold;
-      }
+      if (!shop) return NextResponse.json({ error: "Shop not found" }, { status: 404 });
+      where.shopId = shop.id;
+      lowStockThreshold = shop.lowStockThreshold;
     }
     if (search) {
       where.OR = [

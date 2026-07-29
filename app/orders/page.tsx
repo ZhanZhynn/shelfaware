@@ -7,6 +7,7 @@ import {
   getOrdersForSupplierId,
 } from "@/lib/server/orders-data";
 import { getSupplierByUserId } from "@/prisma/supplier";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * Orders route — server component.
@@ -28,7 +29,10 @@ export default async function OrdersRoute() {
       ? await getOrdersForSupplierId(supplier.id)
       : [];
   } else {
-    initialOrders = await getOrdersForUser(user.id);
+    initialOrders = await getOrdersForUser(
+      user.id,
+      user.role === "admin" ? await getAdminDataScope(user) : undefined,
+    );
   }
   return (
     <OrdersPage initialOrders={initialOrders} userRole={user.role ?? undefined} />

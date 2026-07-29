@@ -5,6 +5,7 @@
  */
 
 import { getCache, setCache, cacheKeys } from "@/lib/cache";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 import { mergeProductListWhere } from "@/lib/products/product-query";
 import { prisma } from "@/prisma/client";
 
@@ -65,15 +66,22 @@ export type SupplierForHome = {
  * Fetch products for the given user.
  * Uses the same cache key and transform as GET /api/products so Redis is shared.
  */
-export async function getProductsForUser(userId: string): Promise<ProductForHome[]> {
-  const cacheKey = cacheKeys.products.list({ userId });
+export async function getProductsForUser(
+  userId: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds" | "cacheScope">,
+): Promise<ProductForHome[]> {
+  const cacheKey = dataScope
+    ? cacheKeys.businessInsights.products(dataScope.cacheScope)
+    : cacheKeys.products.list({ userId });
   const cached = await getCache<ProductForHome[]>(cacheKey);
   if (cached) {
     return cached;
   }
 
   const products = await prisma.product.findMany({
-    where: mergeProductListWhere({ userId }),
+    where: mergeProductListWhere(
+      dataScope ? { userId: { in: dataScope.ownerIds } } : { userId },
+    ),
     orderBy: { createdAt: "desc" },
   });
 

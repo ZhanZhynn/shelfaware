@@ -4,6 +4,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { approvePurchaseOrder, authorizePurchaseOrder } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function POST(
   request: NextRequest,
@@ -20,6 +21,7 @@ export async function POST(
     const { id } = await params;
     const body = await request.json();
     const { action } = body;
+    const dataScope = await getAdminDataScope(session);
 
     if (action !== "approve" && action !== "reject") {
       return NextResponse.json(
@@ -28,7 +30,7 @@ export async function POST(
       );
     }
 
-    const purchaseOrder = await authorizePurchaseOrder(session, id, ["admin"]);
+    const purchaseOrder = await authorizePurchaseOrder(session, id, ["admin"], dataScope.ownerIds);
     // Legacy orders have no workspace role model; approval remains a global-admin action.
     if (!purchaseOrder || (!purchaseOrder.workspaceId && session.role !== "admin")) {
       return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });

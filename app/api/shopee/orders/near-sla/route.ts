@@ -10,6 +10,7 @@ import { getCache, setCache } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { z } from "zod";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 const querySchema = z.object({
   hours: z
@@ -33,7 +34,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
+    const cacheScope = marketplaceCacheScope(session);
     const { searchParams } = new URL(request.url);
 
     const parsed = querySchema.safeParse({
@@ -48,11 +50,11 @@ export async function GET(request: NextRequest) {
     }
 
     const { hours, shopId } = parsed.data;
-    const cacheKey = `shopee:near-sla:${shopId || "all"}:${hours}`;
+    const cacheKey = `shopee:near-sla:${shopId || "all"}:${hours}:${cacheScope}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 
-    const shopWhere: Record<string, unknown> = { userId };
+    const shopWhere: Record<string, unknown> = { userId: { in: ownerIds } };
     if (shopId) shopWhere.shopId = Number(shopId);
 
     const shops = await prisma.shopeeShop.findMany({
@@ -60,6 +62,10 @@ export async function GET(request: NextRequest) {
       select: { id: true },
     });
     const shopIds = shops.map((s) => s.id);
+
+    if (shopId && shopIds.length === 0) {
+      return NextResponse.json({ error: "Shop not found" }, { status: 404 });
+    }
 
     if (shopIds.length === 0) {
       return NextResponse.json({

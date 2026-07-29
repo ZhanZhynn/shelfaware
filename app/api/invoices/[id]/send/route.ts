@@ -15,6 +15,7 @@ import { createInvoiceSentNotification } from "@/lib/notifications/in-app";
 import { prisma } from "@/prisma/client";
 import type { InvoiceEmailData, BillingAddress } from "@/types";
 import { resolveTransactionCurrency, toStripeMinorUnits } from "@/lib/money";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * POST /api/invoices/:id/send
@@ -42,12 +43,18 @@ export async function POST(
 
     const userId = session.id;
     const isAdmin = session.role === "admin";
+    const dataScope = await getAdminDataScope(session);
 
     // Admin can send any invoice; other roles only their own.
     let ownerUserId = userId;
     if (isAdmin) {
-      const existing = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-      if (existing) ownerUserId = existing.userId;
+      const existing = await prisma.invoice.findFirst({
+        where: { id: invoiceId, userId: { in: dataScope.ownerIds } },
+      });
+      if (!existing) {
+        return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      }
+      ownerUserId = existing.userId;
     }
 
     // Get invoice

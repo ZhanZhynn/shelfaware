@@ -4,6 +4,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { getStockMovementsForUser } from "@/prisma/stock-movement";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function GET(request: NextRequest) {
   const rateLimitResponse = await withRateLimit(request, defaultRateLimits.standard);
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
     const sourceType = searchParams.get("sourceType") || undefined;
     const limitParam = searchParams.get("limit");
     const limit = limitParam ? Math.min(100, parseInt(limitParam, 10)) : 50;
+    const dataScope = await getAdminDataScope(session);
 
     const memberships = session.role === "admin" ? [] : await prisma.workspaceMember.findMany({ where: { userId: session.id, role: { in: ["admin", "warehouse"] } }, select: { workspaceId: true } });
     const movements = await getStockMovementsForUser(session.id, {
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
       warehouseId,
       sourceType,
       limit,
-    }, session.role === "admin" ? undefined : memberships.map((member) => member.workspaceId), session.role === "admin");
+    }, session.role === "admin" ? undefined : memberships.map((member) => member.workspaceId), dataScope.sharedAdmin, dataScope.ownerIds);
 
     return NextResponse.json(movements);
   } catch (error) {

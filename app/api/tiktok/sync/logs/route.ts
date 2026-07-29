@@ -8,6 +8,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import prisma from "@/prisma/client";
 import { getCache, setCache } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,21 +17,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
+    const cacheScope = marketplaceCacheScope(session);
     const { searchParams } = new URL(request.url);
     const shopId = searchParams.get("shopId");
 
-    const cacheKey = `tiktok:syncLogs:${shopId || "all"}:${userId}`;
+    const cacheKey = `tiktok:syncLogs:${shopId || "all"}:${cacheScope}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 
-    const where: Record<string, unknown> = { userId, channel: "tiktok" };
+    const where: Record<string, unknown> = { userId: { in: ownerIds }, channel: "tiktok" };
     if (shopId) {
       const shop = await prisma.tikTokShop.findFirst({
-        where: { shopId, userId },
+        where: { shopId, userId: { in: ownerIds } },
         select: { id: true },
       });
-      if (shop) where.shopId = shop.id;
+      if (!shop) return NextResponse.json({ error: "Shop not found" }, { status: 404 });
+      where.shopId = shop.id;
     }
 
     const logs = await prisma.syncLog.findMany({

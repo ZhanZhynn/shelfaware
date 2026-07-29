@@ -80,6 +80,7 @@ function withLazadaRetry<T>(fn: () => Promise<T>): Promise<T> {
 export async function syncLazadaProducts(
   sellerId: string,
   userId: string,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -94,7 +95,7 @@ export async function syncLazadaProducts(
   if (!shop) throw new Error(`Lazada seller ${sellerId} not found for user ${userId}`);
 
   return runWithSyncLog(
-    { shopId: shop.id, userId, channel: "lazada", syncType: "products" },
+    { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "products" },
     async () => {
       const sdk = await getLazadaSDK();
       const errors: string[] = [];
@@ -269,6 +270,7 @@ export async function syncLazadaOrders(
   sellerId: string,
   userId: string,
   createdAfter?: string,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -283,7 +285,7 @@ export async function syncLazadaOrders(
   if (!shop) throw new Error(`Lazada seller ${sellerId} not found for user ${userId}`);
 
   return runWithSyncLog(
-    { shopId: shop.id, userId, channel: "lazada", syncType: "orders" },
+    { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "orders" },
     async () => {
       const errors: string[] = [];
       let synced = 0;
@@ -480,6 +482,7 @@ export async function syncLazadaOrders(
 export async function syncLazadaAll(
   sellerId: string,
   userId: string,
+  actorId = userId,
 ): Promise<{
   products: {
     synced: number;
@@ -500,8 +503,8 @@ export async function syncLazadaAll(
 
   try {
     const [products, orders] = await Promise.all([
-      syncLazadaProducts(sellerId, userId),
-      syncLazadaOrders(sellerId, userId),
+      syncLazadaProducts(sellerId, userId, actorId),
+      syncLazadaOrders(sellerId, userId, undefined, actorId),
     ]);
 
     return { products, orders };

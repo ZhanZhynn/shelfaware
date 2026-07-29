@@ -13,6 +13,7 @@ import {
   updateWarehouseBodySchema,
 } from "@/lib/validations/warehouse";
 import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/warehouses
@@ -26,10 +27,13 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = session.id;
+    const dataScope = await getAdminDataScope(session);
     const memberships = session.role === "admin" ? [] : await prisma.workspaceMember.findMany({ where: { userId, role: { in: ["admin", "warehouse"] } }, select: { workspaceId: true } });
 
     const warehouses = await prisma.warehouse.findMany({
-      where: session.role === "admin" ? {} : { OR: [{ userId }, { workspaceId: { in: memberships.map((member) => member.workspaceId) } }] },
+      where: dataScope.sharedAdmin
+        ? { userId: { in: dataScope.ownerIds } }
+        : { OR: [{ userId }, { workspaceId: { in: memberships.map((member) => member.workspaceId) } }] },
     });
 
     return NextResponse.json(warehouses);
@@ -141,15 +145,24 @@ export async function PUT(request: NextRequest) {
 
     const { id, name, address, type, status } = validationResult.data;
 
-    const existing = await prisma.warehouse.findFirst({
-      where: { id, userId },
-    });
+    const existing = await prisma.warehouse.findUnique({ where: { id } });
 
     if (!existing) {
       return NextResponse.json(
         { error: "Warehouse not found or unauthorized" },
         { status: 404 },
       );
+    }
+    if (existing.workspaceId) {
+      await requireWorkspaceRole(session, existing.workspaceId, ["admin", "warehouse"]);
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existing.userId)) {
+        return NextResponse.json(
+          { error: "Warehouse not found or unauthorized" },
+          { status: 404 },
+        );
+      }
     }
 
     const updateData: {
@@ -224,15 +237,24 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const existing = await prisma.warehouse.findFirst({
-      where: { id, userId },
-    });
+    const existing = await prisma.warehouse.findUnique({ where: { id } });
 
     if (!existing) {
       return NextResponse.json(
         { error: "Warehouse not found or unauthorized" },
         { status: 404 },
       );
+    }
+    if (existing.workspaceId) {
+      await requireWorkspaceRole(session, existing.workspaceId, ["admin", "warehouse"]);
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existing.userId)) {
+        return NextResponse.json(
+          { error: "Warehouse not found or unauthorized" },
+          { status: 404 },
+        );
+      }
     }
 
     await prisma.warehouse.delete({

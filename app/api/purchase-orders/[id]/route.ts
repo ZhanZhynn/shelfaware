@@ -9,6 +9,7 @@ import {
 } from "@/prisma/purchase-order";
 import { logger } from "@/lib/logger";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function GET(
   request: NextRequest,
@@ -24,7 +25,8 @@ export async function GET(
     }
 
     const { id } = await params;
-    const authorized = await authorizePurchaseOrder(session, id, ["admin", "sourcer", "warehouse"]);
+    const dataScope = await getAdminDataScope(session);
+    const authorized = await authorizePurchaseOrder(session, id, ["admin", "sourcer", "warehouse"], dataScope.ownerIds);
     const data = authorized && await getPurchaseOrderById(id);
     if (!data) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 });
@@ -55,8 +57,9 @@ export async function PUT(
     }
 
     const { id } = await params;
+    const dataScope = await getAdminDataScope(session);
     const body = await request.json();
-    if (!await authorizePurchaseOrder(session, id, ["admin"])) {
+    if (!await authorizePurchaseOrder(session, id, ["admin"], dataScope.ownerIds)) {
       return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
     }
     const data = await updatePurchaseOrder(session.id, id, body);
@@ -92,7 +95,8 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    if (!await authorizePurchaseOrder(session, id, ["admin"])) {
+    const dataScope = await getAdminDataScope(session);
+    if (!await authorizePurchaseOrder(session, id, ["admin"], dataScope.ownerIds)) {
       return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
     }
     const success = await deletePurchaseOrder(session.id, id);

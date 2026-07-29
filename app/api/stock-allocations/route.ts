@@ -18,6 +18,7 @@ import { getCache, setCache, cacheKeys } from "@/lib/cache";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { createStockAllocationSchema } from "@/lib/validations";
 import type { StockAllocation, WarehouseStockSummary } from "@/types";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 function transform(
   r: Awaited<ReturnType<typeof getStockAllocations>>[number],
@@ -64,14 +65,15 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const summary = searchParams.get("summary") === "true";
     const warehouseId = searchParams.get("warehouseId");
+    const dataScope = await getAdminDataScope(session);
 
     if (summary) {
       // Return warehouse stock summary
-      const cacheKey = cacheKeys.stockAllocation.summary(session.id);
+      const cacheKey = cacheKeys.stockAllocation.summary(dataScope.cacheScope);
       const cached = await getCache<WarehouseStockSummary[]>(cacheKey);
       if (cached) return NextResponse.json(cached);
 
-      const result = await getWarehouseStockSummary(session.id);
+      const result = await getWarehouseStockSummary(dataScope.ownerIds);
       await setCache(cacheKey, result, 300);
       return NextResponse.json(result);
     }
@@ -83,7 +85,10 @@ export async function GET(request: NextRequest) {
     if (warehouseId) {
       // Verify warehouse belongs to user
       const warehouse = await prisma.warehouse.findFirst({
-        where: { id: warehouseId, userId: session.id },
+        where: {
+          id: warehouseId,
+          userId: { in: dataScope.ownerIds },
+        },
       });
       if (!warehouse) {
         return NextResponse.json(
@@ -92,21 +97,27 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      cacheKey = cacheKeys.stockAllocation.byWarehouse(warehouseId);
+      cacheKey = `${cacheKeys.stockAllocation.byWarehouse(warehouseId)}:${dataScope.cacheScope}`;
       const cached = await getCache<StockAllocation[]>(cacheKey);
       if (cached) return NextResponse.json(cached);
 
+      const products = await prisma.product.findMany({
+        where: mergeProductListWhere({
+          userId: { in: dataScope.ownerIds },
+        }),
+        select: { id: true },
+      });
       allocations = await prisma.stockAllocation.findMany({
-        where: { warehouseId },
+        where: { warehouseId, productId: { in: products.map((product) => product.id) } },
         orderBy: { createdAt: "desc" },
       });
     } else {
       // Return all stock allocations
-      cacheKey = cacheKeys.stockAllocation.list(session.id);
+      cacheKey = cacheKeys.stockAllocation.list(dataScope.cacheScope);
       const cached = await getCache<StockAllocation[]>(cacheKey);
       if (cached) return NextResponse.json(cached);
 
-      allocations = await getStockAllocations(session.id);
+      allocations = await getStockAllocations(dataScope.ownerIds);
     }
 
     // Fetch products and warehouses for context
@@ -174,12 +185,13 @@ export async function POST(request: NextRequest) {
     }
 
     const data = validation.data;
+    const dataScope = await getAdminDataScope(session);
 
     // Verify product belongs to user
     const product = await prisma.product.findFirst({
       where: mergeProductListWhere({
         id: data.productId,
-        userId: session.id,
+        userId: { in: dataScope.ownerIds },
       }),
     });
     if (!product) {
@@ -188,7 +200,10 @@ export async function POST(request: NextRequest) {
 
     // Verify warehouse belongs to user
     const warehouse = await prisma.warehouse.findFirst({
-      where: { id: data.warehouseId, userId: session.id },
+      where: {
+        id: data.warehouseId,
+        userId: { in: dataScope.ownerIds },
+      },
     });
     if (!warehouse) {
       return NextResponse.json(

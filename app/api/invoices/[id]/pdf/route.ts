@@ -10,6 +10,7 @@ import { prisma } from "@/prisma/client";
 import { generateInvoicePDF } from "@/lib/pdf";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { resolveTransactionCurrency } from "@/lib/money";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/invoices/[id]/pdf
@@ -32,10 +33,14 @@ export async function GET(
     }
 
     const { id } = await params;
+    const dataScope = await getAdminDataScope(session);
 
     // Fetch invoice with order and items
     const invoice = await prisma.invoice.findFirst({
-      where: { id, userId: session.id },
+      where:
+        session.role === "admin"
+          ? { id, userId: { in: dataScope.ownerIds } }
+          : { id, userId: session.id },
       include: {
         order: {
           include: {

@@ -1,6 +1,7 @@
 import prisma from "@/prisma/client";
 import type { ExecutiveKpiData, KpiMetric } from "@/types/executive-kpi";
 import { getFinancialCurrencyContext } from "@/lib/server/financial-currency";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 
 function kpi(current: number, previous?: number): KpiMetric {
   const change = previous !== undefined ? current - previous : undefined;
@@ -20,6 +21,7 @@ export async function getExecutiveKpiForUser(
   userId: string,
   dateFrom?: string,
   dateTo?: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds">,
 ): Promise<ExecutiveKpiData> {
   const now = new Date();
   const from = dateFrom ? new Date(dateFrom) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -27,6 +29,8 @@ export async function getExecutiveKpiForUser(
   const periodDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
   const prevFrom = new Date(from.getTime() - periodDays * 24 * 60 * 60 * 1000);
   const prevTo = new Date(from);
+  const ownerIds = dataScope?.ownerIds ?? [userId];
+  const ownerScope = { in: ownerIds };
   const currency = await getFinancialCurrencyContext(userId);
 
   const [
@@ -38,11 +42,11 @@ export async function getExecutiveKpiForUser(
     shopeeProducts,
   ] = await Promise.all([
     prisma.order.findMany({
-      where: { userId, createdAt: { gte: from, lte: to } },
+      where: { userId: ownerScope, createdAt: { gte: from, lte: to } },
       select: { id: true, status: true, total: true, shipping: true, currency: true, createdAt: true, shippedAt: true, deliveredAt: true },
     }),
     prisma.shopeeOrder.findMany({
-      where: { userId, shopeeCreatedAt: { gte: from, lte: to } },
+      where: { userId: ownerScope, shopeeCreatedAt: { gte: from, lte: to } },
       select: {
         id: true, orderStatus: true, totalAmount: true, shipByDate: true,
         shippedAt: true, commissionFee: true, serviceFee: true, sellerTxnFee: true,
@@ -50,21 +54,21 @@ export async function getExecutiveKpiForUser(
       },
     }),
     prisma.invoice.findMany({
-      where: { userId, issuedAt: { gte: from, lte: to } },
+      where: { userId: ownerScope, issuedAt: { gte: from, lte: to } },
       select: { status: true, total: true, amountPaid: true, currency: true, issuedAt: true, paidAt: true },
     }),
     prisma.shopeeOrderItem.findMany({
       where: {
-        order: { userId, orderStatus: { not: "CANCELLED" }, shopeeCreatedAt: { gte: from, lte: to } },
+        order: { userId: ownerScope, orderStatus: { not: "CANCELLED" }, shopeeCreatedAt: { gte: from, lte: to } },
       },
       select: { quantity: true, price: true, order: { select: { currency: true, shopeeCreatedAt: true } } },
     }),
     prisma.product.findMany({
-      where: { userId, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
+      where: { userId: ownerScope, OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] },
       select: { id: true, price: true, quantity: true },
     }),
     prisma.shopeeProduct.findMany({
-      where: { userId, status: "NORMAL" },
+      where: { userId: ownerScope, status: "NORMAL" },
       select: { price: true, stock: true },
     }),
   ]);

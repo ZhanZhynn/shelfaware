@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/prisma/client";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
+import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 
 /**
  * GET /api/warehouses/:id
@@ -24,13 +26,21 @@ export async function GET(
 
     const { id } = await params;
     const userId = session.id;
-    const isAdmin = session.role === "admin";
+    const dataScope = await getAdminDataScope(session);
 
     const warehouse = await prisma.warehouse.findFirst({
-      where: isAdmin ? { id } : { id, userId },
+      where: { id },
     });
 
     if (!warehouse) {
+      return NextResponse.json(
+        { error: "Warehouse not found" },
+        { status: 404 },
+      );
+    }
+    if (warehouse.workspaceId) {
+      await requireWorkspaceRole(session, warehouse.workspaceId, ["admin", "warehouse"]);
+    } else if (!dataScope.ownerIds.includes(warehouse.userId)) {
       return NextResponse.json(
         { error: "Warehouse not found" },
         { status: 404 },

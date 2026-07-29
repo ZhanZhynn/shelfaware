@@ -23,6 +23,7 @@ import { sendOrderStatusUpdate } from "@/lib/email/notifications";
 import { createOrderNotification } from "@/lib/notifications/in-app";
 import { createAuditLog } from "@/prisma/audit-log";
 import { resolveTransactionCurrency } from "@/lib/money";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/orders/:id
@@ -53,9 +54,10 @@ export async function GET(
     const isSupplier = session.role === "supplier";
 
     const isAdmin = session.role === "admin";
+    const dataScope = await getAdminDataScope(session);
     let order: Awaited<ReturnType<typeof getOrderById>> | null;
     if (isAdmin) {
-      order = await getOrderByIdForAdmin(id);
+      order = await getOrderByIdForAdmin(id, dataScope.ownerIds);
     } else if (isClient) {
       order = await getOrderByIdForClient(id, userId);
     } else if (isSupplier) {
@@ -233,9 +235,10 @@ export async function PUT(
     // Admin can update any order (including client orders); other roles
     // can only update their own orders or orders linked to their products.
     const isAdmin = session.role === "admin";
+    const dataScope = await getAdminDataScope(session);
     let existingOrder: Awaited<ReturnType<typeof getOrderById>> | null;
     if (isAdmin) {
-      existingOrder = await getOrderByIdForAdmin(id);
+      existingOrder = await getOrderByIdForAdmin(id, dataScope.ownerIds);
     } else {
       existingOrder = await getOrderById(id, userId);
       if (!existingOrder) {
@@ -541,9 +544,10 @@ export async function DELETE(
     // Get existing order before cancellation for notification.
     // Admin can cancel any order; other roles only their own.
     const isAdmin = session.role === "admin";
+    const dataScope = await getAdminDataScope(session);
     let existingOrder: Awaited<ReturnType<typeof getOrderById>> | null;
     if (isAdmin) {
-      existingOrder = await getOrderByIdForAdmin(id);
+      existingOrder = await getOrderByIdForAdmin(id, dataScope.ownerIds);
     } else {
       existingOrder = await getOrderById(id, userId);
       if (!existingOrder) {

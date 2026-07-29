@@ -5,6 +5,7 @@ import {
   getInvoicesForUser,
   getInvoicesForClientId,
 } from "@/lib/server/invoices-data";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * Invoices route — server component.
@@ -19,6 +20,9 @@ export default async function InvoicesRoute() {
   const initialInvoices =
     user.role === "client"
       ? await getInvoicesForClientId(user.id)
-      : await getInvoicesForUser(user.id);
+      : await getInvoicesForUser(
+          user.id,
+          user.role === "admin" ? await getAdminDataScope(user) : undefined,
+        );
   return <InvoicesPage initialInvoices={initialInvoices} />;
 }

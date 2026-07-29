@@ -1,6 +1,7 @@
 import prisma from "@/prisma/client";
 import type { PnlReport, PnlData, PnlMonthlyTrend } from "@/types/pnl";
 import { getFinancialCurrencyContext } from "@/lib/server/financial-currency";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 
 interface PeriodParams {
   from: Date;
@@ -53,20 +54,21 @@ function getComparePeriod(mainPeriod: PeriodParams): PeriodParams {
 }
 
 async function calculatePnl(
-  userId: string,
   from: Date,
   to: Date,
   currency: Awaited<ReturnType<typeof getFinancialCurrencyContext>>,
+  ownerIds: string[],
 ): Promise<PnlData> {
+  const ownerScope = { in: ownerIds };
   const [wmsOrders, shopeeOrders, wmsInvoiceStats, shopeeFeeStats, shopeeReturns, wmsReturns] =
     await Promise.all([
       prisma.order.findMany({
-        where: { userId, status: { not: "cancelled" }, createdAt: { gte: from, lte: to } },
+        where: { userId: ownerScope, status: { not: "cancelled" }, createdAt: { gte: from, lte: to } },
         select: { id: true, total: true, shipping: true, currency: true, createdAt: true },
       }),
       prisma.shopeeOrder.findMany({
         where: {
-          userId,
+          userId: ownerScope,
           orderStatus: { not: "CANCELLED" },
           shopeeCreatedAt: { gte: from, lte: to },
         },
@@ -83,14 +85,14 @@ async function calculatePnl(
       }),
       prisma.orderItem.findMany({
         where: {
-          order: { userId, status: { not: "cancelled" }, createdAt: { gte: from, lte: to } },
+          order: { userId: ownerScope, status: { not: "cancelled" }, createdAt: { gte: from, lte: to } },
         },
         select: { productId: true, quantity: true, price: true },
       }),
       prisma.shopeeOrderItem.findMany({
         where: {
           order: {
-            userId,
+            userId: ownerScope,
             orderStatus: { not: "CANCELLED" },
             shopeeCreatedAt: { gte: from, lte: to },
           },
@@ -99,14 +101,14 @@ async function calculatePnl(
       }),
       prisma.shopeeReturn.findMany({
         where: {
-          userId,
+          userId: ownerScope,
           status: "COMPLETED",
           shopeeCreatedAt: { gte: from, lte: to },
         },
         select: { refundAmount: true, currency: true, shopeeCreatedAt: true },
       }),
       prisma.order.findMany({
-        where: { userId, paymentStatus: "refunded", createdAt: { gte: from, lte: to } },
+        where: { userId: ownerScope, paymentStatus: "refunded", createdAt: { gte: from, lte: to } },
         select: { total: true, currency: true, createdAt: true },
       }),
     ]);
@@ -177,14 +179,16 @@ export async function getPnlForUser(
   period?: string,
   dateFrom?: string,
   dateTo?: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds">,
 ): Promise<PnlReport> {
   const mainPeriod = getPeriod(period, dateFrom, dateTo);
   const comparePeriod = getComparePeriod(mainPeriod);
+  const ownerIds = dataScope?.ownerIds ?? [userId];
   const currency = await getFinancialCurrencyContext(userId);
 
   const [current, previous] = await Promise.all([
-    calculatePnl(userId, mainPeriod.from, mainPeriod.to, currency),
-    calculatePnl(userId, comparePeriod.from, comparePeriod.to, currency),
+    calculatePnl(mainPeriod.from, mainPeriod.to, currency, ownerIds),
+    calculatePnl(comparePeriod.from, comparePeriod.to, currency, ownerIds),
   ]);
 
   const monthlyTrend: PnlMonthlyTrend[] = [];
@@ -200,7 +204,7 @@ export async function getPnlForUser(
 
     if (mStart > mainPeriod.to) break;
 
-    const mPnl = await calculatePnl(userId, mStart, mEnd, currency);
+    const mPnl = await calculatePnl(mStart, mEnd, currency, ownerIds);
     monthlyTrend.push({
       month: mStart.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
       revenue: mPnl.revenue.total,

@@ -100,6 +100,7 @@ function withTikTokRetry<T>(fn: () => Promise<T>): Promise<T> {
 export async function syncTikTokProducts(
   shopId: string,
   userId: string,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -114,7 +115,7 @@ export async function syncTikTokProducts(
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
 
   return runWithSyncLog(
-    { shopId: shop.id, userId, channel: "tiktok", syncType: "products" },
+    { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "products" },
     async () => {
       const errors: string[] = [];
       let synced = 0;
@@ -166,6 +167,7 @@ export async function syncTikTokProducts(
               hasDraft: product.has_draft ?? false,
               mainImageUrl: product.main_image_url || null,
               lastSyncedAt: new Date(),
+              updatedBy: actorId,
             };
 
             if (existing) {
@@ -181,7 +183,7 @@ export async function syncTikTokProducts(
                   userId,
                   tiktokProductId: productId,
                   categoryId: product.category_id || null,
-                  createdBy: userId,
+                  createdBy: actorId,
                   ...productData,
                 },
               });
@@ -207,7 +209,7 @@ const variantData = normalizeSkuData(sku);
                    if (existingVariant) {
                     await prisma.tikTokProductVariant.update({
                       where: { id: existingVariant.id },
-                      data: variantData,
+                      data: { ...variantData, updatedBy: actorId },
                     });
                   } else {
                     await prisma.tikTokProductVariant.create({
@@ -216,7 +218,7 @@ const variantData = normalizeSkuData(sku);
                         shopId: shop.id,
                         userId,
                         tiktokSkuId: sku.id,
-                        createdBy: userId,
+                        createdBy: actorId,
                         ...variantData,
                       },
                     });
@@ -285,7 +287,7 @@ const variantData = normalizeSkuData(sku);
           if (detailImageUrl && !dbProduct.mainImageUrl) {
             await prisma.tikTokProduct.update({
               where: { id: dbProduct.id },
-              data: { mainImageUrl: detailImageUrl },
+                data: { mainImageUrl: detailImageUrl, updatedBy: actorId },
             });
           }
 
@@ -301,7 +303,7 @@ const variantData = normalizeSkuData(sku);
             if (existingVariant) {
               await prisma.tikTokProductVariant.update({
                 where: { id: existingVariant.id },
-                data: variantData,
+                data: { ...variantData, updatedBy: actorId },
               });
               detailUpdated++;
             } else {
@@ -311,7 +313,7 @@ const variantData = normalizeSkuData(sku);
                   shopId: shop.id,
                   userId,
                   tiktokSkuId: sku.id,
-                  createdBy: userId,
+                  createdBy: actorId,
                   ...variantData,
                 },
               });
@@ -354,6 +356,7 @@ export async function syncTikTokOrders(
   shopId: string,
   userId: string,
   createdAfter?: number,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -368,7 +371,7 @@ export async function syncTikTokOrders(
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
 
   return runWithSyncLog(
-    { shopId: shop.id, userId, channel: "tiktok", syncType: "orders" },
+    { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "orders" },
     async () => {
       const errors: string[] = [];
       let synced = 0;
@@ -577,6 +580,7 @@ export async function syncTikTokOrders(
 export async function syncTikTokAll(
   shopId: string,
   userId: string,
+  actorId = userId,
 ): Promise<{
   products: { synced: number; created: number; updated: number; errors: string[] };
   orders: { synced: number; created: number; updated: number; errors: string[] };
@@ -587,8 +591,8 @@ export async function syncTikTokAll(
 
   try {
     const [products, orders] = await Promise.all([
-      syncTikTokProducts(shopId, userId),
-      syncTikTokOrders(shopId, userId),
+      syncTikTokProducts(shopId, userId, actorId),
+      syncTikTokOrders(shopId, userId, undefined, actorId),
     ]);
 
     return { products, orders };

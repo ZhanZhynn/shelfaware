@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { getCache, setCache } from "@/lib/cache/cache-utils";
+import { cacheKeys, getCache, setCache } from "@/lib/cache/cache-utils";
 import { getAbcAnalysisForUser } from "@/lib/server/abc-analysis-data";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 import { logger } from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
@@ -20,11 +21,21 @@ export async function GET(request: NextRequest) {
     const dateTo = searchParams.get("dateTo") || undefined;
     const channel = searchParams.get("channel") || undefined;
 
-    const cacheKey = `abc-analysis:${session.id}:${dateFrom || "all"}:${dateTo || "all"}:${channel || "all"}`;
+    const dataScope = await getAdminDataScope(session);
+    const cacheKey = cacheKeys.abcAnalysis.report(
+      dataScope.cacheScope,
+      `${dateFrom || "all"}:${dateTo || "all"}:${channel || "all"}`,
+    );
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 
-    const data = await getAbcAnalysisForUser(session.id, dateFrom, dateTo, channel);
+    const data = await getAbcAnalysisForUser(
+      session.id,
+      dateFrom,
+      dateTo,
+      channel,
+      dataScope,
+    );
 
     await setCache(cacheKey, data, 300);
 

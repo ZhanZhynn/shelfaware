@@ -8,6 +8,7 @@ import { getCache, setCache, cacheKeys } from "@/lib/cache";
 import { getInvoicesByUser, getInvoicesByClientId, getInvoicesByOrderIds } from "@/prisma/invoice";
 import { getOrdersContainingProductOwnerProducts } from "@/prisma/order";
 import { prisma } from "@/prisma/client";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 
 /** Invoice shape returned by invoices API GET (dates as ISO strings) */
 export type InvoiceForPage = {
@@ -53,16 +54,23 @@ export type InvoiceForPage = {
  * Uses the same cache key as GET /api/invoices with empty filters so Redis is shared.
  */
 export async function getInvoicesForUser(
-  userId: string
+  userId: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds" | "cacheScope">,
 ): Promise<InvoiceForPage[]> {
   const filters = {};
-  const cacheKey = cacheKeys.invoices.list(filters);
+  const cacheKey = cacheKeys.invoices.list(
+    { ...filters, userId: dataScope?.cacheScope ?? userId },
+  );
   const cached = await getCache<InvoiceForPage[]>(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const invoices = await getInvoicesByUser(userId, undefined);
+  const invoices = await getInvoicesByUser(
+    userId,
+    undefined,
+    dataScope?.ownerIds,
+  );
 
   // Resolve client names for admin display
   const clientIds = [...new Set(invoices.map((inv) => inv.clientId).filter(Boolean))] as string[];

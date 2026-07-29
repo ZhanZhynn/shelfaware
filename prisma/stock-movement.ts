@@ -20,8 +20,18 @@ export async function getStockMovementsForUser(
   filters?: { productId?: string; warehouseId?: string; sourceType?: string; limit?: number },
   workspaceIds?: string[],
   globalAdmin = false,
+  ownerIds?: string[],
 ): Promise<StockMovementRecord[]> {
-  const where: Record<string, unknown> = globalAdmin ? {} : workspaceIds ? { OR: [{ receivedById: userId }, { workspaceId: { in: workspaceIds } }] } : { receivedById: userId };
+  const where: Record<string, unknown> = globalAdmin
+    ? {
+        OR: [
+          { receivedById: { in: ownerIds ?? [userId] }, workspaceId: null },
+          { workspaceId: { not: null } },
+        ],
+      }
+    : workspaceIds
+      ? { OR: [{ receivedById: userId }, { workspaceId: { in: workspaceIds } }] }
+      : { receivedById: userId };
   if (filters?.productId) where.productId = filters.productId;
   if (filters?.warehouseId) where.warehouseId = filters.warehouseId;
   if (filters?.sourceType) where.sourceType = filters.sourceType;

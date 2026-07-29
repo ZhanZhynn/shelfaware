@@ -275,6 +275,7 @@ export async function importExcelOrders(
   orders: Map<string, ExcelOrderRow[]>,
   shopId: string,
   userId: string,
+  actorId = userId,
 ): Promise<ExcelImportResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -296,7 +297,7 @@ export async function importExcelOrders(
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
       shopId: shop.id,
-      userId,
+      userId: actorId,
       syncType: "orders",
       status: "running",
       triggeredBy: "excel_import",
@@ -371,6 +372,7 @@ export async function importExcelOrders(
           completedAt,
           lastSyncedAt: new Date(),
           updatedAt: new Date(),
+          updatedBy: actorId,
           commissionFee,
           serviceFee,
           sellerTxnFee,
@@ -389,7 +391,7 @@ export async function importExcelOrders(
           updated++;
         } else {
           orderRecord = await prisma.shopeeOrder.create({
-            data: { ...orderData, createdBy: userId },
+            data: { ...orderData, createdBy: actorId },
           });
           created++;
         }

@@ -7,6 +7,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
 import { completeSourcingSla } from "@/lib/sourcing/sla";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 const json = (value: unknown) =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -25,7 +26,8 @@ export async function POST(
     }
 
     const { id } = await params;
-    if (!await authorizePurchaseOrder(session, id, ["admin", "sourcer"])) {
+    const dataScope = await getAdminDataScope(session);
+    if (!await authorizePurchaseOrder(session, id, ["admin", "sourcer"], dataScope.ownerIds)) {
       return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
     }
 
@@ -124,7 +126,8 @@ export async function PUT(
     }
 
     const { id } = await params;
-    if (!await authorizePurchaseOrder(session, id, ["admin", "sourcer"])) {
+    const dataScope = await getAdminDataScope(session);
+    if (!await authorizePurchaseOrder(session, id, ["admin", "sourcer"], dataScope.ownerIds)) {
       return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
     }
 
@@ -213,7 +216,8 @@ export async function PATCH(
     }
 
     const { id } = await params;
-    if (!await authorizePurchaseOrder(session, id, ["admin", "sourcer"])) {
+    const dataScope = await getAdminDataScope(session);
+    if (!await authorizePurchaseOrder(session, id, ["admin", "sourcer"], dataScope.ownerIds)) {
       return NextResponse.json({ error: "Purchase order not found or unauthorized" }, { status: 404 });
     }
 

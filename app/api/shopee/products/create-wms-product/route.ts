@@ -6,6 +6,7 @@ import { createAuditLog } from "@/prisma/audit-log";
 import { generateAndUploadQRCode } from "@/lib/imagekit";
 import { z } from "zod";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 const createWmsProductSchema = z.object({
   shopeeProductId: z.string().min(1, "Shopee product ID is required"),
@@ -193,13 +194,14 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const body = await request.json();
 
     // Check if this is a bulk request
     const isBulkRequest = Array.isArray(body.shopeeProductIds);
 
     if (isBulkRequest) {
-      return handleBulkCreate(body, userId);
+      return handleBulkCreate(body, userId, ownerIds);
     }
 
     // Single product create
@@ -228,7 +230,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch Shopee product (verify ownership)
     const shopeeProduct = await prisma.shopeeProduct.findFirst({
-      where: { id: shopeeProductId, userId },
+      where: { id: shopeeProductId, userId: { in: ownerIds } },
       include: { variants: true },
     });
 
@@ -281,7 +283,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleBulkCreate(body: unknown, userId: string) {
+async function handleBulkCreate(body: unknown, userId: string, ownerIds: string[]) {
   const validationResult = bulkCreateSchema.safeParse(body);
   if (!validationResult.success) {
     return NextResponse.json(
@@ -307,7 +309,7 @@ async function handleBulkCreate(body: unknown, userId: string) {
 
   // Fetch all Shopee products (verify ownership)
   const shopeeProducts = await prisma.shopeeProduct.findMany({
-    where: { id: { in: shopeeProductIds }, userId },
+    where: { id: { in: shopeeProductIds }, userId: { in: ownerIds } },
     include: { variants: true },
   });
 
@@ -360,6 +362,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const ownerIds = await marketplaceOwnerIds(session);
     const { searchParams } = new URL(request.url);
     const shopeeProductIds = searchParams.get("ids")?.split(",").filter(Boolean) || [];
 
@@ -369,7 +372,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch all Shopee products with variants
     const shopeeProducts = await prisma.shopeeProduct.findMany({
-      where: { id: { in: shopeeProductIds } },
+      where: { id: { in: shopeeProductIds }, userId: { in: ownerIds } },
       include: { variants: { select: { id: true } } },
     });
 

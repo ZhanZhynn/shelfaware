@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(
   request: NextRequest,
@@ -19,10 +20,10 @@ export async function GET(
     }
 
     const { id } = await params;
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
 
     const product = await prisma.tikTokProduct.findFirst({
-      where: { id, userId },
+      where: { id, userId: { in: ownerIds } },
       include: {
         variants: true,
         shop: {

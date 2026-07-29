@@ -22,6 +22,7 @@ import { prisma } from "@/prisma/client";
 import { createAuditLog } from "@/prisma/audit-log";
 import type { CreateOrderInput } from "@/types";
 import { resolveTransactionCurrency } from "@/lib/money";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/orders
@@ -47,6 +48,7 @@ export async function GET(request: NextRequest) {
     const userId = session.id;
     const isClient = session.role === "client";
     const isSupplier = session.role === "supplier";
+    const dataScope = await getAdminDataScope(session);
     const supplier =
       isSupplier ? await getSupplierByUserId(userId) : null;
     if (isSupplier && !supplier) {
@@ -57,7 +59,9 @@ export async function GET(request: NextRequest) {
       ? cacheKeys.orders.list({ userId, byClient: true })
       : isSupplier
         ? cacheKeys.orders.list({ supplierId: supplier!.id })
-        : cacheKeys.orders.list({ userId });
+        : cacheKeys.orders.list({
+            userId: dataScope.sharedAdmin ? dataScope.cacheScope : userId,
+          });
 
     // Check cache first
     const cachedOrders = await getCache<unknown[]>(cacheKey);
@@ -70,7 +74,21 @@ export async function GET(request: NextRequest) {
       ? await getOrdersByClientId(userId)
       : isSupplier
         ? await getOrdersContainingSupplierProducts(supplier!.id)
-        : await getOrdersByUser(userId);
+        : dataScope.sharedAdmin
+          ? await prisma.order.findMany({
+              where: { userId: { in: dataScope.ownerIds } },
+              include: {
+                items: {
+                  include: {
+                    product: {
+                      select: { id: true, name: true, sku: true, price: true },
+                    },
+                  },
+                },
+              },
+              orderBy: { createdAt: "desc" },
+            })
+          : await getOrdersByUser(userId);
 
     const userIds = [...new Set(orders.map((o) => o.userId))];
     const users =

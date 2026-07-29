@@ -8,6 +8,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { getCache, setCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(
   request: NextRequest,
@@ -20,15 +21,16 @@ export async function GET(
     }
 
     const { id } = await params;
+    const ownerIds = await marketplaceOwnerIds(session);
 
-    const cacheKey = cacheKeys.shopee.productDetail(id);
+    const cacheKey = `${cacheKeys.shopee.productDetail(id)}:${marketplaceCacheScope(session)}`;
     const cached = await getCache(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
     }
 
     const product = await prisma.shopeeProduct.findFirst({
-      where: { id, userId: session.id },
+      where: { id, userId: { in: ownerIds } },
     });
 
     if (!product) {

@@ -11,6 +11,7 @@ import { prisma } from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const body = await request.json();
 
     const validationResult = shopeeSyncBodySchema.safeParse(body);
@@ -36,10 +38,9 @@ export async function POST(request: NextRequest) {
 
     const { shopId, syncType, daysBack } = validationResult.data;
 
-    // Ownership check — verify the user owns this shop
     const shop = await prisma.shopeeShop.findFirst({
-      where: { shopId, userId },
-      select: { id: true },
+      where: { shopId, userId: { in: ownerIds } },
+      select: { id: true, userId: true },
     });
 
     if (!shop) {
@@ -73,20 +74,20 @@ export async function POST(request: NextRequest) {
 
     switch (syncType) {
       case "products":
-        result = { products: await syncShopeeProducts(shopId, userId) };
+        result = { products: await syncShopeeProducts(shopId, shop.userId, userId) };
         break;
       case "orders":
-        result = { orders: await syncShopeeOrders(shopId, userId) };
+        result = { orders: await syncShopeeOrders(shopId, shop.userId, undefined, undefined, userId) };
         break;
       case "returns":
-        result = { returns: await syncShopeeReturns(shopId, userId) };
+        result = { returns: await syncShopeeReturns(shopId, shop.userId, undefined, undefined, userId) };
         break;
       case "ads":
-        result = { ads: await syncShopeeAds(shopId, userId, daysBack) };
+        result = { ads: await syncShopeeAds(shopId, shop.userId, daysBack, userId) };
         break;
       case "all":
       default:
-        result = await syncShopeeAll(shopId, userId);
+        result = await syncShopeeAll(shopId, shop.userId, userId);
         break;
     }
 

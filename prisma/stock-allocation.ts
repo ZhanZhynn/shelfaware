@@ -13,10 +13,10 @@ import type {
 /**
  * Get all stock allocations for a user's products
  */
-export async function getStockAllocations(userId: string) {
+export async function getStockAllocations(ownerIds: string[]) {
   // Get all products for this user
   const products = await prisma.product.findMany({
-    where: mergeProductListWhere({ userId }),
+    where: mergeProductListWhere({ userId: { in: ownerIds } }),
     select: { id: true },
   });
   const productIds = products.map((p) => p.id);
@@ -280,10 +280,10 @@ export async function cancelStockTransfer(id: string) {
 /**
  * Get warehouse stock summary (for analytics)
  */
-export async function getWarehouseStockSummary(userId: string) {
+export async function getWarehouseStockSummary(ownerIds: string[]) {
   // Get all products for this user
   const products = await prisma.product.findMany({
-    where: mergeProductListWhere({ userId }),
+    where: mergeProductListWhere({ userId: { in: ownerIds } }),
     select: { id: true, price: true },
   });
   const productIds = products.map((p) => p.id);
@@ -291,7 +291,7 @@ export async function getWarehouseStockSummary(userId: string) {
 
   // Get all warehouses
   const warehouses = await prisma.warehouse.findMany({
-    where: { userId },
+    where: { userId: { in: ownerIds } },
     select: { id: true, name: true },
   });
 

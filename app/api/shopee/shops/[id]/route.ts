@@ -9,6 +9,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(
   request: NextRequest,
@@ -21,9 +22,10 @@ export async function GET(
     }
 
     const { id } = await params;
+    const ownerIds = await marketplaceOwnerIds(session);
 
     const shop = await prisma.shopeeShop.findFirst({
-      where: { id, userId: session.id },
+      where: { id, userId: { in: ownerIds } },
       select: {
         id: true,
         shopId: true,
@@ -62,9 +64,10 @@ export async function DELETE(
     }
 
     const { id } = await params;
+    const ownerIds = await marketplaceOwnerIds(session);
 
     const shop = await prisma.shopeeShop.findFirst({
-      where: { id, userId: session.id },
+      where: { id, userId: { in: ownerIds } },
     });
 
     if (!shop) {

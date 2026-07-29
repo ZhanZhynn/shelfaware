@@ -10,6 +10,7 @@ import { prisma } from "@/prisma/client";
 import { getCache, setCache } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const { searchParams } = new URL(request.url);
     const shopId = searchParams.get("shopId");
     const returnId = searchParams.get("id");
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, Number(searchParams.get("page") || 1));
     const limit = Math.min(100, Math.max(1, Number(searchParams.get("limit") || 20)));
 
-    const shopWhere: Record<string, unknown> = { userId };
+    const shopWhere: Record<string, unknown> = { userId: { in: ownerIds } };
     if (shopId) shopWhere.shopId = shopId;
 
     const shops = await prisma.shopeeShop.findMany({
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     // Single return detail
     if (returnId) {
-      const cacheKey = `shopee:return:${returnId}`;
+      const cacheKey = `shopee:return:${marketplaceCacheScope(session)}:${returnId}`;
       const cached = await getCache(cacheKey);
       if (cached) return NextResponse.json(cached);
 
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = { shopId: { in: shopIds } };
     if (status) where.status = status;
 
-    const cacheKey = `shopee:returns:${shopId || "all"}:${status || "all"}:${page}:${limit}`;
+    const cacheKey = `shopee:returns:${marketplaceCacheScope(session)}:${shopId || "all"}:${status || "all"}:${page}:${limit}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 

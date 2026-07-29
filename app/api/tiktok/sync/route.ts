@@ -11,6 +11,7 @@ import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { invalidateCache } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const body = await request.json();
 
     const validationResult = tiktokSyncBodySchema.safeParse(body);
@@ -35,10 +37,9 @@ export async function POST(request: NextRequest) {
 
     const { shopId, syncType } = validationResult.data;
 
-    // Ownership check
     const shop = await prisma.tikTokShop.findFirst({
-      where: { shopId, userId },
-      select: { id: true },
+      where: { shopId, userId: { in: ownerIds } },
+      select: { id: true, userId: true },
     });
 
     if (!shop) {
@@ -81,14 +82,14 @@ export async function POST(request: NextRequest) {
 
     switch (syncType) {
       case "products":
-        result = { products: await syncTikTokProducts(shopId, userId) };
+        result = { products: await syncTikTokProducts(shopId, shop.userId, userId) };
         break;
       case "orders":
-        result = { orders: await syncTikTokOrders(shopId, userId) };
+        result = { orders: await syncTikTokOrders(shopId, shop.userId, undefined, userId) };
         break;
       case "all":
       default:
-        result = await syncTikTokAll(shopId, userId);
+        result = await syncTikTokAll(shopId, shop.userId, userId);
         break;
     }
 

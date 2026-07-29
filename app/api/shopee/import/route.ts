@@ -11,6 +11,7 @@ import { prisma } from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
 
     // Parse multipart form data
     const formData = await request.formData();
@@ -57,8 +59,8 @@ export async function POST(request: NextRequest) {
 
     // Ownership check — verify the user owns this shop
     const shop = await prisma.shopeeShop.findFirst({
-      where: { id: shopId, userId },
-      select: { id: true, shopId: true, shopName: true },
+      where: { id: shopId, userId: { in: ownerIds } },
+      select: { id: true, shopId: true, shopName: true, userId: true },
     });
 
     if (!shop) {
@@ -87,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Import orders into database
-    const result = await importExcelOrders(orders, shopId, userId);
+    const result = await importExcelOrders(orders, shopId, shop.userId, userId);
 
     // Invalidate cache after import
     await invalidateCache(cacheKeys.shopee.pattern);

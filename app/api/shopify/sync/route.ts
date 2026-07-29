@@ -12,6 +12,7 @@ import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { invalidateCache } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const body = await request.json();
 
     const validationResult = shopifySyncBodySchema.safeParse(body);
@@ -36,10 +38,9 @@ export async function POST(request: NextRequest) {
 
     const { shopId, syncType, daysBack } = validationResult.data;
 
-    // Ownership check
     const shop = await prisma.shopifyShop.findFirst({
-      where: { id: shopId, userId },
-      select: { id: true, shopDomain: true },
+      where: { id: shopId, userId: { in: ownerIds } },
+      select: { id: true, userId: true, shopDomain: true },
     });
 
     if (!shop) {
@@ -81,14 +82,14 @@ export async function POST(request: NextRequest) {
 
     switch (syncType) {
       case "products":
-        result = { products: await syncShopifyProducts(shopId, userId) };
+        result = { products: await syncShopifyProducts(shopId, shop.userId, userId) };
         break;
       case "orders":
-        result = { orders: await syncShopifyOrders(shopId, userId, daysBack) };
+        result = { orders: await syncShopifyOrders(shopId, shop.userId, daysBack, userId) };
         break;
       case "all":
       default:
-        result = await syncShopifyAll(shopId, userId);
+        result = await syncShopifyAll(shopId, shop.userId, userId);
         break;
     }
 

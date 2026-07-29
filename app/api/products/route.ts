@@ -31,6 +31,8 @@ import {
   updateProductBodySchema,
 } from "@/lib/validations/product";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
+import type { Prisma } from "@prisma/client";
 // NOTE: Performance tracking wrapper is available but deferred until after all features are implemented
 // import { withPerformanceTracking } from "@/lib/api/performance-wrapper";
 
@@ -60,8 +62,9 @@ export async function GET(request: NextRequest) {
 
     const workspaceId = new URL(request.url).searchParams.get("workspaceId") || undefined;
     const isSupplier = !workspaceId && session.role === "supplier";
+    const dataScope = workspaceId ? null : await getAdminDataScope(session);
     let cacheKey: string;
-    let productWhere: { userId: string } | { supplierId: string } | { workspaceId: string };
+    let productWhere: Prisma.ProductWhereInput;
 
     if (workspaceId) {
       await requireWorkspaceRole(session, workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
@@ -79,8 +82,10 @@ export async function GET(request: NextRequest) {
       });
       productWhere = { supplierId: supplier.id };
     } else {
-      cacheKey = cacheKeys.products.list({ userId: session.id });
-      productWhere = { userId: session.id };
+      cacheKey = cacheKeys.products.list({ scope: dataScope!.cacheScope });
+      productWhere = dataScope!.sharedAdmin
+        ? { userId: { in: dataScope!.ownerIds } }
+        : { userId: session.id };
     }
 
     // Try to get from cache first
@@ -226,7 +231,12 @@ export async function POST(request: NextRequest) {
     } = validationResult.data;
 
     if (workspaceId) await requireWorkspaceRole(session, workspaceId, ["admin", "warehouse"]);
-    const ownership = workspaceId ? { workspaceId } : { userId };
+    const dataScope = workspaceId ? null : await getAdminDataScope(session);
+    const ownership = workspaceId
+      ? { workspaceId }
+      : dataScope!.sharedAdmin
+        ? { userId: { in: dataScope!.ownerIds } }
+        : { userId };
     const skuScopeId = workspaceId ?? userId;
 
     // Use the same non-null compound scope as the database index.
@@ -426,8 +436,11 @@ export async function PUT(request: NextRequest) {
     }
     if (existingProduct.workspaceId) {
       await requireWorkspaceRole(session, existingProduct.workspaceId, ["admin", "warehouse"]);
-    } else if (existingProduct.userId !== userId && session.role !== "admin") {
-      return NextResponse.json({ error: "Product not found or unauthorized" }, { status: 404 });
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existingProduct.userId)) {
+        return NextResponse.json({ error: "Product not found or unauthorized" }, { status: 404 });
+      }
     }
 
     // Check if SKU is being changed and if new SKU already exists
@@ -444,7 +457,12 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const ownership = existingProduct.workspaceId ? { workspaceId: existingProduct.workspaceId } : { userId: existingProduct.userId };
+    const dataScope = existingProduct.workspaceId ? null : await getAdminDataScope(session);
+    const ownership = existingProduct.workspaceId
+      ? { workspaceId: existingProduct.workspaceId }
+      : dataScope!.sharedAdmin
+        ? { userId: { in: dataScope!.ownerIds } }
+        : { userId: existingProduct.userId };
     if (categoryId || supplierId) {
       const [category, supplier] = await Promise.all([
         categoryId ? prisma.category.findFirst({ where: { id: categoryId, ...ownership, status: true }, select: { id: true } }) : true,
@@ -674,7 +692,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const existingProduct = await prisma.product.findFirst({
-      where: mergeProductListWhere({ id, userId }),
+      where: mergeProductListWhere({ id }),
     });
 
     if (!existingProduct) {
@@ -682,6 +700,17 @@ export async function DELETE(request: NextRequest) {
         { error: "Product not found, already archived, or unauthorized" },
         { status: 404 },
       );
+    }
+    if (existingProduct.workspaceId) {
+      await requireWorkspaceRole(session, existingProduct.workspaceId, ["admin", "warehouse"]);
+    } else {
+      const dataScope = await getAdminDataScope(session);
+      if (!dataScope.ownerIds.includes(existingProduct.userId)) {
+        return NextResponse.json(
+          { error: "Product not found, already archived, or unauthorized" },
+          { status: 404 },
+        );
+      }
     }
 
     const orderItems = await prisma.orderItem.findMany({

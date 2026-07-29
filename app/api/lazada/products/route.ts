@@ -9,6 +9,7 @@ import prisma from "@/prisma/client";
 import { cacheKeys, getCache, setCache } from "@/lib/cache";
 import { lazadaProductListQuerySchema } from "@/lib/validations/lazada";
 import { logger } from "@/lib/logger";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,7 +18,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
+    const cacheScope = marketplaceCacheScope(session);
     const { searchParams } = new URL(request.url);
 
     const queryResult = lazadaProductListQuerySchema.safeParse({
@@ -39,13 +41,14 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     // Build filter
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId: { in: ownerIds } };
     if (sellerId) {
       const shop = await prisma.lazadaShop.findFirst({
-        where: { sellerId, userId },
+        where: { sellerId, userId: { in: ownerIds } },
         select: { id: true },
       });
-      if (shop) where.shopId = shop.id;
+      if (!shop) return NextResponse.json({ error: "Seller not found" }, { status: 404 });
+      where.shopId = shop.id;
     }
     if (search) {
       where.OR = [
@@ -55,7 +58,7 @@ export async function GET(request: NextRequest) {
     }
     if (status) where.status = status;
 
-    const cacheKey = cacheKeys.lazada.products(sellerId || "all", { page, limit, search, status });
+    const cacheKey = `${cacheKeys.lazada.products(sellerId || "all", { page, limit, search, status })}:${cacheScope}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 

@@ -11,6 +11,7 @@ import { getCache, setCache, invalidateCache, cacheKeys } from "@/lib/cache";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/suppliers/:id
@@ -40,9 +41,17 @@ export async function GET(
     const userId = session.id;
     const isAdmin = session.role === "admin";
     const isClient = session.role === "client";
+    const dataScope = await getAdminDataScope(session);
+    const accessSupplier = await prisma.supplier.findUnique({
+      where: { id },
+      select: { userId: true, workspaceId: true },
+    });
+    if (!accessSupplier || (isAdmin && !accessSupplier.workspaceId && !dataScope.ownerIds.includes(accessSupplier.userId))) {
+      return NextResponse.json({ error: "Supplier not found" }, { status: 404 });
+    }
 
     // Check cache first
-    const cacheKey = cacheKeys.suppliers.detail(id);
+    const cacheKey = `${cacheKeys.suppliers.detail(id)}:${dataScope.cacheScope}`;
     const cachedSupplier = await getCache<unknown>(cacheKey);
     if (cachedSupplier) {
       logger.info(`✅ Cache hit for supplier: ${cacheKey}`);
@@ -55,7 +64,13 @@ export async function GET(
     // Fetch supplier: admin any by id; client any by id; else own or global demo
     let supplier: Awaited<ReturnType<typeof getSupplierById>> | null;
     const demoUserId = await getDemoSupplierUserId();
-    if (isAdmin || isClient) {
+    if (isAdmin) {
+      supplier = await prisma.supplier.findFirst({
+        where: accessSupplier.workspaceId
+          ? { id }
+          : { id, userId: { in: dataScope.ownerIds } },
+      });
+    } else if (isClient) {
       supplier = await prisma.supplier.findUnique({ where: { id } });
     } else {
       supplier = await getSupplierById(id, userId);
@@ -77,7 +92,13 @@ export async function GET(
     const products = await prisma.product.findMany({
       where: mergeProductListWhere({
         supplierId: supplier.id,
-        ...(isClient || isDemoSupplier ? {} : { userId }), // Client/demo: all products; admin: only user's products
+        ...(isClient || isDemoSupplier
+          ? {}
+          : accessSupplier.workspaceId
+            ? { workspaceId: accessSupplier.workspaceId }
+            : isAdmin
+            ? { userId: { in: dataScope.ownerIds } }
+            : { userId }),
       }),
       include: {
         orderItems: {

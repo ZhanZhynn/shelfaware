@@ -4,6 +4,7 @@ import BusinessInsightPage from "@/components/Pages/BusinessInsightPage";
 import { getProductsForUser } from "@/lib/server/home-data";
 import { getOrdersForUser } from "@/lib/server/orders-data";
 import { getCombinedInsightsForUser } from "@/lib/server/combined-orders-data";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * Business Insights route — server component.
@@ -28,11 +29,12 @@ export default async function BusinessInsightsRoute() {
             : "/",
     );
   }
+  const dataScope = await getAdminDataScope(user);
   const [initialProducts, initialOrders, initialCombinedInsights] =
     await Promise.all([
-      getProductsForUser(user.id),
-      getOrdersForUser(user.id),
-      getCombinedInsightsForUser(user.id),
+      getProductsForUser(user.id, dataScope),
+      getOrdersForUser(user.id, dataScope),
+      getCombinedInsightsForUser(user.id, dataScope),
     ]);
   return (
     <BusinessInsightPage

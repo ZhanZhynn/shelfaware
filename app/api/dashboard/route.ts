@@ -9,6 +9,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { logger } from "@/lib/logger";
 import { getDashboardForAdmin } from "@/lib/server/dashboard-data";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,7 +24,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const stats = await getDashboardForAdmin(session.id);
+    const dataScope = await getAdminDataScope(session);
+    const stats = await getDashboardForAdmin(session.id, dataScope);
     return NextResponse.json(stats);
   } catch (error) {
     logger.error("Error fetching dashboard:", error);

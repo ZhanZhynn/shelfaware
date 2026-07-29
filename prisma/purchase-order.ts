@@ -8,6 +8,7 @@ export async function authorizePurchaseOrder(
   actor: PurchaseOrderActor,
   id: string,
   allowedWorkspaceRoles: readonly ("admin" | "sourcer" | "warehouse")[],
+  ownerIds: string[] = [actor.id],
 ) {
   const order = await prisma.purchaseOrder.findUnique({ where: { id }, select: { id: true, userId: true, workspaceId: true } });
   if (!order) return null;
@@ -15,14 +16,29 @@ export async function authorizePurchaseOrder(
     await requireWorkspaceRole(actor, order.workspaceId, allowedWorkspaceRoles);
     return order;
   }
-  return order.userId === actor.id || actor.role === "admin" ? order : null;
+  return ownerIds.includes(order.userId) ? order : null;
 }
 
 export async function getPurchaseOrdersForUser(
   userId: string,
-  filters?: { status?: string; supplierId?: string; workspaceIds?: string[]; globalAdmin?: boolean },
+  filters?: {
+    status?: string;
+    supplierId?: string;
+    workspaceIds?: string[];
+    globalAdmin?: boolean;
+    ownerIds?: string[];
+  },
 ) {
-  const where: Record<string, unknown> = filters?.globalAdmin ? {} : filters?.workspaceIds ? { OR: [{ userId }, { workspaceId: { in: filters.workspaceIds } }] } : { userId };
+  const where: Record<string, unknown> = filters?.globalAdmin
+    ? {
+        OR: [
+          { userId: { in: filters.ownerIds ?? [userId] }, workspaceId: null },
+          { workspaceId: { not: null } },
+        ],
+      }
+    : filters?.workspaceIds
+      ? { OR: [{ userId }, { workspaceId: { in: filters.workspaceIds } }] }
+      : { userId };
   if (filters?.status) where.status = filters.status;
   if (filters?.supplierId) where.supplierId = filters.supplierId;
 

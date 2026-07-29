@@ -8,6 +8,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import prisma from "@/prisma/client";
 import { shopifyProductListQuerySchema } from "@/lib/validations/shopify";
 import { logger } from "@/lib/logger";
+import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const { searchParams } = new URL(request.url);
 
     const queryParams = {
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
     // Verify shop ownership if shopId provided
     if (shopId) {
       const shop = await prisma.shopifyShop.findFirst({
-        where: { id: shopId, userId },
+        where: { id: shopId, userId: { in: ownerIds } },
         select: { id: true },
       });
       if (!shop) {
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const where: Record<string, unknown> = { userId };
+    const where: Record<string, unknown> = { userId: { in: ownerIds } };
     if (shopId) where.shopId = shopId;
     if (status) where.status = status;
     if (search) {

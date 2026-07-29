@@ -9,6 +9,7 @@ import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 import { allocateLandedCost } from "@/lib/sourcing/landed-cost";
 import { completeSourcingSla } from "@/lib/sourcing/sla";
 import type { ReceiveResult, ReceivedItemResult } from "@/types/receiving";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function POST(request: NextRequest) {
   const limited = await withRateLimit(request, defaultRateLimits.strict);
@@ -16,6 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSessionFromRequest(request);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const dataScope = await getAdminDataScope(user);
     const validation = receiveBodySchema.safeParse(await request.json());
     if (!validation.success) return NextResponse.json({ error: "Invalid request", details: validation.error.flatten() }, { status: 400 });
     const { warehouseId, poId, items, notes, actualFreightMyr, actualDutyMyr, actualTaxMyr, actualOtherCostMyr } = validation.data;
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest) {
         if (warehouse.workspaceId || (po && po.userId !== warehouse.userId)) {
           throw new SourcingAccessError("Legacy purchase order and warehouse must have the same owner", 400);
         }
-        if (warehouse.userId !== user.id && user.role !== "admin") throw new SourcingAccessError("Warehouse is not available to this user");
+        if (!dataScope.ownerIds.includes(warehouse.userId)) throw new SourcingAccessError("Warehouse is not available to this user");
       }
       if (po && items.some((item) => !item.poItemId)) throw new SourcingAccessError("Each PO receipt line requires a purchase-order item", 400);
       if (po) {

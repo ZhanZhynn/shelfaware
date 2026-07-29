@@ -13,6 +13,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/products/:id
@@ -42,21 +43,31 @@ export async function GET(
     const isAdmin = session.role === "admin";
     const isSupplier = session.role === "supplier";
     const isClient = session.role === "client";
+    const dataScope = await getAdminDataScope(session);
 
     // Authorize workspace access before serving a shared cached representation.
     const accessProduct = await prisma.product.findFirst({
       where: mergeProductListWhere({ id }),
-      select: { workspaceId: true },
+      select: { workspaceId: true, userId: true, supplierId: true },
     });
     if (!accessProduct) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
     if (accessProduct.workspaceId) {
       await requireWorkspaceRole(session, accessProduct.workspaceId, ["admin", "sourcer", "warehouse", "viewer"]);
+    } else if (isAdmin && !dataScope.ownerIds.includes(accessProduct.userId)) {
+      return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    } else if (isSupplier) {
+      const supplier = await getSupplierByUserId(userId);
+      if (!supplier || accessProduct.supplierId !== supplier.id) {
+        return NextResponse.json({ error: "Product not found" }, { status: 404 });
+      }
+    } else if (!isClient && accessProduct.userId !== userId) {
+      return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
     // Check cache first
-    const cacheKey = cacheKeys.products.detail(id);
+    const cacheKey = `${cacheKeys.products.detail(id)}:${dataScope.cacheScope}`;
     const cachedProduct = await getCache<unknown>(cacheKey);
     if (cachedProduct) {
       logger.info(`✅ Cache hit for product: ${cacheKey}`);
@@ -87,9 +98,14 @@ export async function GET(
         orderBy: { createdAt: "desc" as const },
       },
     };
-    if (accessProduct.workspaceId || isAdmin) {
+    if (accessProduct.workspaceId) {
       product = await prisma.product.findFirst({
         where: mergeProductListWhere({ id }),
+        include: productInclude,
+      });
+    } else if (isAdmin) {
+      product = await prisma.product.findFirst({
+        where: mergeProductListWhere({ id, userId: { in: dataScope.ownerIds } }),
         include: productInclude,
       });
     } else if (isSupplier) {

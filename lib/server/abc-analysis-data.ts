@@ -1,4 +1,5 @@
 import prisma from "@/prisma/client";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 import { logger } from "@/lib/logger";
 import type {
   AbcAnalysisData,
@@ -25,6 +26,7 @@ export async function getAbcAnalysisForUser(
   dateFrom?: string,
   dateTo?: string,
   channel?: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds">,
 ): Promise<AbcAnalysisData> {
   const now = new Date();
   const defaultDateFrom = new Date(now);
@@ -37,6 +39,7 @@ export async function getAbcAnalysisForUser(
 
   const fetchWms = channel !== "shopee";
   const fetchShopee = channel !== "wms";
+  const ownerIds = dataScope?.ownerIds ?? [userId];
 
   const productSalesMap = new Map<string, ProductSales>();
 
@@ -45,7 +48,7 @@ export async function getAbcAnalysisForUser(
       const wmsItems = await prisma.orderItem.findMany({
         where: {
           order: {
-            userId,
+            userId: { in: ownerIds },
             createdAt: { gte: from, lte: to },
             status: { not: "cancelled" },
           },
@@ -92,7 +95,7 @@ export async function getAbcAnalysisForUser(
   if (fetchShopee) {
     try {
       const shops = await prisma.shopeeShop.findMany({
-        where: { userId },
+        where: { userId: { in: ownerIds } },
         select: { id: true },
       });
       const shopIds = shops.map((s) => s.id);

@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/prisma/client";
 import { requireWorkspaceRole } from "@/lib/sourcing/auth";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 export async function GET(request: NextRequest) {
   const rateLimitResponse = await withRateLimit(request, defaultRateLimits.standard);
@@ -24,13 +25,20 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") || undefined;
     const supplierId = searchParams.get("supplierId") || undefined;
+    const dataScope = await getAdminDataScope(session);
     const memberships = session.role === "admin" ? [] : await prisma.workspaceMember.findMany({ where: { userId: session.id, role: { in: ["admin", "warehouse"] } }, select: { workspaceId: true } });
 
-    const cacheKey = `purchaseOrders:list:${session.id}:${status || "all"}:${supplierId || "all"}:${memberships.map((member) => member.workspaceId).join(",")}`;
+    const cacheKey = `purchaseOrders:list:${dataScope.sharedAdmin ? dataScope.cacheScope : session.id}:${status || "all"}:${supplierId || "all"}:${memberships.map((member) => member.workspaceId).join(",")}`;
     const cached = await getCache(cacheKey);
     if (cached) return NextResponse.json(cached);
 
-    const data = await getPurchaseOrdersForUser(session.id, { status, supplierId, workspaceIds: session.role === "admin" ? undefined : memberships.map((member) => member.workspaceId), globalAdmin: session.role === "admin" });
+    const data = await getPurchaseOrdersForUser(session.id, {
+      status,
+      supplierId,
+      workspaceIds: session.role === "admin" ? undefined : memberships.map((member) => member.workspaceId),
+      globalAdmin: dataScope.sharedAdmin,
+      ownerIds: dataScope.ownerIds,
+    });
     await setCache(cacheKey, data, 120);
 
     return NextResponse.json(data);

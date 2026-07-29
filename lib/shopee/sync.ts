@@ -133,6 +133,7 @@ async function fetchModelList(
 export async function syncShopeeProducts(
   shopId: number,
   userId: string,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -147,7 +148,7 @@ export async function syncShopeeProducts(
 
   // Find our ShopeeShop record
   const shop = await prisma.shopeeShop.findFirst({
-    where: { shopId },
+    where: { shopId, userId },
   });
 
   if (!shop) {
@@ -158,7 +159,7 @@ export async function syncShopeeProducts(
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
       shopId: shop.id,
-      userId,
+      userId: actorId,
       syncType: "products",
       status: "running",
       triggeredBy: "manual",
@@ -301,6 +302,7 @@ export async function syncShopeeProducts(
           dimension: toInputJson(detail?.dimension ?? null),
           lastSyncedAt: new Date(),
           updatedAt: new Date(),
+          updatedBy: actorId,
         };
 
         let productRecord;
@@ -312,7 +314,7 @@ export async function syncShopeeProducts(
           updated++;
         } else {
           productRecord = await prisma.shopeeProduct.create({
-            data: { ...productData, createdBy: userId },
+            data: { ...productData, createdBy: actorId },
           });
           created++;
         }
@@ -350,6 +352,7 @@ export async function syncShopeeProducts(
               dimension: toInputJson(m.dimension ?? null),
               lastSyncedAt: new Date(),
               updatedAt: new Date(),
+              updatedBy: actorId,
             };
 
             const existingVariant = await prisma.shopeeProductVariant.findFirst({
@@ -363,7 +366,7 @@ export async function syncShopeeProducts(
               });
             } else {
               await prisma.shopeeProductVariant.create({
-                data: { ...variantData, createdBy: userId },
+                data: { ...variantData, createdBy: actorId },
               });
             }
           }
@@ -558,6 +561,7 @@ export async function syncShopeeOrders(
   userId: string,
   timeFrom?: number,
   timeTo?: number,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -571,7 +575,7 @@ export async function syncShopeeOrders(
   let updated = 0;
 
   const shop = await prisma.shopeeShop.findFirst({
-    where: { shopId },
+    where: { shopId, userId },
   });
 
   if (!shop) {
@@ -586,7 +590,7 @@ export async function syncShopeeOrders(
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
       shopId: shop.id,
-      userId,
+      userId: actorId,
       syncType: "orders",
       status: "running",
       triggeredBy: "manual",
@@ -696,6 +700,7 @@ export async function syncShopeeOrders(
           shopeeUpdatedAt,
           lastSyncedAt: new Date(),
           updatedAt: new Date(),
+          updatedBy: actorId,
           // Fee fields from escrow API
           commissionFee: Number(orderIncome.commission_fee || 0),
           serviceFee: Number(orderIncome.service_fee || 0),
@@ -721,7 +726,7 @@ export async function syncShopeeOrders(
           updated++;
         } else {
           orderRecord = await prisma.shopeeOrder.create({
-            data: { ...orderData, createdBy: userId },
+            data: { ...orderData, createdBy: actorId },
           });
           created++;
         }
@@ -818,6 +823,7 @@ export async function syncShopeeReturns(
   userId: string,
   timeFrom?: number,
   timeTo?: number,
+  actorId = userId,
 ): Promise<{
   synced: number;
   created: number;
@@ -831,7 +837,7 @@ export async function syncShopeeReturns(
   let updated = 0;
 
   const shop = await prisma.shopeeShop.findFirst({
-    where: { shopId },
+    where: { shopId, userId },
   });
   if (!shop) {
     throw new Error(`ShopeeShop record not found for shop_id=${shopId}`);
@@ -840,7 +846,7 @@ export async function syncShopeeReturns(
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
       shopId: shop.id,
-      userId,
+      userId: actorId,
       syncType: "returns",
       status: "running",
       triggeredBy: "manual",
@@ -997,6 +1003,7 @@ export async function syncShopeeReturns(
 export async function syncShopeeAll(
   shopId: number,
   userId: string,
+  actorId = userId,
 ): Promise<{
   products: {
     synced: number;
@@ -1022,9 +1029,9 @@ export async function syncShopeeAll(
 
   try {
     const [products, orders, ads] = await Promise.all([
-      syncShopeeProducts(shopId, userId),
-      syncShopeeOrders(shopId, userId),
-      syncShopeeAds(shopId, userId).catch((err) => {
+      syncShopeeProducts(shopId, userId, actorId),
+      syncShopeeOrders(shopId, userId, undefined, undefined, actorId),
+      syncShopeeAds(shopId, userId, 30, actorId).catch((err) => {
         // Ads sync failure must not block products/orders sync
         logger.error(`[Shopee Sync] Ads sync failed for shop ${shopId}:`, err);
         return { synced: 0, campaigns: 0, errors: [String(err)] };
@@ -1118,6 +1125,7 @@ export async function syncShopeeAds(
   shopId: number,
   userId: string,
   daysBack = 30,
+  actorId = userId,
 ): Promise<{
   synced: number;
   campaigns: number;
@@ -1128,7 +1136,7 @@ export async function syncShopeeAds(
   let synced = 0;
   let campaigns = 0;
 
-  const shop = await prisma.shopeeShop.findFirst({ where: { shopId } });
+  const shop = await prisma.shopeeShop.findFirst({ where: { shopId, userId } });
   if (!shop) {
     throw new Error(`ShopeeShop record not found for shop_id=${shopId}`);
   }
@@ -1136,7 +1144,7 @@ export async function syncShopeeAds(
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
       shopId: shop.id,
-      userId,
+      userId: actorId,
       syncType: "ads",
       status: "running",
       triggeredBy: "manual",

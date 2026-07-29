@@ -1,5 +1,6 @@
 import { getSession } from "@/lib/auth-server";
 import { getDashboardForAdmin } from "@/lib/server/dashboard-data";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 import AdminDashboardMergedView from "@/components/admin/AdminDashboardMergedView";
 
 /**
@@ -9,7 +10,8 @@ import AdminDashboardMergedView from "@/components/admin/AdminDashboardMergedVie
 export default async function StoreDashboardPage() {
   const user = await getSession();
   if (!user) return null;
-  const initialStats = await getDashboardForAdmin(user.id);
+  const dataScope = await getAdminDataScope(user);
+  const initialStats = await getDashboardForAdmin(user.id, dataScope);
   return (
     <AdminDashboardMergedView
       variant="store"

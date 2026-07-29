@@ -12,6 +12,7 @@ import {
   getOrdersContainingProductOwnerProducts,
 } from "@/prisma/order";
 import { prisma } from "@/prisma/client";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 
 /** Order item shape (dates as ISO strings) */
 type OrderItemForPage = {
@@ -68,15 +69,32 @@ export type OrderForPage = {
  * Uses the same cache key and transform as GET /api/orders so Redis is shared.
  */
 export async function getOrdersForUser(
-  userId: string
+  userId: string,
+  dataScope?: Pick<AdminDataScope, "ownerIds" | "cacheScope">,
 ): Promise<OrderForPage[]> {
-  const cacheKey = cacheKeys.orders.list({ userId });
+  const cacheKey = dataScope
+    ? cacheKeys.orders.list({ userId: dataScope.cacheScope })
+    : cacheKeys.orders.list({ userId });
   const cached = await getCache<OrderForPage[]>(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const orders = await getOrdersByUser(userId);
+  const orders = dataScope
+    ? await prisma.order.findMany({
+        where: { userId: { in: dataScope.ownerIds } },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: { id: true, name: true, sku: true, price: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      })
+    : await getOrdersByUser(userId);
   const firstOrder = orders[0];
   const user =
     firstOrder != null
@@ -86,6 +104,13 @@ export async function getOrdersForUser(
         })
       : null;
   const placedByName = user?.name ?? user?.email ?? null;
+  const users = dataScope
+    ? await prisma.user.findMany({
+        where: { id: { in: dataScope.ownerIds } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const userMap = new Map(users.map((owner) => [owner.id, owner]));
 
   const transformed: OrderForPage[] = orders.map((order) => ({
     id: order.id,
@@ -123,7 +148,9 @@ export async function getOrdersForUser(
       subtotal: item.subtotal,
       createdAt: item.createdAt.toISOString(),
     })),
-    placedByName,
+    placedByName: dataScope
+      ? userMap.get(order.userId)?.name ?? userMap.get(order.userId)?.email ?? null
+      : placedByName,
   }));
 
   await setCache(cacheKey, transformed, 300);

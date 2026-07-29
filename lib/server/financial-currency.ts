@@ -1,6 +1,7 @@
 import prisma from "@/prisma/client";
 import { DEFAULT_CURRENCY, convertMoney } from "@/lib/money";
 import type { HistoricalRateSelection } from "@/lib/exchange-rates/service";
+import type { AdminDataScope } from "@/lib/admin/data-scope";
 
 export type FinancialCurrencyMetadata = {
   baseCurrency: string;
@@ -127,31 +128,33 @@ export async function getFinancialCurrencyContext(userId: string) {
 export async function getUnknownCurrencyReconciliation(
   userId: string,
   limit = 100,
+  dataScope?: Pick<AdminDataScope, "ownerIds">,
 ): Promise<UnknownCurrencyReconciliation> {
   const cappedLimit = Math.min(Math.max(limit, 1), 250);
   const unknownCurrency = { OR: [{ currency: null }, { currency: "" }] };
+  const ownerScope = { in: dataScope?.ownerIds ?? [userId] };
   const [shopeeOrders, shopeeReturns, lazadaOrders, shopeeOrderCount, shopeeReturnCount, lazadaOrderCount] = await Promise.all([
     prisma.shopeeOrder.findMany({
-      where: { userId, ...unknownCurrency },
+      where: { userId: ownerScope, ...unknownCurrency },
       select: { id: true, shopeeOrderId: true, totalAmount: true, shopeeCreatedAt: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: cappedLimit + 1,
     }),
     prisma.shopeeReturn.findMany({
-      where: { userId, ...unknownCurrency },
+      where: { userId: ownerScope, ...unknownCurrency },
       select: { id: true, returnSn: true, refundAmount: true, shopeeCreatedAt: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: cappedLimit + 1,
     }),
     prisma.lazadaOrder.findMany({
-      where: { userId, ...unknownCurrency },
+      where: { userId: ownerScope, ...unknownCurrency },
       select: { id: true, lazadaOrderId: true, totalAmount: true, lazadaCreatedAt: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: cappedLimit + 1,
     }),
-    prisma.shopeeOrder.count({ where: { userId, ...unknownCurrency } }),
-    prisma.shopeeReturn.count({ where: { userId, ...unknownCurrency } }),
-    prisma.lazadaOrder.count({ where: { userId, ...unknownCurrency } }),
+    prisma.shopeeOrder.count({ where: { userId: ownerScope, ...unknownCurrency } }),
+    prisma.shopeeReturn.count({ where: { userId: ownerScope, ...unknownCurrency } }),
+    prisma.lazadaOrder.count({ where: { userId: ownerScope, ...unknownCurrency } }),
   ]);
 
   const records: UnknownCurrencyRecord[] = [

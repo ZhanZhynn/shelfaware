@@ -51,8 +51,8 @@ function computeKpis(agg: AdsAggregate) {
   };
 }
 
-export async function getShopeeAdsForUser(
-  userId: string,
+export async function getShopeeAdsForOwnerIds(
+  ownerIds: string[],
   dateFrom?: string,
   dateTo?: string,
 ): Promise<ShopeeAdsData> {
@@ -63,9 +63,9 @@ export async function getShopeeAdsForUser(
   const prevFrom = new Date(from.getTime() - periodDays * 24 * 60 * 60 * 1000);
   const prevTo = new Date(from);
 
-  // Find user's shops
+  // Resolve the shops visible to the approved marketplace owners.
   const shops = await prisma.shopeeShop.findMany({
-    where: { userId },
+    where: { userId: { in: ownerIds } },
     select: { id: true },
   });
   const shopIds = shops.map((s) => s.id);
@@ -159,7 +159,7 @@ export async function getShopeeAdsForUser(
     .sort((a, b) => b.spend - a.spend);
 
   logger.info(
-    `[Shopee Ads] Aggregated ${dailyRows.length} daily rows, ${campaignRows.length} campaign rows for user ${userId}`,
+    `[Shopee Ads] Aggregated ${dailyRows.length} daily rows, ${campaignRows.length} campaign rows for ${ownerIds.length} owners`,
   );
 
   return {

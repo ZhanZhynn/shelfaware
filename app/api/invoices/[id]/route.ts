@@ -19,6 +19,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { createAuditLog } from "@/prisma/audit-log";
 import type { UpdateInvoiceInput } from "@/types";
 import { resolveTransactionCurrency } from "@/lib/money";
+import { getAdminDataScope } from "@/lib/admin/data-scope";
 
 /**
  * GET /api/invoices/:id
@@ -47,10 +48,13 @@ export async function GET(
     const userId = session.id;
     const isAdmin = session.role === "admin";
     const isClient = session.role === "client";
+    const dataScope = await getAdminDataScope(session);
 
     let invoice: Awaited<ReturnType<typeof getInvoiceById>> | null;
     if (isAdmin) {
-      invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
+      invoice = await prisma.invoice.findFirst({
+        where: { id: invoiceId, userId: { in: dataScope.ownerIds } },
+      });
     } else if (isClient) {
       // Client can view invoices where they are the customer (clientId)
       invoice = await prisma.invoice.findFirst({
@@ -208,6 +212,7 @@ export async function PUT(
     }
 
     const userId = session.id;
+    const dataScope = await getAdminDataScope(session);
     const body = await request.json();
 
     // Validate request body
@@ -235,7 +240,9 @@ export async function PUT(
     const isAdmin = session.role === "admin";
     let ownerUserId = userId;
     if (isAdmin) {
-      const existing = await prisma.invoice.findUnique({ where: { id } });
+      const existing = await prisma.invoice.findFirst({
+        where: { id, userId: { in: dataScope.ownerIds } },
+      });
       if (!existing) {
         return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
       }
@@ -375,12 +382,18 @@ export async function DELETE(
 
     const userId = session.id;
     const isAdmin = session.role === "admin";
+    const dataScope = await getAdminDataScope(session);
 
     // Admin can delete any invoice; product owners can delete invoices linked to their products.
     let ownerUserId = userId;
     if (isAdmin) {
-      const existing = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-      if (existing) ownerUserId = existing.userId;
+      const existing = await prisma.invoice.findFirst({
+        where: { id: invoiceId, userId: { in: dataScope.ownerIds } },
+      });
+      if (!existing) {
+        return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      }
+      ownerUserId = existing.userId;
     } else {
       const existingCheck = await prisma.invoice.findFirst({
         where: { id: invoiceId, userId },

@@ -179,14 +179,18 @@ export default function SourcingCaseDetail({
     );
 
   const run = async (action: string, extra: Record<string, unknown> = {}) => {
-    await command.mutateAsync({
-      id: item.id,
-      version: item.version,
-      action,
-      ...extra,
-    });
-    setDialog(null);
-    setReason("");
+    try {
+      await command.mutateAsync({
+        id: item.id,
+        version: item.version,
+        action,
+        ...extra,
+      });
+      setDialog(null);
+      setReason("");
+    } catch {
+      // The mutation hook already displays the API error as a toast.
+    }
   };
   const saveQuote = (action: "create_quote" | "save_quote" | "submit_quote") =>
     form.handleSubmit((quote) =>

@@ -2,8 +2,9 @@
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useState } from "react";
-import { Menu, X } from "lucide-react";
+import { LogOut, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts";
 import AdminSidebar from "./AdminSidebar";
 
 export default function AdminMobileDrawer({
@@ -12,6 +13,19 @@ export default function AdminMobileDrawer({
   isSuperAdmin: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      window.location.href = "/login";
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
@@ -27,7 +41,7 @@ export default function AdminMobileDrawer({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content className="fixed inset-y-0 right-0 z-[60] flex w-[min(22rem,calc(100vw-2.5rem))] flex-col border-l border-gray-200/50 bg-white/95 shadow-2xl outline-none dark:border-white/10 dark:bg-gray-950/95 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right">
-          <div className="flex items-center justify-between border-b border-gray-200/50 px-4 py-3 dark:border-white/10">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-200/50 px-4 py-3 dark:border-white/10">
             <DialogPrimitive.Title className="text-sm font-semibold">Admin navigation</DialogPrimitive.Title>
             <DialogPrimitive.Close asChild>
               <Button variant="ghost" size="icon" aria-label="Close admin navigation">
@@ -41,6 +55,17 @@ export default function AdminMobileDrawer({
               mobileDrawer
               onNavigate={() => setOpen(false)}
             />
+          </div>
+          <div className="shrink-0 border-t border-gray-200/50 bg-white/95 p-3 dark:border-white/10 dark:bg-gray-950/95">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={isLoggingOut}
+              onClick={() => void handleLogout()}
+            >
+              <LogOut className="h-4 w-4" />
+              {isLoggingOut ? "Logging out..." : "Logout"}
+            </Button>
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

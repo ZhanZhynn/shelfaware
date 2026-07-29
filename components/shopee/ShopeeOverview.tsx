@@ -47,7 +47,7 @@ export default function ShopeeOverview() {
   }, []);
 
   const { data: shops, isLoading: shopsLoading } = useQuery({
-    queryKey: ["shopee", "shops"],
+    queryKey: ["shopee", "shops", "shared-admin-v1"],
     queryFn: async () => {
       const response = await apiClient.shopee.getShops();
       return response.data;

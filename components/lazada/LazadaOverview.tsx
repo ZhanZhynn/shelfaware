@@ -46,7 +46,7 @@ export default function LazadaOverview() {
   }, []);
 
   const { data: shops, isLoading: shopsLoading } = useQuery({
-    queryKey: ["lazada", "shops"],
+    queryKey: ["lazada", "shops", "shared-admin-v1"],
     queryFn: async () => {
       const response = await apiClient.lazada.getShops();
       return response.data;

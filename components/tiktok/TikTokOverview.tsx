@@ -47,7 +47,7 @@ export default function TikTokOverview() {
   }, []);
 
   const { data: shops, isLoading: shopsLoading } = useQuery({
-    queryKey: ["tiktok", "shops"],
+    queryKey: ["tiktok", "shops", "shared-admin-v1"],
     queryFn: async () => {
       const response = await apiClient.tiktok.getShops();
       return response.data;

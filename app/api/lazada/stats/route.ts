@@ -10,6 +10,7 @@ import { prisma } from "@/prisma/client";
 import { getCache, setCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = session.id;
+    const ownerIds = await marketplaceOwnerIds(session);
     const { searchParams } = new URL(request.url);
     const sellerId = searchParams.get("sellerId");
     const dateFrom = searchParams.get("dateFrom");
@@ -42,13 +43,16 @@ export async function GET(request: NextRequest) {
       ? `${dateFrom || ""}_${dateTo || ""}`
       : undefined;
 
-    const cacheKey = cacheKeys.lazada.stats(sellerId || "all", dateRangeKey);
+    const cacheKey = cacheKeys.lazada.stats(
+      `${marketplaceCacheScope(session)}:${sellerId || "all"}`,
+      dateRangeKey,
+    );
     const cached = await getCache(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    const shopWhere: Record<string, unknown> = { userId };
+    const shopWhere: Record<string, unknown> = { userId: { in: ownerIds } };
     if (sellerId) shopWhere.sellerId = sellerId;
 
     const shops = await prisma.lazadaShop.findMany({

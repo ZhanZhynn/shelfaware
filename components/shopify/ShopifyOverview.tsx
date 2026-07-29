@@ -68,7 +68,7 @@ export default function ShopifyOverview() {
   }, []);
 
   const { data: shops, isLoading: shopsLoading } = useQuery<ShopifyShop[]>({
-    queryKey: ["shopify", "shops"],
+    queryKey: ["shopify", "shops", "shared-admin-v1"],
     queryFn: async () => {
       const response = await apiClient.shopify.getShops();
       return response.data;

@@ -9,6 +9,7 @@ import { prisma } from "@/prisma/client";
 import { isShopeeConfigured } from "@/lib/shopee";
 import { getCache, setCache, cacheKeys } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
+import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,8 +25,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const userId = session.id;
-    const cacheKey = cacheKeys.shopee.shops(userId);
+    const ownerIds = await marketplaceOwnerIds(session);
+    const cacheKey = cacheKeys.shopee.shops(marketplaceCacheScope(session));
 
     // Check cache
     const cached = await getCache(cacheKey);
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
     }
 
     const shops = await prisma.shopeeShop.findMany({
-      where: { userId },
+      where: { userId: { in: ownerIds } },
       select: {
         id: true,
         shopId: true,

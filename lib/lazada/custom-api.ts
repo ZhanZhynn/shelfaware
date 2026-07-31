@@ -288,6 +288,7 @@ export interface OrderItem {
   status: string;
   shipment_provider: string;
   tracking_number: string;
+  tracking_code?: string;
   [key: string]: unknown;
 }
 
@@ -336,6 +337,15 @@ export interface LazadaFinanceTransaction {
   [key: string]: unknown;
 }
 
+export interface LazadaPayoutStatement {
+  payout?: string;
+  paid?: string | number | boolean;
+  statement_number?: string;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
 interface GetFinanceTransactionDetailsParams {
   start_time: string | Date;
   end_time: string | Date;
@@ -349,6 +359,14 @@ interface GetFinanceTransactionDetailsParams {
 interface GetFinanceTransactionDetailsResponse {
   code: string | number;
   data?: LazadaFinanceTransaction[] | string;
+  request_id?: string;
+  message?: string;
+  msg?: string;
+}
+
+interface GetPayoutStatusResponse {
+  code: string | number;
+  data?: LazadaPayoutStatement[] | string;
   request_id?: string;
   message?: string;
   msg?: string;
@@ -446,6 +464,237 @@ export async function getAllFinanceTransactionDetailsCustom(
 
   logger.info(`[Lazada Custom API] Total finance transactions fetched: ${transactions.length}`);
   return transactions;
+}
+
+// ─── Logistics Fee Detail API ──────────────────────────────────────────────
+
+export interface LazadaLogisticsFee {
+  tenant_id?: string;
+  amount?: Record<string, unknown>;
+  tax_in_amount?: Record<string, unknown>;
+  trade_order_id?: string;
+  trade_order_line_id?: string;
+  seller_short_code?: string;
+  seller_id?: string;
+  fee_code?: string;
+  fee_name?: string;
+  fee_creation_date?: Record<string, unknown>;
+  order_info?: { order_item_status?: string; order_creation_date?: Record<string, unknown> };
+  statement_id?: string;
+  statement_period?: string;
+  currency?: string;
+  package_info?: {
+    billing_date?: Record<string, unknown>;
+    destination_address?: string;
+    origin_address?: string;
+    package_chargeable_weight?: string;
+    delivery_date?: Record<string, unknown>;
+    tracking_number?: string;
+  };
+  sku_info?: { item_details?: string; seller_sku?: string; lazada_sku?: string };
+  [key: string]: unknown;
+}
+
+interface GetLogisticsFeeDetailResponse {
+  code: string | number;
+  data?: LazadaLogisticsFee[] | string;
+  success?: string | boolean;
+  remark?: string;
+  request_id?: string;
+  message?: string;
+  msg?: string;
+}
+
+interface GetLogisticsFeeDetailParams {
+  seller_id: string;
+  request_type?: string;
+  trade_order_id?: string;
+  trade_order_line_id?: string;
+  fee_type?: string;
+  biz_flow_type?: string;
+  bill_start_time?: number;
+  bill_end_time?: number;
+  page_no?: number;
+  page_size?: number;
+}
+
+/** Fetch one signed page of logistics fee details from Lazada's SLB API. */
+export async function getLogisticsFeeDetailCustom(
+  params: GetLogisticsFeeDetailParams,
+): Promise<LazadaLogisticsFee[]> {
+  const appKey = getEnvVar("LAZADA_APP_KEY");
+  const appSecret = getEnvVar("LAZADA_APP_SECRET");
+  if (!appKey || !appSecret) {
+    throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
+  }
+
+  const { getActiveSellerId } = await import("./server");
+  const activeSellerId = getActiveSellerId();
+  const shop = activeSellerId
+    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
+    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
+
+  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+
+  const path = "/lbs/slb/queryLogisticsFeeDetail";
+  const requestParams: Record<string, string> = {
+    app_key: appKey,
+    sign_method: "sha256",
+    timestamp: String(Date.now()),
+    access_token: shop.accessToken,
+    seller_id: params.seller_id,
+    request_type: params.request_type ?? "OPEN_API",
+  };
+  if (params.trade_order_id) requestParams.trade_order_id = params.trade_order_id;
+  if (params.trade_order_line_id) requestParams.trade_order_line_id = params.trade_order_line_id;
+  if (params.fee_type) requestParams.fee_type = params.fee_type;
+  if (params.biz_flow_type) requestParams.biz_flow_type = params.biz_flow_type;
+  if (params.bill_start_time !== undefined) requestParams.bill_start_time = String(params.bill_start_time);
+  if (params.bill_end_time !== undefined) requestParams.bill_end_time = String(params.bill_end_time);
+  if (params.page_no !== undefined) requestParams.page_no = String(params.page_no);
+  if (params.page_size !== undefined) requestParams.page_size = String(Math.min(Math.max(1, params.page_size), 100));
+
+  const signature = createSignature(path, requestParams, appSecret);
+  const queryString = Object.entries(requestParams)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const data: GetLogisticsFeeDetailResponse = await response.json();
+
+  if (String(data.code) !== "0") {
+    const errorMsg = data.msg || data.message || (typeof data.data === "string" ? data.data : undefined) || `API error code: ${data.code}`;
+    logger.error(`[Lazada Custom API] GetLogisticsFeeDetail failed: ${errorMsg}`);
+    throw new Error(`Lazada API error: ${errorMsg}`);
+  }
+  return Array.isArray(data.data) ? data.data : [];
+}
+
+/** Fetch all logistics fee detail pages. */
+export async function getAllLogisticsFeeDetailCustom(
+  params: Omit<GetLogisticsFeeDetailParams, "page_no" | "page_size">,
+): Promise<LazadaLogisticsFee[]> {
+  const records: LazadaLogisticsFee[] = [];
+  const pageSize = 50;
+  let pageNo = 1;
+
+  while (true) {
+    const page = await getLogisticsFeeDetailCustom({ ...params, page_no: pageNo, page_size: pageSize });
+    records.push(...page);
+    if (page.length < pageSize) break;
+    pageNo++;
+  }
+
+  logger.info(`[Lazada Custom API] Total logistics fee details fetched: ${records.length}`);
+  return records;
+}
+
+// ─── GetShippingFee API ────────────────────────────────────────────────────
+
+export interface LazadaShippingFeeResult {
+  estimatedShippingFee: string;
+  actualShippingFee: string;
+  currency: string;
+  originEstimatedShippingFee?: string;
+}
+
+interface GetShippingFeeResponse {
+  code: string | number;
+  data?: LazadaShippingFeeResult;
+  success?: string | boolean;
+  errorMessage?: string;
+  errorCode?: string;
+  request_id?: string;
+  message?: string;
+  msg?: string;
+}
+
+/** Fetch estimated and actual shipping fee for a single package by tracking number. */
+export async function getShippingFeeCustom(
+  trackingNumber: string,
+  sellerId: string,
+): Promise<LazadaShippingFeeResult | null> {
+  const appKey = getEnvVar("LAZADA_APP_KEY");
+  const appSecret = getEnvVar("LAZADA_APP_SECRET");
+  if (!appKey || !appSecret) {
+    throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
+  }
+
+  const { getActiveSellerId } = await import("./server");
+  const activeSellerId = getActiveSellerId();
+  const shop = activeSellerId
+    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
+    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
+
+  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+
+  const path = "/logistics/epis/get_shipping_fee";
+  const requestParams: Record<string, string> = {
+    app_key: appKey,
+    sign_method: "sha256",
+    timestamp: String(Date.now()),
+    externalSellerId: sellerId,
+    platformName: "Platform_Lazada",
+    trackingNumber: trackingNumber,
+  };
+
+  const signature = createSignature(path, requestParams, appSecret);
+  const queryString = Object.entries(requestParams)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const data: GetShippingFeeResponse = await response.json();
+
+  if (String(data.code) !== "0") {
+    const errorMsg = data.msg || data.message || data.errorMessage || `API error code: ${data.code}`;
+    logger.warn(`[Lazada Custom API] GetShippingFee failed for ${trackingNumber}: ${errorMsg}`);
+    return null;
+  }
+  return data.data ?? null;
+}
+
+/** Fetch Lazada payout statements created after the required calendar date. */
+export async function getPayoutStatusCustom(
+  createdAfter: string | Date,
+): Promise<LazadaPayoutStatement[]> {
+  const appKey = getEnvVar("LAZADA_APP_KEY");
+  const appSecret = getEnvVar("LAZADA_APP_SECRET");
+  if (!appKey || !appSecret) {
+    throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
+  }
+
+  const { getActiveSellerId } = await import("./server");
+  const activeSellerId = getActiveSellerId();
+  const shop = activeSellerId
+    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
+    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
+  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+
+  const date = createdAfter instanceof Date ? new Date(createdAfter) : new Date(createdAfter);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Lazada payout created_after must be a valid date.");
+  }
+
+  const path = "/finance/payout/status/get";
+  const requestParams: Record<string, string> = {
+    app_key: appKey,
+    sign_method: "sha256",
+    timestamp: String(Date.now()),
+    access_token: shop.accessToken,
+    created_after: date.toISOString().slice(0, 10),
+  };
+  const signature = createSignature(path, requestParams, appSecret);
+  const queryString = Object.entries(requestParams)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const data: GetPayoutStatusResponse = await response.json();
+
+  if (String(data.code) !== "0") {
+    const errorMsg = data.msg || data.message || (typeof data.data === "string" ? data.data : undefined) || `API error code: ${data.code}`;
+    logger.error(`[Lazada Custom API] GetPayoutStatus failed: ${errorMsg}`);
+    throw new Error(`Lazada API error: ${errorMsg}`);
+  }
+  return Array.isArray(data.data) ? data.data : [];
 }
 
 /**

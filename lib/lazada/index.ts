@@ -19,6 +19,8 @@ export {
   syncLazadaProducts,
   syncLazadaOrders,
   syncLazadaFinance,
+  syncLazadaPayoutStatements,
+  syncLazadaLogisticsFees,
   syncLazadaAll,
   isSellerSyncing,
 } from "./sync";
@@ -30,5 +32,9 @@ export {
   getMultipleOrderItemsCustom,
   getFinanceTransactionDetailsCustom,
   getAllFinanceTransactionDetailsCustom,
+  getPayoutStatusCustom,
+  getLogisticsFeeDetailCustom,
+  getAllLogisticsFeeDetailCustom,
+  getShippingFeeCustom,
   validateFinanceDateRange,
 } from "./custom-api";

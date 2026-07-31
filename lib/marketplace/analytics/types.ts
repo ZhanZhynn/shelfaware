@@ -1,7 +1,7 @@
 import type { FinancialQuality } from "./provenance";
 
 export type MarketplacePlatform = "shopee" | "lazada" | "tiktok" | "shopify";
-export type CalculationBasis = "settled" | "order-estimate" | "partial" | "unavailable";
+export type CalculationBasis = "settled" | "order-estimate" | "partial" | "unavailable" | "imported-records";
 
 export interface NormalizedOrderItem {
   id: string;
@@ -25,7 +25,7 @@ export interface NormalizedOrderFinancials {
 }
 
 export interface AnalyticsCoverage {
-  state: "ready" | "partial" | "unavailable";
+  state: "ready" | "partial" | "unavailable" | "provisional";
   calculationBasis: CalculationBasis;
   financialCoveragePercent: number | null;
   buyerIdentityCoveragePercent: number;

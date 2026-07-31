@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveSeller, syncLazadaProducts, syncLazadaOrders, syncLazadaFinance, syncLazadaAll, isSellerSyncing, validateLazadaToken, patchLazadaSDKEndpoint } from "@/lib/lazada";
+import { setActiveSeller, syncLazadaProducts, syncLazadaOrders, syncLazadaFinance, syncLazadaPayoutStatements, syncLazadaAll, isSellerSyncing, validateLazadaToken, patchLazadaSDKEndpoint } from "@/lib/lazada";
 import { lazadaSyncBodySchema } from "@/lib/validations/lazada";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -82,6 +82,7 @@ export async function POST(request: NextRequest) {
       products?: { synced: number; created: number; updated: number; errors: string[] };
       orders?: { synced: number; created: number; updated: number; errors: string[] };
       finance?: { synced: number; created: number; updated: number; errors: string[] };
+      payouts?: { synced: number; created: number; updated: number; errors: string[] };
     };
 
     switch (syncType) {
@@ -93,6 +94,9 @@ export async function POST(request: NextRequest) {
         break;
       case "finance":
         result = { finance: await syncLazadaFinance(sellerId, shop.userId, undefined, userId) };
+        break;
+      case "payouts":
+        result = { payouts: await syncLazadaPayoutStatements(sellerId, shop.userId, undefined, userId) };
         break;
       case "all":
       default:

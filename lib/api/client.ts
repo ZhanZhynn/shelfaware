@@ -1823,7 +1823,7 @@ class ApiClient {
 
     triggerSync: async (data: {
       shopId: string;
-      syncType?: "products" | "orders" | "finance" | "all";
+      syncType?: "products" | "orders" | "finance" | "payouts" | "all";
     }): Promise<ApiResponse<unknown>> => {
       const response = await this.client.post(API_ENDPOINTS.tiktok.sync, data);
       return {

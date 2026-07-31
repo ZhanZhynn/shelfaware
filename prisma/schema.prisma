@@ -1897,8 +1897,12 @@ model MarketplaceFinancialRecord {
   platform      String
   shopId        String   @db.ObjectId
   externalId    String
-  orderExternalId String?
-  itemExternalId String?
+  // Lazada's documented finance `statement` / payout `statement_number` reference.
+   statementExternalId String?
+   orderExternalId String?
+   orderInternalId String? @db.ObjectId
+   orderLinkState String? // linked, unmatched, not_applicable
+   itemExternalId String?
   transactionType String?
   feeType       String?
   feeName       String?
@@ -1918,6 +1922,8 @@ model MarketplaceFinancialRecord {
 
   @@unique([platform, shopId, externalId])
   @@index([analyticsConnectionId])
-  @@index([platform, shopId, orderExternalId])
+   @@index([platform, shopId, orderExternalId])
+   @@index([platform, shopId, orderLinkState])
+   @@index([platform, shopId, statementExternalId])
   @@index([occurredAt])
 }

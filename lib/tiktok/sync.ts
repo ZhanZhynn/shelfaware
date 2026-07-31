@@ -17,6 +17,7 @@ import {
   searchOrders,
   getOrderDetail,
   getOrderStatementTransactions,
+  getStatementTransactions,
 } from "./custom-api";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
@@ -31,6 +32,7 @@ import type {
   TikTokProductSKU,
   TikTokOrderStatementTransaction,
   TikTokOrderStatementTransactionsData,
+  TikTokStatementTransactionsData,
 } from "./types";
 
 // ─── Status Mappings ──────────────────────────────────────────────────────
@@ -671,6 +673,9 @@ export async function syncTikTokFinance(
                   : null;
                 const externalId = financeExternalId(order.tiktokOrderId, transaction, index);
                 const data = {
+                  statementExternalId: "statement_id" in transaction && typeof transaction.statement_id === "string" && transaction.statement_id
+                    ? transaction.statement_id
+                    : null,
                   orderExternalId: statement.order_id || order.tiktokOrderId,
                   itemExternalId: "sku_id" in transaction && typeof transaction.sku_id === "string"
                     ? transaction.sku_id
@@ -760,6 +765,141 @@ export async function syncTikTokFinance(
         }
         throw error;
       }
+    },
+  );
+}
+
+function payoutStatementExternalId(statementId: string): string {
+  // Keep final payout evidence in a namespace separate from order transaction IDs.
+  return `payout_statement:${encodeURIComponent(statementId)}`;
+}
+
+function statementOccurredAt(value: unknown): Date | null {
+  if (typeof value !== "number") return null;
+  const date = new Date(value * 1000);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Sync final statement payouts separately from order-level finance rows. This
+ * is deliberately manual and excluded from all-sync because it is settlement evidence.
+ */
+export async function syncTikTokPayoutStatements(
+  shopId: string,
+  userId: string,
+  actorId = userId,
+): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
+  setActiveShop(shopId);
+
+  const shop = await prisma.tikTokShop.findFirst({ where: { shopId, userId } });
+  if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
+
+  return runWithSyncLog(
+    { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "payouts" },
+    async () => {
+      const tokenCheck = await validateTikTokToken();
+      if (!tokenCheck.valid) {
+        throw new Error(`TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`);
+      }
+
+      const [accessToken, cipher, ledgerRows] = await Promise.all([
+        ensureFreshToken(),
+        getActiveShopCipher(),
+        prisma.marketplaceFinancialRecord.findMany({
+          where: {
+            platform: "tiktok",
+            shopId: shop.id,
+            statementExternalId: { not: null },
+            NOT: { transactionType: "payout_statement" },
+          },
+          distinct: ["statementExternalId"],
+          select: { statementExternalId: true },
+        }),
+      ]);
+      const statementIds = [...new Set(ledgerRows
+        .map((row) => row.statementExternalId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0))];
+      const errors: string[] = [];
+      let synced = 0;
+      let created = 0;
+      let updated = 0;
+      let settledStatements = 0;
+
+      for (const statementId of statementIds) {
+        try {
+          const pages: TikTokStatementTransactionsData[] = [];
+          let pageToken: string | undefined;
+          do {
+            const statement = await withTikTokRetry(() =>
+              getStatementTransactions(accessToken, cipher, statementId, 100, pageToken),
+            );
+            pages.push(statement);
+            pageToken = statement.next_page_token || undefined;
+          } while (pageToken);
+
+          const statement = pages[0];
+          if (!statement || statement.id !== statementId || statement.status !== "SETTLED") continue;
+
+          // payable_amount is the documented final amount paid out, including reserves.
+          const payable = statement.payable_amount;
+          const parsedPayable = parseSourceNumber(payable, "tiktok.statement.payable_amount");
+          const exactPayable = toExactMinorUnits(payable);
+          const externalId = payoutStatementExternalId(statementId);
+          const data = {
+            statementExternalId: statementId,
+            orderExternalId: null,
+            itemExternalId: null,
+            transactionType: "payout_statement",
+            feeType: "statement_settled",
+            feeName: "TikTok Shop final statement payout",
+            amountMinor: exactPayable?.amountMinor ?? null,
+            amountScale: exactPayable?.amountScale ?? 2,
+            amount: null,
+            financialQuality: parsedPayable.quality,
+            unknownReason: parsedPayable.unknownReason,
+            currency: statement.currency ?? null,
+            sourceObservedAt: new Date(),
+            occurredAt: statementOccurredAt(statement.create_time),
+            rawPayload: sanitizeMarketplaceRawPayload({
+              ...statement,
+              transactions: pages.flatMap((page) => page.transactions ?? []),
+            }),
+          };
+          const where = {
+            platform_shopId_externalId: { platform: "tiktok", shopId: shop.id, externalId },
+          };
+          const existing = await prisma.marketplaceFinancialRecord.findUnique({
+            where,
+            select: { id: true },
+          });
+          await prisma.marketplaceFinancialRecord.upsert({
+            where,
+            create: { userId, platform: "tiktok", shopId: shop.id, externalId, ...data },
+            update: data,
+          });
+          if (existing) updated++; else created++;
+          synced++;
+          settledStatements++;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`Statement ${statementId}: ${message}`);
+          logger.warn(`[TikTok Payout Sync] Failed to fetch or store statement ${statementId}: ${message}`);
+        }
+      }
+
+      // Only a directly observed final statement establishes settlement availability.
+      if (settledStatements > 0) {
+        await setMarketplaceCapability({
+          userId,
+          platform: "tiktok",
+          shopId: shop.id,
+          capability: "settlements",
+          state: "available",
+          endpointVersion: "/finance/202501/statements/{statement_id}/statement_transactions",
+          observedFields: ["id", "status", "payable_amount", "total_settlement_amount", "currency"],
+        });
+      }
+      return { synced, created, updated, errors };
     },
   );
 }

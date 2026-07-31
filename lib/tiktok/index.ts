@@ -20,6 +20,7 @@ export {
   syncTikTokProducts,
   syncTikTokOrders,
   syncTikTokFinance,
+  syncTikTokPayoutStatements,
   syncTikTokAll,
   isShopSyncing,
 } from "./sync";
@@ -31,4 +32,5 @@ export {
   searchOrders,
   getOrderDetail,
   getOrderStatementTransactions,
+  getStatementTransactions,
 } from "./custom-api";

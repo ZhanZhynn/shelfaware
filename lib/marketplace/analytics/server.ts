@@ -4,7 +4,7 @@ import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/ac
 import { accessibleMarketplaceShops } from "@/lib/marketplace/shops";
 import { marketplaceAnalyticsCacheKey } from "./cache";
 import { getMarketplaceCapabilities, getMarketplaceFinancialReadiness } from "./capabilities";
-import { calculateBuyerMetrics, calculateClvMetrics, calculateProfit } from "./calculators";
+import { calculateBuyerMetrics, calculateClvMetrics, calculateProfit, calculateProvisionalProfitFromOrders } from "./calculators";
 import type { MarketplacePlatform, NormalizedOrderFinancials, OperationalCoverage } from "./types";
 import type { CapabilityState } from "./capabilities";
 import { createHmac } from "crypto";
@@ -173,8 +173,12 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
   const reportingCurrency = resolveReportingCurrency(orders, currency);
   const reconciled = await getMarketplaceFinancialReadiness(platform, shopIds);
   const financeReady = metric === "profit" && isFinancialAnalyticsEligible({ platform, shops: selectedShops, finance: capabilities.finance, readinessAndEvidenceApproved: reconciled });
+  const originalOrders = metric === "profit" && !financeReady ? orders : null;
   if (metric === "profit" && !financeReady) orders = orders.map((order) => ({ ...order, financialQuality: "legacy-unverified" }));
   const built = buildResponse(orders, reportingCurrency, shopCount, granularity, metric, financeReady);
+  if (metric === "profit" && !financeReady && capabilities.finance === "available" && originalOrders && originalOrders.length > 0) {
+    built.profit = calculateProvisionalProfitFromOrders(originalOrders, reportingCurrency);
+  }
   let page: AnalyticsPage | null = null;
   if (metric === "products") {
     const result = paginateAnalyticsValues(built.products, pagination);

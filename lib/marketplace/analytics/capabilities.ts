@@ -56,13 +56,13 @@ export async function getMarketplaceFinancialReadiness(platform: MarketplacePlat
   return shopIds.length > 0 && shopIds.every((shopId) => readiness.some((record) => record.shopId === shopId) && records.some((record) => record.shopId === shopId));
 }
 
-export async function setMarketplaceFinancialReadiness(input: { userId: string; platform: MarketplacePlatform; shopId: string; financeReady: boolean; reconciledAt?: Date | null; reconciliationId?: string; detail?: string }) {
+export async function setMarketplaceFinancialReadiness(input: { userId: string; platform: MarketplacePlatform; shopId: string; financeReady: boolean; reconciledAt?: Date | null; reconciliationId?: string | null; detail?: string }) {
   const connection = await ensureMarketplaceAnalyticsConnection(input);
   const reconciledAt = input.financeReady ? input.reconciledAt ?? new Date() : null;
   const result = await prisma.marketplaceAnalyticsReadiness.upsert({
     where: { platform_shopId: { platform: input.platform, shopId: input.shopId } },
     create: { ...input, connectionId: connection.id, reconciledAt },
-    update: { connectionId: connection.id, financeReady: input.financeReady, reconciledAt, reconciliationId: input.reconciliationId, detail: input.detail },
+    update: { connectionId: connection.id, financeReady: input.financeReady, reconciledAt, reconciliationId: input.reconciliationId ?? null, detail: input.detail },
   });
   await invalidateMarketplaceAnalytics(input.platform);
   return result;

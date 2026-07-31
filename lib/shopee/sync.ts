@@ -54,6 +54,13 @@ function releaseSyncLock(shopId: number): void {
   syncLocks.delete(shopId);
 }
 
+type SyncResult = {
+  synced: number;
+  created: number;
+  updated: number;
+  errors: string[];
+};
+
 /**
  * Check if a shop is currently syncing.
  */
@@ -1147,6 +1154,191 @@ export async function syncShopeeReturns(
       `[Shopee Sync] Returns synced: ${synced} (created: ${created}, updated: ${updated}, errors: ${errors.length})`,
     );
 
+    return { synced, created, updated, errors };
+  } catch (error) {
+    await prisma.shopeeSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: "failed",
+        errors: [error instanceof Error ? error.message : String(error)],
+        completedAt: new Date(),
+      },
+    });
+    throw error;
+  }
+}
+
+function payoutExternalId(encryptedPayoutId: string): string {
+  // Keep payout statements distinct from order-level escrow observations.
+  return `payout:${encodeURIComponent(encryptedPayoutId)}`;
+}
+
+function payoutOccurredAt(value: unknown): Date | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const date = new Date(value * 1000);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function payoutEvidencePayload(payout: Record<string, unknown>) {
+  // get_payout_info includes a payee account identifier; retain only statement evidence.
+  return sanitizeMarketplaceRawPayload({
+    encrypted_payout_id: payout.encrypted_payout_id,
+    from_currency: payout.from_currency,
+    payout_currency: payout.payout_currency,
+    from_amount: payout.from_amount,
+    payout_amount: payout.payout_amount,
+    exchange_rate: payout.exchange_rate,
+    payout_time: payout.payout_time,
+    pay_service: payout.pay_service,
+  });
+}
+
+/**
+ * Manually ingest actual Shopee CB payouts. The documented get_payout_info
+ * endpoint returns actual payout amounts and payout times, rather than pending
+ * estimates, so each durable row is final payout evidence.
+ */
+export async function syncShopeePayoutStatements(
+  shopId: number,
+  userId: string,
+  daysBack = 15,
+  actorId = userId,
+): Promise<SyncResult> {
+  const sdk = getShopeeSDK();
+  const shop = await prisma.shopeeShop.findFirst({ where: { shopId, userId } });
+  if (!shop) throw new Error(`ShopeeShop record not found for shop_id=${shopId}`);
+
+  const syncLog = await prisma.shopeeSyncLog.create({
+    data: {
+      shopId: shop.id,
+      userId: actorId,
+      syncType: "payouts",
+      status: "running",
+      triggeredBy: "manual",
+    },
+  });
+
+  const errors: string[] = [];
+  let synced = 0;
+  let created = 0;
+  let updated = 0;
+  let finalPayouts = 0;
+
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const safeDaysBack = Number.isInteger(daysBack) && daysBack > 0 ? Math.min(daysBack, 180) : 15;
+    const windowSeconds = 15 * 24 * 60 * 60;
+    const seenPayoutIds = new Set<string>();
+
+    // The endpoint permits at most fifteen days per request.
+    for (let from = now - safeDaysBack * 24 * 60 * 60; from < now; from += windowSeconds) {
+      const to = Math.min(from + windowSeconds, now);
+      let cursor = "";
+      let more = true;
+
+      while (more) {
+        try {
+          const result = await sdk.payment.getPayoutInfo({
+            payout_time_from: from,
+            payout_time_to: to,
+            page_size: 100,
+            cursor,
+          });
+          const response = (result as unknown as {
+            response?: { payout_list?: Record<string, unknown>[]; more?: boolean; next_cursor?: string };
+          }).response;
+          const payouts = response?.payout_list ?? [];
+
+          for (const payout of payouts) {
+            const encryptedPayoutId = typeof payout.encrypted_payout_id === "string"
+              ? payout.encrypted_payout_id.trim()
+              : "";
+            const occurredAt = payoutOccurredAt(payout.payout_time);
+            const payoutCurrency = typeof payout.payout_currency === "string"
+              ? payout.payout_currency.trim().toUpperCase()
+              : "";
+            const payoutAmount = parseSourceNumber(payout.payout_amount, "shopee.payout.payout_amount");
+
+            if (!encryptedPayoutId || !occurredAt || !payoutCurrency || payoutAmount.value === null) {
+              errors.push("Payout record omitted documented final payout evidence (encrypted_payout_id, payout_amount, payout_currency, or payout_time).");
+              continue;
+            }
+            if (seenPayoutIds.has(encryptedPayoutId)) continue;
+            seenPayoutIds.add(encryptedPayoutId);
+
+            const externalId = payoutExternalId(encryptedPayoutId);
+            const data = {
+              statementExternalId: encryptedPayoutId,
+              orderExternalId: null,
+              itemExternalId: null,
+              transactionType: "payout_statement",
+              feeType: "payout_paid",
+              feeName: "Shopee final payout",
+              // The API documents a float without a minor-unit scale, so retain the
+              // source value in evidence rather than inventing an exact amount.
+              amountMinor: null,
+              amountScale: 2,
+              amount: null,
+              financialQuality: "unknown",
+              unknownReason: payoutAmount.unknownReason,
+              currency: payoutCurrency,
+              sourceObservedAt: new Date(),
+              occurredAt,
+              rawPayload: payoutEvidencePayload(payout),
+            };
+            const where = {
+              platform_shopId_externalId: { platform: "shopee", shopId: shop.id, externalId },
+            };
+            const existing = await prisma.marketplaceFinancialRecord.findUnique({ where, select: { id: true } });
+            await prisma.marketplaceFinancialRecord.upsert({
+              where,
+              create: { userId, platform: "shopee", shopId: shop.id, externalId, ...data },
+              update: data,
+            });
+            if (existing) updated++; else created++;
+            synced++;
+            finalPayouts++;
+          }
+
+          more = response?.more === true;
+          cursor = response?.next_cursor ?? "";
+          if (more && !cursor) {
+            errors.push(`Payout response for ${from}-${to} indicated another page without next_cursor.`);
+            break;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`Payout request ${from}-${to}: ${message}`);
+          logger.warn(`[Shopee Payout Sync] Failed to fetch payouts for ${from}-${to}: ${message}`);
+          break;
+        }
+      }
+    }
+
+    // Settlement availability is observed only after a final payout statement is stored.
+    if (finalPayouts > 0) {
+      await setMarketplaceCapability({
+        userId,
+        platform: "shopee",
+        shopId: shop.id,
+        capability: "settlements",
+        state: "available",
+        endpointVersion: "/payment/get_payout_info",
+        observedFields: ["encrypted_payout_id", "payout_amount", "payout_currency", "payout_time"],
+      });
+    }
+
+    await prisma.shopeeSyncLog.update({
+      where: { id: syncLog.id },
+      data: {
+        status: errors.length > 0 ? "completed_with_errors" : "completed",
+        itemsSynced: synced,
+        itemsCreated: created,
+        itemsUpdated: updated,
+        errors: errors.length > 0 ? errors : null,
+        completedAt: new Date(),
+      },
+    });
     return { synced, created, updated, errors };
   } catch (error) {
     await prisma.shopeeSyncLog.update({

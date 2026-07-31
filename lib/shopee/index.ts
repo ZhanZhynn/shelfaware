@@ -14,6 +14,7 @@ export { getShopeeAuthUrl, exchangeCodeForToken, getShopeeShopInfo } from "./aut
 export {
   syncShopeeProducts,
   syncShopeeOrders,
+  syncShopeePayoutStatements,
   syncShopeeReturns,
   syncShopeeAll,
   syncShopeeAds,

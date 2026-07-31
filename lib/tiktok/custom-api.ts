@@ -17,6 +17,7 @@ import type {
   TikTokSearchOrdersData,
   TikTokGetOrderDetailData,
   TikTokOrderStatementTransactionsData,
+  TikTokStatementTransactionsData,
   TikTokShopInfo,
 } from "./types";
 
@@ -280,6 +281,35 @@ export async function getOrderStatementTransactions(
     path: `/finance/202501/orders/${encodeURIComponent(orderId)}/statement_transactions`,
     accessToken,
     params: { shop_cipher: shopCipher },
+  });
+
+  return resp.data ?? {};
+}
+
+/**
+ * Get one page of transactions for a statement. Statements are paginated by
+ * order creation time and only become settlement evidence when SETTLED.
+ */
+export async function getStatementTransactions(
+  accessToken: string,
+  shopCipher: string,
+  statementId: string,
+  pageSize: number = 100,
+  pageToken?: string,
+): Promise<TikTokStatementTransactionsData> {
+  const params: Record<string, string> = {
+    shop_cipher: shopCipher,
+    sort_field: "order_create_time",
+    sort_order: "DESC",
+    page_size: String(pageSize),
+  };
+  if (pageToken) params.page_token = pageToken;
+
+  const resp = await tiktokRequest<TikTokStatementTransactionsData>({
+    method: "GET",
+    path: `/finance/202501/statements/${encodeURIComponent(statementId)}/statement_transactions`,
+    accessToken,
+    params,
   });
 
   return resp.data ?? {};

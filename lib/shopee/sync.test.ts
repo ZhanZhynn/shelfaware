@@ -7,7 +7,7 @@ const { prismaMock, sdk, getShopeeSDK, setMarketplaceCapability } = vi.hoisted((
       getOrdersDetail: vi.fn(),
       searchPackageList: vi.fn(),
     },
-    payment: { getEscrowDetailBatch: vi.fn() },
+    payment: { getEscrowDetailBatch: vi.fn(), getPayoutInfo: vi.fn() },
   };
   const prismaMock = {
     shopeeShop: { findFirst: vi.fn(), update: vi.fn() },
@@ -15,7 +15,7 @@ const { prismaMock, sdk, getShopeeSDK, setMarketplaceCapability } = vi.hoisted((
     shopeeProductVariant: { findMany: vi.fn() },
     shopeeOrder: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     shopeeOrderItem: { deleteMany: vi.fn(), create: vi.fn() },
-    marketplaceFinancialRecord: { upsert: vi.fn() },
+    marketplaceFinancialRecord: { findUnique: vi.fn(), upsert: vi.fn() },
   };
   return { prismaMock, sdk, getShopeeSDK: vi.fn(), setMarketplaceCapability: vi.fn() };
 });
@@ -24,7 +24,7 @@ vi.mock("./server", () => ({ getShopeeSDK }));
 vi.mock("@/prisma/client", () => ({ default: prismaMock, prisma: prismaMock }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability }));
 
-import { syncShopeeOrders } from "./sync";
+import { syncShopeeOrders, syncShopeePayoutStatements } from "./sync";
 
 function configureOrderSync() {
   prismaMock.shopeeShop.findFirst.mockResolvedValue({ id: "shop-record", shopId: 123 });
@@ -35,6 +35,7 @@ function configureOrderSync() {
   prismaMock.shopeeSyncLog.update.mockResolvedValue({});
   prismaMock.shopeeShop.update.mockResolvedValue({});
   prismaMock.marketplaceFinancialRecord.upsert.mockResolvedValue({});
+  prismaMock.marketplaceFinancialRecord.findUnique.mockResolvedValue(null);
   setMarketplaceCapability.mockResolvedValue({});
   sdk.order.getOrderList.mockResolvedValue({
     response: { order_list: [{ order_sn: "ORDER-1", order_status: "COMPLETED" }], more: false, next_cursor: "" },
@@ -59,6 +60,74 @@ beforeEach(() => {
   vi.clearAllMocks();
   getShopeeSDK.mockReturnValue(sdk);
   configureOrderSync();
+});
+
+describe("Shopee final payout sync", () => {
+  const finalPayout = {
+    encrypted_payout_id: "11796795500890875355",
+    from_currency: "SGD",
+    payout_currency: "USD",
+    from_amount: 1769.01,
+    payout_amount: 1769.01,
+    exchange_rate: "1",
+    payout_time: 1_691_638_015,
+    payee_id: "private-account",
+  };
+
+  it("upserts final payouts under payout-specific IDs and then observes settlements", async () => {
+    sdk.payment.getPayoutInfo.mockResolvedValue({
+      response: { payout_list: [finalPayout], more: false, next_cursor: "" },
+    });
+    prismaMock.marketplaceFinancialRecord.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "existing-payout" });
+
+    const first = await syncShopeePayoutStatements(123, "user-record");
+    const second = await syncShopeePayoutStatements(123, "user-record");
+
+    expect(first).toMatchObject({ synced: 1, created: 1, updated: 0, errors: [] });
+    expect(second).toMatchObject({ synced: 1, created: 0, updated: 1, errors: [] });
+    expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        platform_shopId_externalId: {
+          platform: "shopee",
+          shopId: "shop-record",
+          externalId: "payout:11796795500890875355",
+        },
+      },
+      create: expect.objectContaining({
+        statementExternalId: "11796795500890875355",
+        transactionType: "payout_statement",
+        feeType: "payout_paid",
+        amountMinor: null,
+        amount: null,
+        currency: "USD",
+        rawPayload: expect.not.objectContaining({ payee_id: expect.anything() }),
+      }),
+    }));
+    expect(setMarketplaceCapability).toHaveBeenCalledWith(expect.objectContaining({
+      platform: "shopee",
+      shopId: "shop-record",
+      capability: "settlements",
+      state: "available",
+      endpointVersion: "/payment/get_payout_info",
+    }));
+    expect(prismaMock.marketplaceFinancialRecord.upsert.mock.invocationCallOrder[0])
+      .toBeLessThan(setMarketplaceCapability.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("does not observe settlements when a payout lacks documented final evidence", async () => {
+    sdk.payment.getPayoutInfo.mockResolvedValue({
+      response: { payout_list: [{ ...finalPayout, payout_time: undefined }], more: false, next_cursor: "" },
+    });
+
+    const result = await syncShopeePayoutStatements(123, "user-record");
+
+    expect(result).toMatchObject({ synced: 0, created: 0, updated: 0 });
+    expect(result.errors).toHaveLength(1);
+    expect(prismaMock.marketplaceFinancialRecord.upsert).not.toHaveBeenCalled();
+    expect(setMarketplaceCapability).not.toHaveBeenCalled();
+  });
 });
 
 describe("Shopee escrow finance observations", () => {

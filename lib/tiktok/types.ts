@@ -342,3 +342,17 @@ export interface TikTokOrderStatementTransactionsData {
   sku_transactions?: TikTokOrderStatementTransaction[];
   total_count?: number;
 }
+
+export interface TikTokStatementTransactionsData {
+  id?: string;
+  create_time?: number;
+  status?: string;
+  currency?: string;
+  payable_amount?: string;
+  total_reserve_amount?: string;
+  total_settlement_amount?: string;
+  total_settlement_breakdown?: Record<string, unknown>;
+  total_count?: number;
+  next_page_token?: string;
+  transactions?: Array<Record<string, unknown>>;
+}

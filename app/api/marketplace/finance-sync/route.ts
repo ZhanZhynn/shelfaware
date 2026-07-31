@@ -8,6 +8,8 @@ import { syncTikTokFinance } from "@/lib/tiktok";
 import { syncShopifyFinance } from "@/lib/shopify";
 import { syncShopeeOrders } from "@/lib/shopee";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
+import { linkMarketplaceFinancialRecords } from "@/lib/server/marketplace-financial-links";
+import { reconcileLazadaPayoutStatements } from "@/lib/server/lazada-reconciliation";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
 
@@ -21,10 +23,12 @@ export async function POST(request: NextRequest) {
   const ownerIds = await marketplaceOwnerIds(session);
   try {
     let result: unknown;
+    let reconciliation: unknown = null;
     if (platform === "lazada") {
       const shop = await prisma.lazadaShop.findFirst({ where: { id: body.shopId, userId: { in: ownerIds } }, select: { sellerId: true, userId: true } });
       if (!shop) throw new Error("Selected Lazada shop is unavailable.");
       result = await syncLazadaFinance(shop.sellerId, shop.userId, undefined, session.id);
+      reconciliation = await reconcileLazadaPayoutStatements({ userId: shop.userId, shopId: body.shopId });
     } else if (platform === "tiktok") {
       const shop = await prisma.tikTokShop.findFirst({ where: { id: body.shopId, userId: { in: ownerIds } }, select: { shopId: true, userId: true } });
       if (!shop) throw new Error("Selected TikTok Shop is unavailable.");
@@ -38,8 +42,9 @@ export async function POST(request: NextRequest) {
       if (!shop) throw new Error("Selected Shopee shop is unavailable.");
       result = await syncShopeeOrders(shop.shopId, shop.userId, undefined, undefined, session.id);
     }
+    const links = await linkMarketplaceFinancialRecords(platform, body.shopId);
     await invalidateMarketplaceAnalytics(platform);
-    return NextResponse.json({ result });
+    return NextResponse.json({ result, links, reconciliation });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: { code: "FINANCE_SYNC_FAILED", message } }, { status: 502 });

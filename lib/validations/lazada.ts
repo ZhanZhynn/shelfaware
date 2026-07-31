@@ -8,7 +8,7 @@ import { z } from "zod";
 // --- Sync Trigger ---
 export const lazadaSyncBodySchema = z.object({
   sellerId: z.string().min(1, "Seller ID is required"),
-  syncType: z.enum(["products", "orders", "finance", "all"]).default("all"),
+  syncType: z.enum(["products", "orders", "finance", "payouts", "all"]).default("all"),
 });
 
 export type LazadaSyncBody = z.infer<typeof lazadaSyncBodySchema>;

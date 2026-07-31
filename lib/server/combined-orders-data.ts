@@ -13,15 +13,15 @@ import type { MarketSource } from "@/types/marketplace";
 /** Normalized order item shape */
 export type CombinedOrderItem = {
   productName: string;
-  quantity: number;
-  price: number;
+  quantity: number | null;
+  price: number | null;
 };
 
 /** Normalized order shape — unified WMS + marketplace */
 export type CombinedOrder = {
   id: string;
   source: MarketSource;
-  total: number;
+  total: number | null;
   status: string;
   createdAt: string;
   items: CombinedOrderItem[];
@@ -50,7 +50,7 @@ export type LazadaProductStats = {
 export type LazadaTopProduct = {
   productName: string;
   revenue: number;
-  quantity: number;
+  quantity: number | null;
 };
 
 /** Combined insights — orders + marketplace-specific aggregations */
@@ -259,7 +259,7 @@ export async function getCombinedInsightsForUser(
   const shopeeTopProducts: ShopeeTopProduct[] = shopeeTopRaw.map((item) => ({
     productName: item.productName,
     revenue: item._sum.subtotal || 0,
-    quantity: Number(item._sum.quantity || 0),
+    quantity: Number(item._sum.quantity ?? 0),
   }));
 
   // Build Lazada product stats
@@ -278,7 +278,7 @@ export async function getCombinedInsightsForUser(
   const lazadaTopProducts: LazadaTopProduct[] = lazadaTopRaw.map((item) => ({
     productName: item.productName,
     revenue: item._sum.paidPrice || 0,
-    quantity: Number(item._sum.quantity || 0),
+    quantity: item._sum.quantity === null ? null : Number(item._sum.quantity),
   }));
 
   const result: CombinedInsights = {

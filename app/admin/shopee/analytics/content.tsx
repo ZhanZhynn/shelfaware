@@ -15,13 +15,11 @@ export default function ShopeeAnalyticsContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Shopee Analytics</h1>
-          <p className="text-muted-foreground">
-            Revenue trends, buyer insights, and product performance
-          </p>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold">Shopee Analytics</h1>
+        <p className="text-muted-foreground">
+          Revenue trends, buyer insights, and product performance
+        </p>
       </div>
 
       <ShopeeDateRangeFilter
@@ -31,11 +29,8 @@ export default function ShopeeAnalyticsContent() {
       />
 
       <ShopeeRevenueTrendChart />
-
       <ShopeeBuyerAnalytics />
-
       <ShopeeClvAnalytics />
-
       <ShopeeProductPerformance />
     </div>
   );

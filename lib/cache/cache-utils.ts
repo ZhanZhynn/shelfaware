@@ -522,6 +522,7 @@ export async function invalidateAllServerCaches(): Promise<void> {
     invalidateCache(cacheKeys.lazada.pattern),
     invalidateCache(cacheKeys.tiktok.pattern),
     invalidateCache(cacheKeys.shopify.pattern),
+    invalidateMarketplaceAnalytics(),
     invalidateCache("forecasting:*"),
     invalidateCache("system-config:*"),
     invalidateCache(cacheKeys.abcAnalysis.pattern),
@@ -529,6 +530,12 @@ export async function invalidateAllServerCaches(): Promise<void> {
     invalidateCache(cacheKeys.purchaseOrders.pattern),
     invalidateCache(cacheKeys.executiveKpi.pattern),
   ]);
+}
+
+/** Invalidate every versioned analytics view after orders, refunds, or finance syncs. */
+export async function invalidateMarketplaceAnalytics(platform?: "shopee" | "lazada" | "tiktok" | "shopify"): Promise<void> {
+  // API/calculation versions and every access/filter dimension are intentionally wildcarded.
+  await invalidateCache(`marketplace-analytics:*:*:${platform ?? "*"}:*`);
 }
 
 /** @deprecated Use invalidateAllServerCaches instead */

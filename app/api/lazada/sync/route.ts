@@ -5,11 +5,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveSeller, syncLazadaProducts, syncLazadaOrders, syncLazadaAll, isSellerSyncing, validateLazadaToken, patchLazadaSDKEndpoint } from "@/lib/lazada";
+import { setActiveSeller, syncLazadaProducts, syncLazadaOrders, syncLazadaFinance, syncLazadaAll, isSellerSyncing, validateLazadaToken, patchLazadaSDKEndpoint } from "@/lib/lazada";
 import { lazadaSyncBodySchema } from "@/lib/validations/lazada";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
+import { invalidateCache, cacheKeys, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
@@ -64,21 +64,24 @@ export async function POST(request: NextRequest) {
     patchLazadaSDKEndpoint(shop.countryCode);
 
     // Pre-flight token check — fail fast with a clear message
-    const tokenStatus = await validateLazadaToken();
-    if (!tokenStatus.valid) {
-      return NextResponse.json(
-        {
-          error: "Lazada token is invalid or expired",
-          details: tokenStatus.error,
-          action: "Please re-authorize the seller by connecting again.",
-        },
-        { status: 401 },
-      );
+    if (syncType !== "finance") {
+      const tokenStatus = await validateLazadaToken();
+      if (!tokenStatus.valid) {
+        return NextResponse.json(
+          {
+            error: "Lazada token is invalid or expired",
+            details: tokenStatus.error,
+            action: "Please re-authorize the seller by connecting again.",
+          },
+          { status: 401 },
+        );
+      }
     }
 
     let result: {
       products?: { synced: number; created: number; updated: number; errors: string[] };
       orders?: { synced: number; created: number; updated: number; errors: string[] };
+      finance?: { synced: number; created: number; updated: number; errors: string[] };
     };
 
     switch (syncType) {
@@ -88,6 +91,9 @@ export async function POST(request: NextRequest) {
       case "orders":
         result = { orders: await syncLazadaOrders(sellerId, shop.userId, undefined, userId) };
         break;
+      case "finance":
+        result = { finance: await syncLazadaFinance(sellerId, shop.userId, undefined, userId) };
+        break;
       case "all":
       default:
         result = await syncLazadaAll(sellerId, shop.userId, userId);
@@ -96,6 +102,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate cache after sync
     await invalidateCache(cacheKeys.lazada?.pattern || "lazada:*");
+    await invalidateMarketplaceAnalytics("lazada");
 
     return NextResponse.json(result);
   } catch (error) {

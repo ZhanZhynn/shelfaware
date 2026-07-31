@@ -11,6 +11,7 @@ import { getCache, setCache } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
+import { legacyFinancialReady, legacyKnownNumber, legacySum } from "@/lib/marketplace/analytics/legacy-quality";
 
 export async function GET(request: NextRequest) {
   try {
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
       totalReturns,
       returnsByStatus,
       topReasonsRaw,
-      refundAgg,
+      refundRows,
       recentReturns,
     ] = await Promise.all([
       prisma.shopeeOrder.count({
@@ -75,10 +76,9 @@ export async function GET(request: NextRequest) {
         orderBy: { _count: { reason: "desc" } },
         take: 10,
       }),
-      prisma.shopeeReturn.aggregate({
+      prisma.shopeeReturn.findMany({
         where: { shopId: { in: shopIds } },
-        _sum: { refundAmount: true },
-        _avg: { refundAmount: true },
+        select: { refundAmount: true, financialQuality: true },
       }),
       prisma.shopeeReturn.findMany({
         where: { shopId: { in: shopIds } },
@@ -91,15 +91,16 @@ export async function GET(request: NextRequest) {
           status: true,
           refundAmount: true,
           reason: true,
-          buyerUsername: true,
           shopeeCreatedAt: true,
+          financialQuality: true,
         },
       }),
     ]);
 
     const returnRate = totalOrders > 0 ? (totalReturns / totalOrders) * 100 : 0;
-    const totalRefundAmount = Number(refundAgg._sum.refundAmount || 0);
-    const avgRefund = Number(refundAgg._avg.refundAmount || 0);
+    const refundReady = await legacyFinancialReady("shopee", shopIds, "refunds");
+    const totalRefundAmount = legacySum(refundRows.map((row) => ({ ...row, value: row.refundAmount })), refundReady);
+    const avgRefund = totalRefundAmount === null ? null : totalReturns ? totalRefundAmount / totalReturns : 0;
 
     const byStatus = returnsByStatus.map((s) => ({
       status: s.status,
@@ -114,13 +115,17 @@ export async function GET(request: NextRequest) {
     const result = {
       summary: {
         totalReturns,
-        totalRefundAmount: Math.round(totalRefundAmount * 100) / 100,
+        totalRefundAmount: totalRefundAmount === null ? null : Math.round(totalRefundAmount * 100) / 100,
         returnRate: Math.round(returnRate * 100) / 100,
-        avgRefund: Math.round(avgRefund * 100) / 100,
+        avgRefund: avgRefund === null ? null : Math.round(avgRefund * 100) / 100,
       },
       byStatus,
       topReasons,
-      recentReturns,
+      recentReturns: recentReturns.map((row) => {
+        const { financialQuality, refundAmount, ...rest } = row;
+        const { buyerUsername: _buyerUsername, ...returnRow } = rest as typeof rest & { buyerUsername?: string };
+        return { ...returnRow, refundAmount: legacyKnownNumber(refundAmount, { financialQuality }, refundReady) };
+      }),
     };
 
     await setCache(cacheKey, result, 300);

@@ -1,16 +1,16 @@
 /**
  * Shopify Sync — Trigger Sync
  * POST /api/shopify/sync
- * Body: { shopId: string, syncType: "products"|"orders"|"all", daysBack?: number }
+ * Body: { shopId: string, syncType: "products"|"orders"|"finance"|"all", daysBack?: number }
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { syncShopifyProducts, syncShopifyOrders, syncShopifyAll, isShopSyncing, validateShopifyToken, setActiveShop } from "@/lib/shopify";
+import { syncShopifyProducts, syncShopifyOrders, syncShopifyFinance, syncShopifyAll, isShopSyncing, validateShopifyToken, setActiveShop } from "@/lib/shopify";
 import { shopifySyncBodySchema } from "@/lib/validations/shopify";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { invalidateCache } from "@/lib/cache/cache-utils";
+import { invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
     let result: {
       products?: { synced: number; created: number; updated: number; errors: string[] };
       orders?: { synced: number; created: number; updated: number; errors: string[] };
+      finance?: { synced: number; created: number; updated: number; errors: string[] };
     };
 
     switch (syncType) {
@@ -87,6 +88,9 @@ export async function POST(request: NextRequest) {
       case "orders":
         result = { orders: await syncShopifyOrders(shopId, shop.userId, daysBack, userId) };
         break;
+      case "finance":
+        result = { finance: await syncShopifyFinance(shopId, shop.userId, daysBack, userId) };
+        break;
       case "all":
       default:
         result = await syncShopifyAll(shopId, shop.userId, userId);
@@ -95,6 +99,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate cache after sync
     await invalidateCache("shopify:*");
+    await invalidateMarketplaceAnalytics("shopify");
 
     return NextResponse.json(result);
   } catch (error) {

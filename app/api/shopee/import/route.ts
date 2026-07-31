@@ -9,7 +9,7 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { parseExcelOrderFile, importExcelOrders } from "@/lib/shopee/excel-import";
 import { prisma } from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
+import { invalidateCache, cacheKeys, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate cache after import
     await invalidateCache(cacheKeys.shopee.pattern);
+    await invalidateMarketplaceAnalytics("shopee");
 
     logger.info(
       `[Shopee Excel Import] Completed for shop ${shop.shopName}: ${result.orders} orders, ${result.itemsCreated} items`,

@@ -158,6 +158,40 @@ export interface ShopifyOrdersResponse {
   };
 }
 
+// ─── Finance ──────────────────────────────────────────────────────────────
+
+export interface ShopifyOrderTransactionNode {
+  id: string;
+  kind: string;
+  status: string;
+  gateway: string | null;
+  createdAt: string;
+  processedAt: string | null;
+  amountSet: MoneyBag;
+}
+
+export interface ShopifyRefundNode {
+  id: string;
+  createdAt: string;
+  processedAt: string;
+  totalRefundedSet: MoneyBag;
+  transactions: { nodes: ShopifyOrderTransactionNode[] };
+}
+
+export interface ShopifyFinanceOrderNode {
+  id: string;
+  updatedAt: string;
+  transactions: { nodes: ShopifyOrderTransactionNode[] };
+  refunds: ShopifyRefundNode[];
+}
+
+export interface ShopifyFinanceOrdersResponse {
+  orders: {
+    nodes: ShopifyFinanceOrderNode[];
+    pageInfo: PageInfo;
+  };
+}
+
 // ─── Shop Info ────────────────────────────────────────────────────────────
 
 export interface ShopifyShopInfo {

@@ -1566,8 +1566,8 @@ class ApiClient {
 
     triggerSync: async (data: {
       sellerId: string;
-      syncType: "products" | "orders" | "all";
-    }): Promise<ApiResponse<{ success: boolean; message?: string }>> => {
+      syncType: "products" | "orders" | "finance" | "all";
+    }): Promise<ApiResponse<unknown>> => {
       const response = await this.client.post(API_ENDPOINTS.lazada.sync, data);
       return {
         data: response.data,
@@ -1823,7 +1823,7 @@ class ApiClient {
 
     triggerSync: async (data: {
       shopId: string;
-      syncType?: "products" | "orders" | "all";
+      syncType?: "products" | "orders" | "finance" | "all";
     }): Promise<ApiResponse<unknown>> => {
       const response = await this.client.post(API_ENDPOINTS.tiktok.sync, data);
       return {
@@ -2081,7 +2081,8 @@ class ApiClient {
 
     triggerSync: async (data: {
       shopId: string;
-      syncType?: "products" | "orders" | "all";
+      syncType?: "products" | "orders" | "finance" | "all";
+      daysBack?: number;
     }): Promise<ApiResponse<unknown>> => {
       const response = await this.client.post(API_ENDPOINTS.shopify.sync, data);
       return {

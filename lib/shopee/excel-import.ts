@@ -347,7 +347,7 @@ export async function importExcelOrders(
 
         // Check if order already exists
         const existing = await prisma.shopeeOrder.findFirst({
-          where: { shopeeOrderId: orderId },
+          where: { shopId: shop.id, shopeeOrderId: orderId },
         });
 
         const orderData = {
@@ -378,6 +378,10 @@ export async function importExcelOrders(
           sellerTxnFee,
           shippingFee,
           sellerIncome,
+          financialQuality: "unknown",
+          financialRevision: "source-v1",
+          qualityMarkedAt: new Date(),
+          sourceObservedAt: new Date(),
           buyerPaymentMethod: "",
         };
 

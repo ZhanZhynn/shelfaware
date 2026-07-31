@@ -16,15 +16,21 @@ import {
   getProductDetail,
   searchOrders,
   getOrderDetail,
+  getOrderStatementTransactions,
 } from "./custom-api";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
+import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
+import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
+import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
 import type {
   TikTokProductSummary,
   TikTokOrderSummary,
   TikTokProductSKU,
+  TikTokOrderStatementTransaction,
+  TikTokOrderStatementTransactionsData,
 } from "./types";
 
 // ─── Status Mappings ──────────────────────────────────────────────────────
@@ -449,7 +455,7 @@ export async function syncTikTokOrders(
               const paymentStatus = PAYMENT_STATUS_MAP[order.status] || "unpaid";
 
               const existing = await prisma.tikTokOrder.findFirst({
-                where: { tiktokOrderId: order.id },
+                where: { shopId: shop.id, tiktokOrderId: order.id },
               });
 
               const orderData = {
@@ -460,9 +466,14 @@ export async function syncTikTokOrders(
                 fulfillmentType: order.fulfillment_type || null,
                 shippingType: order.shipping_type || null,
                 currency: order.payment?.currency || null,
-                payment: order.payment ? JSON.parse(JSON.stringify(order.payment)) : undefined,
+                payment: order.payment ? toInputJson(order.payment) : undefined,
+                financialQuality: "unknown",
+                financialRevision: "source-v1",
+                qualityMarkedAt: new Date(),
+                sourceObservedAt: new Date(),
+                rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
                 recipientAddress: order.recipient_address
-                  ? JSON.parse(JSON.stringify(order.recipient_address))
+                  ? toInputJson(order.recipient_address)
                   : undefined,
                 isCod: order.is_cod ?? false,
                 buyerUserId: order.user_id || null,
@@ -495,7 +506,7 @@ export async function syncTikTokOrders(
 
               // Upsert order items
               const dbOrder = existing || (await prisma.tikTokOrder.findFirst({
-                where: { tiktokOrderId: order.id },
+                where: { shopId: shop.id, tiktokOrderId: order.id },
               }));
 
               if (dbOrder && order.line_items) {
@@ -509,7 +520,7 @@ export async function syncTikTokOrders(
                 for (const item of order.line_items) {
                   if (item.sku_id) {
                     const variant = await prisma.tikTokProductVariant.findFirst({
-                      where: { tiktokSkuId: item.sku_id },
+                      where: { shopId: shop.id, tiktokSkuId: item.sku_id },
                       select: { id: true },
                     });
                     if (variant) {
@@ -519,6 +530,8 @@ export async function syncTikTokOrders(
                 }
 
                 for (const item of order.line_items) {
+                  const originalPrice = parseSourceNumber(item.original_price, "tiktok.line_items.original_price");
+                  const price = parseSourceNumber(item.sale_price, "tiktok.line_items.sale_price");
                   await prisma.tikTokOrderItem.create({
                     data: {
                       orderId: dbOrder.id,
@@ -531,13 +544,18 @@ export async function syncTikTokOrders(
                       skuName: item.sku_name || null,
                       sellerSku: item.seller_sku || null,
                       productImageUrl: item.sku_image || null,
-                      quantity: 1,
-                      originalPrice: parseFloat(item.original_price || "0"),
-                      price: parseFloat(item.sale_price || "0"),
-                      discount: item.seller_discount ? parseFloat(item.seller_discount) : 0,
-                      subtotalAmount: 0,
-                      taxAmount: 0,
-                      refundAmount: 0,
+                      quantity: null,
+                      originalPrice: originalPrice.value,
+                      price: price.value,
+                      discount: null,
+                      subtotalAmount: null,
+                      taxAmount: null,
+                      refundAmount: null,
+                      financialQuality: "unknown",
+                      financialRevision: "source-v1",
+                      qualityMarkedAt: new Date(),
+                      sourceObservedAt: new Date(),
+                       rawFinancialPayload: sanitizeMarketplaceRawPayload(item),
                       currency: item.currency || null,
                       isGift: item.is_gift ?? false,
                       saleAttrs: undefined,
@@ -567,6 +585,181 @@ export async function syncTikTokOrders(
       });
 
       return { synced, created, updated, errors };
+    },
+  );
+}
+
+// ─── Finance Sync ─────────────────────────────────────────────────────────
+
+function toExactMinorUnits(value: unknown): { amountMinor: string; amountScale: number } | null {
+  // Only source strings preserve decimal precision; a JavaScript number may not.
+  if (typeof value !== "string") return null;
+  const amount = value.trim();
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(amount);
+  if (!match) return null;
+
+  const [, sign = "", whole = "", fraction = ""] = match;
+  const digits = `${whole.replace(/^0+(?=\d)/, "")}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+  return { amountMinor: `${sign === "-" && digits !== "0" ? "-" : ""}${digits}`, amountScale: fraction.length };
+}
+
+function financeExternalId(
+  orderId: string,
+  transaction: TikTokOrderStatementTransaction | TikTokOrderStatementTransactionsData,
+  index: number,
+): string {
+  if ("statement_id" in transaction && typeof transaction.statement_id === "string" && transaction.statement_id) {
+    return transaction.statement_id;
+  }
+  const skuId = "sku_id" in transaction && typeof transaction.sku_id === "string" ? transaction.sku_id : "order";
+  return `${orderId}:${skuId}:${index}`;
+}
+
+export async function syncTikTokFinance(
+  shopId: string,
+  userId: string,
+  actorId = userId,
+): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
+  setActiveShop(shopId);
+
+  const shop = await prisma.tikTokShop.findFirst({ where: { shopId, userId } });
+  if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
+
+  return runWithSyncLog(
+    { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "finance" },
+    async () => {
+      try {
+        const tokenCheck = await validateTikTokToken();
+        if (!tokenCheck.valid) {
+          throw new Error(`TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`);
+        }
+
+        const [accessToken, cipher, orders] = await Promise.all([
+          ensureFreshToken(),
+          getActiveShopCipher(),
+          prisma.tikTokOrder.findMany({
+            where: { shopId: shop.id },
+            select: { tiktokOrderId: true },
+          }),
+        ]);
+        const errors: string[] = [];
+        let synced = 0;
+        let created = 0;
+        let updated = 0;
+        let successfulRequests = 0;
+
+        for (const order of orders) {
+          try {
+            const statement = await withTikTokRetry(() =>
+              getOrderStatementTransactions(accessToken, cipher, order.tiktokOrderId),
+            );
+            successfulRequests++;
+            const transactions = statement.sku_transactions?.length
+              ? statement.sku_transactions
+              : [statement];
+
+            for (let index = 0; index < transactions.length; index++) {
+              const transaction = transactions[index];
+              if (!transaction) continue;
+              try {
+                const amount = transaction.settlement_amount;
+                const parsedAmount = parseSourceNumber(amount, "tiktok.finance.settlement_amount");
+                const exactAmount = toExactMinorUnits(amount);
+                const orderCreateTime = statement.order_create_time;
+                const occurredAt = typeof orderCreateTime === "number"
+                  ? new Date(orderCreateTime * 1000)
+                  : null;
+                const externalId = financeExternalId(order.tiktokOrderId, transaction, index);
+                const data = {
+                  orderExternalId: statement.order_id || order.tiktokOrderId,
+                  itemExternalId: "sku_id" in transaction && typeof transaction.sku_id === "string"
+                    ? transaction.sku_id
+                    : null,
+                  transactionType: "settlement",
+                  feeType: "order_statement",
+                  feeName: "TikTok Shop order settlement",
+                  amountMinor: exactAmount?.amountMinor ?? null,
+                  amountScale: exactAmount?.amountScale ?? 2,
+                  amount: null,
+                  financialQuality: parsedAmount.quality,
+                  unknownReason: parsedAmount.unknownReason,
+                  currency: statement.currency ?? null,
+                  sourceObservedAt: new Date(),
+                  occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
+                  rawPayload: sanitizeMarketplaceRawPayload({
+                    order_id: statement.order_id,
+                    order_create_time: statement.order_create_time,
+                    currency: statement.currency,
+                    revenue_amount: statement.revenue_amount,
+                    fee_and_tax_amount: statement.fee_and_tax_amount,
+                    shipping_cost_amount: statement.shipping_cost_amount,
+                    settlement_amount: statement.settlement_amount,
+                    transaction,
+                  }),
+                };
+                const where = {
+                  platform_shopId_externalId: {
+                    platform: "tiktok",
+                    shopId: shop.id,
+                    externalId,
+                  },
+                };
+                const existing = await prisma.marketplaceFinancialRecord.findUnique({
+                  where,
+                  select: { id: true },
+                });
+                await prisma.marketplaceFinancialRecord.upsert({
+                  where,
+                  create: { userId, platform: "tiktok", shopId: shop.id, externalId, ...data },
+                  update: data,
+                });
+                if (existing) updated++; else created++;
+                synced++;
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                errors.push(`Statement transaction for order ${order.tiktokOrderId}: ${message}`);
+                logger.warn(`[TikTok Finance Sync] Failed to store statement transaction: ${message}`);
+              }
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`Order ${order.tiktokOrderId}: ${message}`);
+            logger.warn(`[TikTok Finance Sync] Failed to fetch order statement: ${message}`);
+          }
+        }
+
+        if (orders.length > 0 && successfulRequests === 0) {
+          throw new Error(errors[0] || "TikTok finance requests failed for all locally observed orders");
+        }
+
+        await setMarketplaceCapability({
+          userId,
+          platform: "tiktok",
+          shopId: shop.id,
+          capability: "finance",
+          state: orders.length === 0 ? "unknown" : "available",
+          detail: orders.length === 0 ? "No locally observed TikTok orders to query." : undefined,
+          endpointVersion: "/finance/202501/orders/{order_id}/statement_transactions",
+          observedFields: ["statement_id", "settlement_amount", "currency"],
+        });
+        return { synced, created, updated, errors };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          await setMarketplaceCapability({
+            userId,
+            platform: "tiktok",
+            shopId: shop.id,
+            capability: "finance",
+            state: "failed",
+            detail: message,
+            endpointVersion: "/finance/202501/orders/{order_id}/statement_transactions",
+          });
+        } catch (capabilityError) {
+          logger.error("[TikTok Finance Sync] Failed to record finance capability:", capabilityError);
+        }
+        throw error;
+      }
     },
   );
 }
@@ -647,7 +840,7 @@ function normalizeSkuData(sku: TikTokProductSKU) {
     totalQuantity,
     imageUrl: sku.image_url || null,
     status: sku.status || "NORMAL",
-    salesAttrs: salesAttrs ? JSON.parse(JSON.stringify(salesAttrs)) : null,
+    salesAttrs: salesAttrs ? toInputJson(salesAttrs) : null,
     lastSyncedAt: new Date(),
   };
 }

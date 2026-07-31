@@ -8,8 +8,10 @@
 import { getShopeeSDK } from "./server";
 import type { ItemStatus } from "@congminh1254/shopee-sdk/schemas";
 import prisma from "@/prisma/client";
-import { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
+import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
+import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
+import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
 
 // Shopee order status mapping to our internal status
 const ORDER_STATUS_MAP: Record<string, string> = {
@@ -30,11 +32,6 @@ const PAYMENT_STATUS_MAP: Record<string, string> = {
   COMPLETED: "paid",
   CANCELLED: "refunded",
 };
-
-/** Cast value to Prisma InputJsonValue for JSON fields */
-function toInputJson(value: unknown): Prisma.InputJsonValue {
-  return value as Prisma.InputJsonValue;
-}
 
 // ─── Sync Lock (per-shop mutex) ──────────────────────────────────────────────
 
@@ -468,11 +465,46 @@ async function fetchOrderDetails(
  * Fee breakdown (commission, service fee, seller income) comes from the
  * payment.getEscrowDetailBatch endpoint, NOT from getOrdersDetail.
  */
+type EscrowFetchResult = {
+  details: Map<string, Record<string, unknown>>;
+  successfulRequests: number;
+  errors: unknown[];
+};
+
+function escrowCapabilityFailure(error: unknown): {
+  state: "failed" | "unauthorized";
+  detail: string;
+  errorCode?: string;
+} {
+  const message = error instanceof Error ? error.message : String(error);
+  const errorData = error && typeof error === "object" && "data" in error
+    ? (error as { data?: unknown }).data
+    : undefined;
+  const data = errorData && typeof errorData === "object" ? errorData as Record<string, unknown> : {};
+  const status = error && typeof error === "object" && "status" in error
+    ? (error as { status?: unknown }).status
+    : undefined;
+  const errorCode = typeof data.error === "string"
+    ? data.error
+    : typeof data.error_code === "string"
+      ? data.error_code
+      : undefined;
+  const unauthorized = status === 401 || status === 403 || /(?:error_auth|unauthori[sz]ed|forbidden|permission denied|access denied|invalid.*token|expired.*token)/i.test(`${errorCode ?? ""} ${message}`);
+
+  return {
+    state: unauthorized ? "unauthorized" : "failed",
+    detail: message,
+    errorCode,
+  };
+}
+
 async function fetchEscrowDetails(
   sdk: ReturnType<typeof getShopeeSDK>,
   orderSns: string[],
-): Promise<Map<string, Record<string, unknown>>> {
+): Promise<EscrowFetchResult> {
   const details = new Map<string, Record<string, unknown>>();
+  const errors: unknown[] = [];
+  let successfulRequests = 0;
   const BATCH_SIZE = 50;
 
   for (let i = 0; i < orderSns.length; i += BATCH_SIZE) {
@@ -481,22 +513,94 @@ async function fetchEscrowDetails(
       const result = await sdk.payment.getEscrowDetailBatch({
         order_sn_list: batch,
       });
-      // Response structure: { response: [{ escrow_detail: { order_sn, order_income, buyer_payment_info } }] }
-      const resp = (result as unknown as { response?: Array<{ escrow_detail?: Record<string, unknown> }> }).response;
-      const escrowList = Array.isArray(resp) ? resp : [];
-      for (const wrapper of escrowList) {
-        const detail = wrapper?.escrow_detail;
-        if (detail) {
-          const sn = String(detail.order_sn || "");
-          if (sn) details.set(sn, detail);
-        }
+      successfulRequests++;
+      // The current SDK returns response.order_income_list. Retain support for
+      // the older wrapped form so already-observed escrow data is not discarded.
+      const response = (result as unknown as {
+        response?: { order_income_list?: Record<string, unknown>[] } | Array<{ escrow_detail?: Record<string, unknown> }>;
+      }).response;
+      const escrowList = Array.isArray(response)
+        ? response.map((wrapper) => wrapper?.escrow_detail).filter((detail): detail is Record<string, unknown> => Boolean(detail))
+        : Array.isArray(response?.order_income_list)
+          ? response.order_income_list
+          : [];
+      for (const detail of escrowList) {
+        const sn = String(detail.order_sn || "");
+        if (sn) details.set(sn, detail);
       }
     } catch (err) {
+      errors.push(err);
       logger.warn(`[Shopee Sync] Failed to fetch escrow details for batch starting ${batch[0]}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  return details;
+  return { details, successfulRequests, errors };
+}
+
+async function storeEscrowFinancialRecords(input: {
+  userId: string;
+  shopId: string;
+  escrowDetails: Map<string, Record<string, unknown>>;
+  orderDetails: Map<string, Record<string, unknown>>;
+}): Promise<{ written: number; errors: string[] }> {
+  let written = 0;
+  const errors: string[] = [];
+
+  for (const [orderSn, escrowDetail] of input.escrowDetails) {
+    try {
+      const orderDetail = input.orderDetails.get(orderSn);
+      const createdAt = orderDetail?.create_time;
+      const occurredAt = typeof createdAt === "number" || typeof createdAt === "string"
+        ? new Date(Number(createdAt) * 1000)
+        : null;
+      await prisma.marketplaceFinancialRecord.upsert({
+        where: {
+          platform_shopId_externalId: {
+            platform: "shopee",
+            shopId: input.shopId,
+            externalId: `escrow:${orderSn}`,
+          },
+        },
+        create: {
+          userId: input.userId,
+          platform: "shopee",
+          shopId: input.shopId,
+          externalId: `escrow:${orderSn}`,
+          orderExternalId: orderSn,
+          transactionType: "order_escrow",
+          feeType: "escrow_detail",
+          feeName: "Shopee order escrow detail",
+          amount: null,
+          amountMinor: null,
+          amountScale: 2,
+          financialQuality: "unknown",
+          unknownReason: "source_observed_unverified",
+          currency: typeof orderDetail?.currency === "string" ? orderDetail.currency : null,
+          occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
+          sourceObservedAt: new Date(),
+          rawPayload: sanitizeMarketplaceRawPayload(escrowDetail),
+        },
+        update: {
+          amount: null,
+          amountMinor: null,
+          amountScale: 2,
+          financialQuality: "unknown",
+          unknownReason: "source_observed_unverified",
+          currency: typeof orderDetail?.currency === "string" ? orderDetail.currency : null,
+          occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
+          sourceObservedAt: new Date(),
+          rawPayload: sanitizeMarketplaceRawPayload(escrowDetail),
+        },
+      });
+      written++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`Failed to store escrow observation for order ${orderSn}: ${message}`);
+      logger.warn(`[Shopee Sync] Failed to store escrow observation for order ${orderSn}: ${message}`);
+    }
+  }
+
+  return { written, errors };
 }
 
 /**
@@ -634,7 +738,56 @@ export async function syncShopeeOrders(
     const detailsMap = await fetchOrderDetails(sdk, orderSnStrings);
 
     // Step 2.5: Fetch escrow/income details for fee breakdown
-    const escrowMap = await fetchEscrowDetails(sdk, orderSnStrings);
+    const escrowResult = await fetchEscrowDetails(sdk, orderSnStrings);
+    const escrowMap = escrowResult.details;
+    const escrowRecords = await storeEscrowFinancialRecords({
+      userId,
+      shopId: shop.id,
+      escrowDetails: escrowMap,
+      orderDetails: detailsMap,
+    });
+
+    // Capability availability requires both an observed escrow endpoint and
+    // durable raw ledger observations. Escrow failures do not block order sync.
+    try {
+      if (escrowResult.errors.length > 0) {
+        const failures = escrowResult.errors.map(escrowCapabilityFailure);
+        const failure = failures.find((candidate) => candidate.state === "unauthorized")
+          ?? escrowCapabilityFailure(escrowResult.errors[0]);
+        await setMarketplaceCapability({
+          userId,
+          platform: "shopee",
+          shopId: shop.id,
+          capability: "finance",
+          state: failure.state,
+          detail: failure.detail,
+          errorCode: failure.errorCode,
+          endpointVersion: "/payment/get_escrow_detail_batch",
+        });
+      } else if (escrowRecords.errors.length > 0) {
+        await setMarketplaceCapability({
+          userId,
+          platform: "shopee",
+          shopId: shop.id,
+          capability: "finance",
+          state: "failed",
+          detail: escrowRecords.errors[0],
+          endpointVersion: "/payment/get_escrow_detail_batch",
+        });
+      } else if (escrowResult.successfulRequests > 0 && escrowRecords.written > 0) {
+        await setMarketplaceCapability({
+          userId,
+          platform: "shopee",
+          shopId: shop.id,
+          capability: "finance",
+          state: "available",
+          endpointVersion: "/payment/get_escrow_detail_batch",
+          observedFields: ["order_income_list.order_sn", "order_income_list.order_income", "order_income_list.buyer_payment_info"],
+        });
+      }
+    } catch (capabilityError) {
+      logger.error("[Shopee Sync] Failed to record escrow finance capability:", capabilityError);
+    }
 
     // Step 2.6: Fetch package details for SLA ship_by_date tracking
     const packageMap = await fetchPackageDetails(sdk);
@@ -678,9 +831,15 @@ export async function syncShopeeOrders(
           : null;
 
         const existing = await prisma.shopeeOrder.findFirst({
-          where: { shopeeOrderId: sn },
+          where: { shopId: shop.id, shopeeOrderId: sn },
         });
 
+        const commissionFee = parseSourceNumber(orderIncome.commission_fee, "shopee.escrow.order_income.commission_fee");
+        const serviceFee = parseSourceNumber(orderIncome.service_fee, "shopee.escrow.order_income.service_fee");
+        const sellerTxnFee = parseSourceNumber(orderIncome.seller_transaction_fee, "shopee.escrow.order_income.seller_transaction_fee");
+        const shippingFee = parseSourceNumber(orderIncome.actual_shipping_fee, "shopee.escrow.order_income.actual_shipping_fee");
+        const estimatedShippingFee = parseSourceNumber(orderIncome.estimated_shipping_fee, "shopee.escrow.order_income.estimated_shipping_fee");
+        const sellerIncome = parseSourceNumber(orderIncome.escrow_amount, "shopee.escrow.order_income.escrow_amount");
         const orderData = {
           shopId: shop.id,
           userId,
@@ -702,12 +861,17 @@ export async function syncShopeeOrders(
           updatedAt: new Date(),
           updatedBy: actorId,
           // Fee fields from escrow API
-          commissionFee: Number(orderIncome.commission_fee || 0),
-          serviceFee: Number(orderIncome.service_fee || 0),
-          sellerTxnFee: Number(orderIncome.seller_transaction_fee || 0),
-          shippingFee: Number(orderIncome.actual_shipping_fee || orderIncome.final_shipping_fee || 0),
-          estimatedShippingFee: Number(orderIncome.estimated_shipping_fee || 0),
-          sellerIncome: Number(orderIncome.escrow_amount || 0),
+          commissionFee: commissionFee.value,
+          serviceFee: serviceFee.value,
+          sellerTxnFee: sellerTxnFee.value,
+          shippingFee: shippingFee.value,
+          estimatedShippingFee: estimatedShippingFee.value,
+          sellerIncome: sellerIncome.value,
+          financialQuality: "unknown",
+          financialRevision: "source-v1",
+          qualityMarkedAt: new Date(),
+          sourceObservedAt: new Date(),
+          rawFinancialPayload: sanitizeMarketplaceRawPayload({ order_income: orderIncome, buyer_payment_info: buyerPaymentInfo }),
           buyerPaymentMethod: String(buyerPaymentInfo.buyer_payment_method || detail?.payment_method || ""),
           // SLA fields from package detail
           shipByDate: pkgInfo?.shipByDate || null,
@@ -912,13 +1076,16 @@ export async function syncShopeeReturns(
           where: { returnSn },
         });
 
+        const refund = parseSourceNumber(ret.refund_amount, "shopee.return.refund_amount");
         const returnData = {
           shopId: shop.id,
           userId,
           returnSn,
           orderSn: String(ret.order_sn || ""),
           status: String(ret.status || ""),
-          refundAmount: Number(ret.refund_amount || 0),
+          refundAmount: refund.value,
+          financialQuality: refund.quality,
+          sourceObservedAt: refund.value === null ? null : new Date(),
           currency: String(ret.currency || ""),
           reason: String(ret.reason || ""),
           textReason: String(ret.text_reason || ""),
@@ -934,8 +1101,8 @@ export async function syncShopeeReturns(
           validationType: String(ret.validation_type || ""),
           returnShipDueDate: ret.return_ship_due_date ? new Date(Number(ret.return_ship_due_date) * 1000) : null,
           returnSellerDueDate: ret.return_seller_due_date ? new Date(Number(ret.return_seller_due_date) * 1000) : null,
-          images: toInputJson(ret.image || []),
-          items: toInputJson(ret.item || []),
+          images: sanitizeMarketplaceRawPayload(ret.image || []),
+          items: sanitizeMarketplaceRawPayload(ret.item || []),
           buyerUsername: String((ret.user as Record<string, unknown>)?.username || ""),
           buyerEmail: String((ret.user as Record<string, unknown>)?.email || ""),
           shopeeCreatedAt: ret.create_time ? new Date(Number(ret.create_time) * 1000) : null,

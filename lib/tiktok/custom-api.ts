@@ -16,6 +16,7 @@ import type {
   TikTokGetProductDetailData,
   TikTokSearchOrdersData,
   TikTokGetOrderDetailData,
+  TikTokOrderStatementTransactionsData,
   TikTokShopInfo,
 } from "./types";
 
@@ -261,4 +262,25 @@ export async function getOrderDetail(
   });
 
   return resp.data ?? { orders: [] };
+}
+
+// ─── Finance ──────────────────────────────────────────────────────────────
+
+/**
+ * Get the settled statement transactions for one order.
+ * Requires the seller.finance.info scope.
+ */
+export async function getOrderStatementTransactions(
+  accessToken: string,
+  shopCipher: string,
+  orderId: string,
+): Promise<TikTokOrderStatementTransactionsData> {
+  const resp = await tiktokRequest<TikTokOrderStatementTransactionsData>({
+    method: "GET",
+    path: `/finance/202501/orders/${encodeURIComponent(orderId)}/statement_transactions`,
+    accessToken,
+    params: { shop_cipher: shopCipher },
+  });
+
+  return resp.data ?? {};
 }

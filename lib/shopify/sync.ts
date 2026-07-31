@@ -9,13 +9,16 @@ import {
   setActiveShop,
   validateShopifyToken,
   getActiveAccessToken,
+  SHOPIFY_API_VERSION,
 } from "./server";
-import { fetchAllProducts, fetchAllOrders } from "./graphql-client";
+import { fetchAllProducts, fetchAllOrders, fetchAllFinanceOrders } from "./graphql-client";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
-import type { ShopifyProductNode, ShopifyOrderNode } from "./types";
+import { sanitizeMarketplaceRawPayload } from "@/lib/marketplace/json";
+import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
+import type { ShopifyOrderTransactionNode, ShopifyProductNode, ShopifyOrderNode, ShopifyRefundNode } from "./types";
 
 // ─── Sync Lock (per-shop mutex) ───────────────────────────────────────────
 
@@ -72,6 +75,22 @@ function deriveOrderStatus(order: ShopifyOrderNode): string {
 function extractIdFromGid(gid: string): string {
   const parts = gid.split("/");
   return parts[parts.length - 1] || gid;
+}
+
+function toExactMinorUnits(value: string): { amountMinor: string; amountScale: number } | null {
+  const amount = value.trim();
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(amount);
+  if (!match) return null;
+
+  const [, sign = "", whole = "", fraction = ""] = match;
+  const digits = `${whole.replace(/^0+(?=\d)/, "")}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+  return { amountMinor: `${sign === "-" && digits !== "0" ? "-" : ""}${digits}`, amountScale: fraction.length };
+}
+
+function validDate(value: string | null): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 // ─── Product Sync ─────────────────────────────────────────────────────────
@@ -297,6 +316,10 @@ export async function syncShopifyOrders(
             cancelledAt: order.cancelledAt ? new Date(order.cancelledAt) : null,
             lastSyncedAt: new Date(),
             updatedAt: new Date(),
+            // This query has original/gross values but no verified current/refund reconciliation.
+            financialQuality: "legacy-unverified",
+            sourceObservedAt: new Date(),
+            rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
           };
 
           let dbOrder;
@@ -364,6 +387,152 @@ export async function syncShopifyOrders(
       });
 
       return { synced, created, updated, errors };
+      },
+    );
+  } finally {
+    releaseSyncLock(shopId);
+  }
+}
+
+// ─── Finance Sync ─────────────────────────────────────────────────────────
+
+export async function syncShopifyFinance(
+  shopId: string,
+  userId: string,
+  daysBack?: number,
+  actorId = userId,
+): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
+  const shop = await prisma.shopifyShop.findFirst({ where: { id: shopId, userId } });
+  if (!shop) throw new Error(`Shopify shop ${shopId} not found for user ${userId}`);
+
+  if (!acquireSyncLock(shopId)) {
+    throw new Error(`Sync already in progress for Shopify shop ${shopId}`);
+  }
+  try {
+    setActiveShop(shop.shopDomain);
+    return await runWithSyncLog(
+      { shopId: shop.id, userId: actorId, channel: "shopify", syncType: "finance" },
+      async () => {
+        try {
+          const tokenCheck = await validateShopifyToken();
+          if (!tokenCheck.valid) throw new Error(`Token validation failed: ${tokenCheck.error}`);
+
+          const accessToken = await getActiveAccessToken();
+          const updatedAfter = daysBack
+            ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
+            : undefined;
+          const orders = await withShopifyRetry(() =>
+            fetchAllFinanceOrders(shop.shopDomain, accessToken, updatedAfter),
+          );
+          const errors: string[] = [];
+          let synced = 0;
+          let created = 0;
+          let updated = 0;
+
+          const storeRecord = async (
+            externalId: string,
+            orderExternalId: string,
+            transactionType: string,
+            feeType: string,
+            feeName: string | null,
+            amount: { amount: string; currencyCode: string },
+            occurredAt: string | null,
+            rawPayload: unknown,
+          ) => {
+            const exactAmount = toExactMinorUnits(amount.amount);
+            const data = {
+              orderExternalId,
+              transactionType,
+              feeType,
+              feeName,
+              amountMinor: exactAmount?.amountMinor ?? null,
+              amountScale: exactAmount?.amountScale ?? 2,
+              amount: null,
+              financialQuality: "unknown",
+              unknownReason: exactAmount ? "source_observed_unverified" : "source_value_malformed",
+              currency: amount.currencyCode,
+              occurredAt: validDate(occurredAt),
+              sourceObservedAt: new Date(),
+              rawPayload: sanitizeMarketplaceRawPayload(rawPayload),
+            };
+            const where = {
+              platform_shopId_externalId: { platform: "shopify", shopId: shop.id, externalId },
+            };
+            const existing = await prisma.marketplaceFinancialRecord.findUnique({ where, select: { id: true } });
+            await prisma.marketplaceFinancialRecord.upsert({
+              where,
+              create: { userId, platform: "shopify", shopId: shop.id, externalId, ...data },
+              update: data,
+            });
+            if (existing) updated++; else created++;
+            synced++;
+          };
+
+          const storeTransaction = async (
+            orderId: string,
+            transaction: ShopifyOrderTransactionNode,
+            refund?: ShopifyRefundNode,
+          ) => storeRecord(
+            transaction.id,
+            orderId,
+            transaction.kind,
+            refund ? "refund_transaction" : "order_transaction",
+            transaction.gateway,
+            transaction.amountSet.shopMoney,
+            transaction.processedAt ?? transaction.createdAt,
+            refund
+              ? { source: "refund_transaction", orderId, refundId: refund.id, refundCreatedAt: refund.createdAt, refundProcessedAt: refund.processedAt, transaction }
+              : { source: "order_transaction", orderId, transaction },
+          );
+
+          for (const order of orders) {
+            try {
+              const refundTransactionIds = new Set<string>();
+              for (const refund of order.refunds) {
+                for (const transaction of refund.transactions.nodes) {
+                  refundTransactionIds.add(transaction.id);
+                  await storeTransaction(order.id, transaction, refund);
+                }
+                // A refund object alone does not confirm money moved; its
+                // transaction rows above are the non-duplicated ledger facts.
+              }
+              for (const transaction of order.transactions.nodes) {
+                if (!refundTransactionIds.has(transaction.id)) await storeTransaction(order.id, transaction);
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              errors.push(`Order ${order.id}: ${message}`);
+              logger.warn(`[Shopify Finance Sync] Failed to store finance records for order ${order.id}: ${message}`);
+            }
+          }
+
+          await setMarketplaceCapability({
+            userId,
+            platform: "shopify",
+            shopId: shop.id,
+            capability: "finance",
+            state: "available",
+            endpointVersion: `Admin GraphQL API ${SHOPIFY_API_VERSION}`,
+            observedFields: ["transactions.id", "transactions.amountSet", "refunds.id", "refunds.totalRefundedSet"],
+          });
+          return { synced, created, updated, errors };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          try {
+            await setMarketplaceCapability({
+              userId,
+              platform: "shopify",
+              shopId: shop.id,
+              capability: "finance",
+              state: "failed",
+              detail: message,
+              endpointVersion: `Admin GraphQL API ${SHOPIFY_API_VERSION}`,
+            });
+          } catch (capabilityError) {
+            logger.error("[Shopify Finance Sync] Failed to record finance capability:", capabilityError);
+          }
+          throw error;
+        }
       },
     );
   } finally {

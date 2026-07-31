@@ -9,7 +9,7 @@ import crypto from "crypto";
 import prisma from "@/prisma/client";
 import { setActiveSeller, syncLazadaAll, patchLazadaSDKEndpoint } from "@/lib/lazada";
 import { logger } from "@/lib/logger";
-import { invalidateAllServerCaches } from "@/lib/cache";
+import { invalidateAllServerCaches, invalidateMarketplaceAnalytics } from "@/lib/cache";
 
 export const runtime = "nodejs";
 
@@ -74,7 +74,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    void invalidateAllServerCaches();
+    await invalidateAllServerCaches();
+    await invalidateMarketplaceAnalytics("lazada");
     return NextResponse.json({
       message: `Synced ${shops.length} seller(s)`,
       results,

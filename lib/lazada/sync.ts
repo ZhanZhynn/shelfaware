@@ -6,12 +6,15 @@
  */
 
 import { getLazadaSDK, setActiveSeller, validateLazadaToken } from "./server";
-import { getAllProductsCustom, getAllOrdersCustom, getMultipleOrderItemsCustom } from "./custom-api";
+import { getAllFinanceTransactionDetailsCustom, getAllProductsCustom, getAllOrdersCustom, getMultipleOrderItemsCustom } from "./custom-api";
 import prisma from "@/prisma/client";
-import { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
+import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
+import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
+import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
+import { createHash } from "crypto";
 import type { LazadaOrderDetail } from "lazada-api-client";
 import type { OrderItem } from "./custom-api";
 
@@ -367,8 +370,8 @@ export async function syncLazadaOrders(
           const internalStatus = ORDER_STATUS_MAP[orderStatus] || "pending";
           const paymentStatus = PAYMENT_STATUS_MAP[orderStatus] || "unpaid";
 
-          const totalAmount = parseFloat(order.price || "0");
-          const shippingFee = parseFloat(order.shipping_fee || "0");
+          const totalAmount = parseSourceNumber(order.price, "lazada.order.price").value;
+          const shippingFee = parseSourceNumber(order.shipping_fee, "lazada.order.shipping_fee").value;
           const itemCurrencies = [...new Set(orderItems
             .map((item) => item.currency?.trim().toUpperCase())
             .filter((currency): currency is string => Boolean(currency)))];
@@ -377,7 +380,7 @@ export async function syncLazadaOrders(
           const currency = itemCurrencies.length === 1 ? itemCurrencies[0] : null;
 
           const existing = await prisma.lazadaOrder.findFirst({
-            where: { lazadaOrderId: String(orderId) },
+            where: { shopId: shop.id, lazadaOrderId: String(orderId) },
           });
 
           const orderData = {
@@ -393,10 +396,15 @@ export async function syncLazadaOrders(
             remarks: order.remarks || null,
             trackingNumber: orderItems[0]?.tracking_number || null,
             trackingCarrier: orderItems[0]?.shipment_provider || null,
-            shippingAddress: order.address_shipping ? JSON.parse(JSON.stringify(order.address_shipping)) as Prisma.InputJsonValue : undefined,
-            billingAddress: order.address_billing ? JSON.parse(JSON.stringify(order.address_billing)) as Prisma.InputJsonValue : undefined,
+            shippingAddress: order.address_shipping ? toInputJson(order.address_shipping) : undefined,
+            billingAddress: order.address_billing ? toInputJson(order.address_billing) : undefined,
             lazadaCreatedAt: order.created_at ? new Date(order.created_at) : null,
             lazadaUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+            financialQuality: "unknown",
+            financialRevision: "source-v1",
+            qualityMarkedAt: new Date(),
+            sourceObservedAt: new Date(),
+            rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
           };
 
           if (existing) {
@@ -419,7 +427,7 @@ export async function syncLazadaOrders(
 
           // Upsert order items
           const dbOrder = existing || (await prisma.lazadaOrder.findFirst({
-            where: { lazadaOrderId: String(orderId) },
+             where: { shopId: shop.id, lazadaOrderId: String(orderId) },
           }));
 
           if (dbOrder) {
@@ -441,14 +449,20 @@ export async function syncLazadaOrders(
                   shopSku: item.shop_sku || null,
                   productName: item.name || "Unknown Product",
                   variation: item.variation || null,
-                  quantity: 1, // Lazada items are typically qty 1 per line
-                  price: parseFloat(item.item_price || "0"),
-                  paidPrice: parseFloat(item.paid_price || "0"),
-                  itemPrice: parseFloat(item.item_price || "0"),
+                   // Row multiplicity has not been verified. Do not manufacture unit sales.
+                   quantity: null,
+                   price: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
+                   paidPrice: parseSourceNumber(item.paid_price, "lazada.item.paid_price").value,
+                   itemPrice: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
                   currency: item.currency || null,
                   status: ORDER_STATUS_MAP[itemStatus] || internalStatus,
                   shipmentProvider: item.shipment_provider || null,
-                  trackingNumber: item.tracking_number || null,
+                   trackingNumber: item.tracking_number || null,
+                    financialQuality: "unknown",
+                    financialRevision: "source-v1",
+                    qualityMarkedAt: new Date(),
+                    sourceObservedAt: new Date(),
+                     rawFinancialPayload: sanitizeMarketplaceRawPayload(item),
                 },
               });
             }
@@ -469,6 +483,132 @@ export async function syncLazadaOrders(
       });
 
       return { synced, created, updated, errors };
+    },
+  );
+}
+
+// ─── Finance Sync ─────────────────────────────────────────────────────────
+
+function toExactMinorUnits(value: unknown): { amountMinor: string; amountScale: number } | null {
+  // Only source strings preserve decimal precision; a JavaScript number may not.
+  if (typeof value !== "string") return null;
+  const amount = value.trim();
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(amount);
+  if (!match) return null;
+
+  const [, sign = "", whole = "", fraction = ""] = match;
+  const digits = `${whole.replace(/^0+(?=\d)/, "")}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+  return { amountMinor: `${sign === "-" && digits !== "0" ? "-" : ""}${digits}`, amountScale: fraction.length };
+}
+
+function financeExternalId(transaction: Record<string, unknown>): string {
+  if (typeof transaction.transaction_number === "string" && transaction.transaction_number) {
+    return transaction.transaction_number;
+  }
+  // The documented transaction_number is the stable provider key. Hash the full
+  // row only for malformed rows where Lazada omitted it, preserving idempotency.
+  return `row:${createHash("sha256").update(JSON.stringify(transaction)).digest("hex")}`;
+}
+
+function defaultFinanceStart(): Date {
+  const start = new Date();
+  start.setDate(start.getDate() - 15);
+  return start;
+}
+
+export async function syncLazadaFinance(
+  sellerId: string,
+  userId: string,
+  createdAfter?: string,
+  actorId = userId,
+): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
+  setActiveSeller(sellerId);
+
+  const shop = await prisma.lazadaShop.findFirst({ where: { sellerId, userId } });
+  if (!shop) throw new Error(`Lazada seller ${sellerId} not found for user ${userId}`);
+
+  return runWithSyncLog(
+    { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "finance" },
+    async () => {
+      try {
+        const tokenCheck = await validateLazadaToken();
+        if (!tokenCheck.valid) {
+          throw new Error(`Lazada token is invalid or expired: ${tokenCheck.error}. Please re-authorize the seller by connecting again.`);
+        }
+
+        const transactions = await withLazadaRetry(() => getAllFinanceTransactionDetailsCustom({
+          start_time: createdAfter || defaultFinanceStart(),
+          end_time: new Date(),
+        }));
+        let created = 0;
+        let updated = 0;
+        const errors: string[] = [];
+
+        for (const transaction of transactions) {
+          try {
+            const externalId = financeExternalId(transaction);
+            const parsedAmount = parseSourceNumber(transaction.amount, "lazada.finance.amount");
+            const exactAmount = toExactMinorUnits(transaction.amount);
+            const occurredAt = transaction.transaction_date ? new Date(transaction.transaction_date) : null;
+            const data = {
+              orderExternalId: typeof transaction.order_no === "string" ? transaction.order_no : null,
+              itemExternalId: typeof transaction.orderItem_no === "string" ? transaction.orderItem_no : null,
+              transactionType: typeof transaction.transaction_type === "string" ? transaction.transaction_type : null,
+              feeType: typeof transaction.fee_type === "string" ? transaction.fee_type : null,
+              feeName: typeof transaction.fee_name === "string" ? transaction.fee_name : null,
+              amountMinor: exactAmount?.amountMinor ?? null,
+              amountScale: exactAmount?.amountScale ?? 2,
+              amount: null,
+              financialQuality: parsedAmount.quality,
+              unknownReason: parsedAmount.unknownReason,
+              sourceObservedAt: new Date(),
+              occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
+              rawPayload: sanitizeMarketplaceRawPayload(transaction),
+            };
+            const existing = await prisma.marketplaceFinancialRecord.findUnique({
+              where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
+              select: { id: true },
+            });
+            await prisma.marketplaceFinancialRecord.upsert({
+              where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
+              create: { userId, platform: "lazada", shopId: shop.id, externalId, ...data },
+              update: data,
+            });
+            if (existing) updated++; else created++;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`Transaction ${String(transaction.transaction_number ?? "unknown")}: ${message}`);
+            logger.warn(`[Lazada Finance Sync] Failed to store transaction: ${message}`);
+          }
+        }
+
+        await setMarketplaceCapability({
+          userId,
+          platform: "lazada",
+          shopId: shop.id,
+          capability: "finance",
+          state: "available",
+          endpointVersion: "/finance/transaction/details/get",
+          observedFields: ["transaction_number", "amount", "transaction_date"],
+        });
+        return { synced: transactions.length, created, updated, errors };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          await setMarketplaceCapability({
+            userId,
+            platform: "lazada",
+            shopId: shop.id,
+            capability: "finance",
+            state: "failed",
+            detail: message,
+            endpointVersion: "/finance/transaction/details/get",
+          });
+        } catch (capabilityError) {
+          logger.error("[Lazada Finance Sync] Failed to record finance capability:", capabilityError);
+        }
+        throw error;
+      }
     },
   );
 }

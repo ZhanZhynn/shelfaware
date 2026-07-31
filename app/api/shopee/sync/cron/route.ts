@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/prisma/client";
 import { setActiveShop, syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
-import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
+import { invalidateCache, cacheKeys, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate all Shopee caches
     await invalidateCache(cacheKeys.shopee.pattern);
+    await invalidateMarketplaceAnalytics("shopee");
 
     const succeeded = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;

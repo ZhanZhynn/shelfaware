@@ -14,7 +14,7 @@ export async function ensureMarketplaceAnalyticsConnection(input: { userId: stri
   if (existing && existing.userId !== input.userId) throw new Error("Marketplace analytics connection owner mismatch");
   return prisma.marketplaceAnalyticsConnection.upsert({
     where: { platform_shopId: { platform: input.platform, shopId: input.shopId } },
-    create: input,
+    create: { userId: input.userId, platform: input.platform, shopId: input.shopId },
     // Owner mismatch is rejected above; this never transfers ownership.
     update: {},
   });

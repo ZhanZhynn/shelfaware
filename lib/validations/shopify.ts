@@ -8,7 +8,7 @@ import { z } from "zod";
 // --- Sync Trigger ---
 export const shopifySyncBodySchema = z.object({
   shopId: z.string().min(1, "Shop ID is required"),
-  syncType: z.enum(["products", "orders", "all"]).default("all"),
+  syncType: z.enum(["products", "orders", "finance", "all"]).default("all"),
   daysBack: z.coerce.number().int().positive().max(365).optional(),
 });
 

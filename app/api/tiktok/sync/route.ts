@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveShop, syncTikTokProducts, syncTikTokOrders, syncTikTokAll, isShopSyncing, validateTikTokToken } from "@/lib/tiktok";
+import { setActiveShop, syncTikTokProducts, syncTikTokOrders, syncTikTokFinance, syncTikTokAll, isShopSyncing, validateTikTokToken } from "@/lib/tiktok";
 import { tiktokSyncBodySchema } from "@/lib/validations/tiktok";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
     let result: {
       products?: { synced: number; created: number; updated: number; errors: string[] };
       orders?: { synced: number; created: number; updated: number; errors: string[] };
+      finance?: { synced: number; created: number; updated: number; errors: string[] };
     };
 
     switch (syncType) {
@@ -86,6 +87,9 @@ export async function POST(request: NextRequest) {
         break;
       case "orders":
         result = { orders: await syncTikTokOrders(shopId, shop.userId, undefined, userId) };
+        break;
+      case "finance":
+        result = { finance: await syncTikTokFinance(shopId, shop.userId, userId) };
         break;
       case "all":
       default:

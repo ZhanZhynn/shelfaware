@@ -4,12 +4,14 @@
  * Provides domain-specific query functions for products and orders.
  */
 
-import { shopifyGraphQL, getActiveAccessToken, PRODUCTS_QUERY, ORDERS_QUERY } from "./server";
+import { shopifyGraphQL, PRODUCTS_QUERY, ORDERS_QUERY, FINANCE_ORDERS_QUERY } from "./server";
 import type {
   ShopifyProductNode,
   ShopifyProductsResponse,
   ShopifyOrderNode,
   ShopifyOrdersResponse,
+  ShopifyFinanceOrderNode,
+  ShopifyFinanceOrdersResponse,
 } from "./types";
 
 // ─── Product Queries ───────────────────────────────────────────────────────
@@ -83,6 +85,41 @@ export async function fetchAllOrders(
       shopDomain,
       accessToken,
       ORDERS_QUERY,
+      { first: 50, after: cursor, query: queryString },
+    );
+
+    allOrders.push(...data.orders.nodes);
+    hasNextPage = data.orders.pageInfo.hasNextPage;
+    cursor = data.orders.pageInfo.endCursor;
+  }
+
+  return allOrders;
+}
+
+// ─── Finance Queries ───────────────────────────────────────────────────────
+
+/**
+ * Fetch orders updated since a date with their documented payment transactions
+ * and refund records. Updated-at filtering catches refunds on older orders.
+ */
+export async function fetchAllFinanceOrders(
+  shopDomain: string,
+  accessToken: string,
+  updatedAfter?: string,
+): Promise<ShopifyFinanceOrderNode[]> {
+  const allOrders: ShopifyFinanceOrderNode[] = [];
+  let cursor: string | null = null;
+  let hasNextPage = true;
+  const filterDate = updatedAfter
+    ? updatedAfter
+    : new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+  const queryString = `updated_at:>=${filterDate}`;
+
+  while (hasNextPage) {
+    const data: ShopifyFinanceOrdersResponse = await shopifyGraphQL<ShopifyFinanceOrdersResponse>(
+      shopDomain,
+      accessToken,
+      FINANCE_ORDERS_QUERY,
       { first: 50, after: cursor, query: queryString },
     );
 

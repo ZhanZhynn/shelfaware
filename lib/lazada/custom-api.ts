@@ -322,6 +322,132 @@ interface GetOrderItemsResponse {
   request_id?: string;
 }
 
+// ─── Finance API Functions ────────────────────────────────────────────────
+
+export interface LazadaFinanceTransaction {
+  amount?: string;
+  transaction_number?: string;
+  transaction_date?: string;
+  order_no?: string;
+  orderItem_no?: string;
+  transaction_type?: string;
+  fee_type?: string;
+  fee_name?: string;
+  [key: string]: unknown;
+}
+
+interface GetFinanceTransactionDetailsParams {
+  start_time: string | Date;
+  end_time: string | Date;
+  offset?: number;
+  limit?: number;
+  trans_type?: string;
+  trade_order_id?: string;
+  trade_order_line_id?: string;
+}
+
+interface GetFinanceTransactionDetailsResponse {
+  code: string | number;
+  data?: LazadaFinanceTransaction[] | string;
+  request_id?: string;
+  message?: string;
+  msg?: string;
+}
+
+const FINANCE_MAX_RANGE_MS = 180 * 24 * 60 * 60 * 1000;
+
+function normalizeFinanceDate(value: string | Date, parameter: string): { date: Date; value: string } {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Lazada finance ${parameter} must be a valid date.`);
+  }
+  const normalized = date.toISOString().slice(0, 10);
+  return { date: new Date(`${normalized}T00:00:00.000Z`), value: normalized };
+}
+
+/** Lazada rejects finance query windows that are 180 days or longer. */
+export function validateFinanceDateRange(startTime: string | Date, endTime: string | Date): {
+  startTime: string;
+  endTime: string;
+} {
+  const start = normalizeFinanceDate(startTime, "start_time");
+  const end = normalizeFinanceDate(endTime, "end_time");
+  const range = end.date.getTime() - start.date.getTime();
+  if (range < 0) throw new Error("Lazada finance end_time must not be before start_time.");
+  if (range >= FINANCE_MAX_RANGE_MS) {
+    throw new Error("Lazada finance end_time - start_time must be less than 180 days.");
+  }
+  return { startTime: start.value, endTime: end.value };
+}
+
+/** Fetch one signed page of transaction details from Lazada's finance API. */
+export async function getFinanceTransactionDetailsCustom(
+  params: GetFinanceTransactionDetailsParams,
+): Promise<LazadaFinanceTransaction[]> {
+  const appKey = getEnvVar("LAZADA_APP_KEY");
+  const appSecret = getEnvVar("LAZADA_APP_SECRET");
+  if (!appKey || !appSecret) {
+    throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
+  }
+
+  const { getActiveSellerId } = await import("./server");
+  const activeSellerId = getActiveSellerId();
+  const shop = activeSellerId
+    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
+    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
+
+  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+
+  const { startTime, endTime } = validateFinanceDateRange(params.start_time, params.end_time);
+  const path = "/finance/transaction/details/get";
+  const requestParams: Record<string, string> = {
+    app_key: appKey,
+    sign_method: "sha256",
+    timestamp: String(Date.now()),
+    access_token: shop.accessToken,
+    start_time: startTime,
+    end_time: endTime,
+  };
+  if (params.offset !== undefined) requestParams.offset = String(Math.max(0, params.offset));
+  if (params.limit !== undefined) requestParams.limit = String(Math.min(Math.max(1, params.limit), 500));
+  if (params.trans_type) requestParams.trans_type = params.trans_type;
+  if (params.trade_order_id) requestParams.trade_order_id = params.trade_order_id;
+  if (params.trade_order_line_id) requestParams.trade_order_line_id = params.trade_order_line_id;
+
+  const signature = createSignature(path, requestParams, appSecret);
+  const queryString = Object.entries(requestParams)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&");
+  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const data: GetFinanceTransactionDetailsResponse = await response.json();
+
+  if (String(data.code) !== "0") {
+    const errorMsg = data.msg || data.message || (typeof data.data === "string" ? data.data : undefined) || `API error code: ${data.code}`;
+    logger.error(`[Lazada Custom API] GetFinanceTransactionDetails failed: ${errorMsg}`);
+    throw new Error(`Lazada API error: ${errorMsg}`);
+  }
+  return Array.isArray(data.data) ? data.data : [];
+}
+
+/** Fetch all finance transaction pages using Lazada's documented 500-row limit. */
+export async function getAllFinanceTransactionDetailsCustom(
+  params: Omit<GetFinanceTransactionDetailsParams, "offset" | "limit">,
+): Promise<LazadaFinanceTransaction[]> {
+  const transactions: LazadaFinanceTransaction[] = [];
+  const pageSize = 500;
+  let offset = 0;
+
+  while (true) {
+    const page = await getFinanceTransactionDetailsCustom({ ...params, offset, limit: pageSize });
+    transactions.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  logger.info(`[Lazada Custom API] Total finance transactions fetched: ${transactions.length}`);
+  return transactions;
+}
+
 /**
  * Get orders from Lazada with proper parameters.
  * Follows official API documentation: https://open.lazada.com/apps/doc/api?path=%2Forders%2Fget

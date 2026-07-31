@@ -23,7 +23,7 @@ import type {
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
-const SHOPIFY_API_VERSION = "2025-07";
+export const SHOPIFY_API_VERSION = "2025-07";
 const OAUTH_SCOPES_DEFAULT = "read_products,read_orders";
 const OAUTH_TIMESTAMP_TOLERANCE_SEC = 120; // 2 minutes
 
@@ -463,6 +463,51 @@ export const ORDERS_QUERY = `
             variant { id title sku }
             originalUnitPriceSet { shopMoney { amount currencyCode } }
             discountedUnitPriceSet { shopMoney { amount currencyCode } }
+          }
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+`;
+
+// Payment transactions and refunds are available through read_orders. This
+// intentionally excludes Shopify Payments payout and fee resources.
+export const FINANCE_ORDERS_QUERY = `
+  query GetFinanceOrders($first: Int!, $after: String, $query: String) {
+    orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+      nodes {
+        id
+        updatedAt
+        transactions(first: 100) {
+          nodes {
+            id
+            kind
+            status
+            gateway
+            createdAt
+            processedAt
+            amountSet { shopMoney { amount currencyCode } }
+          }
+        }
+        refunds(first: 100) {
+          id
+          createdAt
+          processedAt
+          totalRefundedSet { shopMoney { amount currencyCode } }
+          transactions(first: 100) {
+            nodes {
+              id
+              kind
+              status
+              gateway
+              createdAt
+              processedAt
+              amountSet { shopMoney { amount currencyCode } }
+            }
           }
         }
       }

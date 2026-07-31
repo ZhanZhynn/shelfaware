@@ -17,5 +17,5 @@ export function marketplaceAnalyticsCacheKey(input: {
 }) {
   const shopSet = [...new Set(input.shopIds)].sort().join(",");
   const shopSetHash = createHash("sha256").update(shopSet).digest("hex").slice(0, 16);
-  return ["marketplace-analytics", ANALYTICS_API_VERSION, "v3-provenance", input.platform, input.accessScope, shopSetHash, input.metric, input.dateFrom, input.dateTo, input.currency, input.granularity, input.cursor, input.limit].join(":");
+  return ["marketplace-analytics", ANALYTICS_API_VERSION, "v5-operational-catalog-sku", input.platform, input.accessScope, shopSetHash, input.metric, input.dateFrom, input.dateTo, input.currency, input.granularity, input.cursor, input.limit].join(":");
 }

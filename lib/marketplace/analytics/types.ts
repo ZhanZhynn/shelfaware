@@ -8,6 +8,7 @@ export interface NormalizedOrderItem {
   productId: string | null;
   productName: string;
   sku: string | null;
+  imageUrl: string | null;
   quantity: number | null;
   grossSales: number | null;
   refund: number | null;

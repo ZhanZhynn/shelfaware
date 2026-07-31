@@ -3,7 +3,7 @@ import { prisma } from "@/prisma/client";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import { getSessionFromRequest } from "@/utils/auth";
 import { defaultRateLimits, withRateLimit } from "@/lib/api/rate-limit";
-import { legacyFinancialReady, legacyKnownNumber, legacySum } from "./legacy-quality";
+import { legacyFinancialReady, legacyKnownNumber, legacyOperationalNumber, legacyOperationalSum, legacySum } from "./legacy-quality";
 import type { MarketplacePlatform } from "./types";
 
 type LegacyStats = {
@@ -35,7 +35,7 @@ function statusMap(rows: Array<{ orderStatus: string; _count: number }>) {
   return Object.fromEntries(rows.map((row) => [row.orderStatus, row._count]));
 }
 
-async function lazadaStats(ownerIds: string[], searchParams: URLSearchParams): Promise<LegacyStats> {
+async function lazadaStats(ownerIds: string[], searchParams: URLSearchParams, strictFinancials = true): Promise<LegacyStats> {
   const { dateFrom, dateTo, value, hasDateFilter } = dateRange(searchParams);
   const sellerId = searchParams.get("sellerId");
   const shops = await prisma.lazadaShop.findMany({ where: { userId: { in: ownerIds }, ...(sellerId ? { sellerId } : {}) }, select: { id: true } });
@@ -53,13 +53,14 @@ async function lazadaStats(ownerIds: string[], searchParams: URLSearchParams): P
     prisma.lazadaShop.findFirst({ where: { id: { in: shopIds } }, orderBy: { lastSyncedAt: "desc" }, select: { lastSyncedAt: true } }),
   ]);
   const ready = await legacyFinancialReady("lazada", shopIds);
+  const knownNumber = strictFinancials ? (value: unknown, row: { financialQuality?: string | null }) => legacyKnownNumber(value, row, ready) : (value: unknown) => legacyOperationalNumber(value);
   const products = new Map<string, LegacySales>();
-  for (const item of items) addLegacySale(products, item.productName, item.quantity, legacyKnownNumber(item.price, item, ready) === null || legacyKnownNumber(item.quantity, item, ready) === null ? null : item.price! * item.quantity!, item, ready);
-  const totalRevenue = legacySum(financialRows.map((row) => ({ ...row, value: row.totalAmount })), ready);
+  for (const item of items) addLegacySale(products, item.productName, item.quantity, knownNumber(item.price, item) === null || knownNumber(item.quantity, item) === null ? null : item.price! * item.quantity!, item, ready, strictFinancials);
+  const totalRevenue = strictFinancials ? legacySum(financialRows.map((row) => ({ ...row, value: row.totalAmount })), ready) : legacyOperationalSum(financialRows.map((row) => ({ value: row.totalAmount })));
   return { totalProducts, totalOrders, totalRevenue, averageOrderValue: totalRevenue === null ? null : totalOrders ? totalRevenue / totalOrders : 0, ordersByStatus: statusMap(statuses), topProducts: [...products].map(([name, value]) => ({ name, ...value })).sort((a, b) => (b.revenue ?? -Infinity) - (a.revenue ?? -Infinity)).slice(0, 10), lastSyncedAt: lastShop?.lastSyncedAt || null, dateFrom, dateTo };
 }
 
-async function shopeeStats(ownerIds: string[], searchParams: URLSearchParams): Promise<LegacyStats> {
+async function shopeeStats(ownerIds: string[], searchParams: URLSearchParams, strictFinancials = true): Promise<LegacyStats> {
   const { dateFrom, dateTo, value, hasDateFilter } = dateRange(searchParams);
   const shopId = searchParams.get("shopId");
   const shops = await prisma.shopeeShop.findMany({ where: { userId: { in: ownerIds }, ...(shopId ? { shopId: Number(shopId) } : {}) }, select: { id: true } });
@@ -77,12 +78,12 @@ async function shopeeStats(ownerIds: string[], searchParams: URLSearchParams): P
     prisma.shopeeShop.findFirst({ where: { id: { in: shopIds } }, orderBy: { lastSyncedAt: "desc" }, select: { lastSyncedAt: true } }),
   ]);
   const ready = await legacyFinancialReady("shopee", shopIds);
-  const totalRevenue = legacySum(financialRows.map((row) => ({ ...row, value: row.totalAmount })), ready);
-  const productReady = ready && financialRows.every((row) => legacyKnownNumber(row.totalAmount, row, ready) !== null);
+  const totalRevenue = strictFinancials ? legacySum(financialRows.map((row) => ({ ...row, value: row.totalAmount })), ready) : legacyOperationalSum(financialRows.map((row) => ({ value: row.totalAmount })));
+  const productReady = strictFinancials ? ready && financialRows.every((row) => legacyKnownNumber(row.totalAmount, row, ready) !== null) : true;
   return { totalProducts, totalOrders, totalRevenue, averageOrderValue: totalRevenue === null ? null : totalOrders ? totalRevenue / totalOrders : 0, ordersByStatus: statusMap(statuses), topProducts: products.map((item) => ({ name: item.productName, revenue: productReady && typeof item._sum.subtotal === "number" ? item._sum.subtotal : null, quantity: productReady && typeof item._sum.quantity === "number" ? item._sum.quantity : null })), lastSyncedAt: lastShop?.lastSyncedAt || null, dateFrom, dateTo };
 }
 
-async function tiktokStats(ownerIds: string[], searchParams: URLSearchParams): Promise<LegacyStats> {
+async function tiktokStats(ownerIds: string[], searchParams: URLSearchParams, strictFinancials = true): Promise<LegacyStats> {
   const { dateFrom, dateTo, value, hasDateFilter } = dateRange(searchParams);
   const shopId = searchParams.get("shopId");
   const shops = await prisma.tikTokShop.findMany({ where: { userId: { in: ownerIds }, ...(shopId ? { shopId } : {}) }, select: { id: true } });
@@ -101,12 +102,12 @@ async function tiktokStats(ownerIds: string[], searchParams: URLSearchParams): P
   ]);
   const ready = await legacyFinancialReady("tiktok", shopIds);
   const products = new Map<string, LegacySales>();
-  for (const item of items) addLegacySale(products, item.productName, item.quantity, item.subtotalAmount, item, ready);
-  const totalRevenue = legacySum(financialRows.map((row) => ({ ...row, value: row.subtotalAmount })), ready);
+  for (const item of items) addLegacySale(products, item.productName, item.quantity, item.subtotalAmount, item, ready, strictFinancials);
+  const totalRevenue = strictFinancials ? legacySum(financialRows.map((row) => ({ ...row, value: row.subtotalAmount })), ready) : legacyOperationalSum(financialRows.map((row) => ({ value: row.subtotalAmount })));
   return { totalProducts, totalOrders, totalRevenue, averageOrderValue: totalRevenue === null ? null : totalOrders ? totalRevenue / totalOrders : 0, ordersByStatus: statusMap(statuses), topProducts: [...products].map(([name, value]) => ({ name, ...value })).sort((a, b) => (b.revenue ?? -Infinity) - (a.revenue ?? -Infinity)).slice(0, 10), lastSyncedAt: lastShop?.lastSyncedAt || null, dateFrom, dateTo };
 }
 
-export async function shopifyStats(ownerIds: string[], searchParams: URLSearchParams): Promise<LegacyStats> {
+export async function shopifyStats(ownerIds: string[], searchParams: URLSearchParams, strictFinancials = true): Promise<LegacyStats> {
   const { dateFrom, dateTo, value, hasDateFilter } = dateRange(searchParams);
   const shopId = searchParams.get("shopId");
   const shops = await prisma.shopifyShop.findMany({ where: { userId: { in: ownerIds }, ...(shopId ? { id: shopId } : {}) }, select: { id: true } });
@@ -124,13 +125,14 @@ export async function shopifyStats(ownerIds: string[], searchParams: URLSearchPa
     prisma.shopifyShop.findFirst({ where: { id: { in: shopIds } }, orderBy: { lastSyncedAt: "desc" }, select: { lastSyncedAt: true } }),
   ]);
   const ready = await legacyFinancialReady("shopify", shopIds);
+  const knownNumber = strictFinancials ? (value: unknown, row: { financialQuality?: string | null }) => legacyKnownNumber(value, row, ready) : (value: unknown) => legacyOperationalNumber(value);
   const products = new Map<string, LegacySales>();
   for (const item of items) {
-    const price = legacyKnownNumber(item.price, item.order, ready);
-    const quantity = legacyKnownNumber(item.quantity, item.order, ready);
-    addLegacySale(products, item.name, item.quantity, price === null || quantity === null ? null : price * quantity, item.order, ready);
+    const price = knownNumber(item.price, item.order);
+    const quantity = knownNumber(item.quantity, item.order);
+    addLegacySale(products, item.name, item.quantity, price === null || quantity === null ? null : price * quantity, item.order, ready, strictFinancials);
   }
-  const totalRevenue = legacySum(financialRows.map((row) => ({ ...row, value: row.totalAmount })), ready);
+  const totalRevenue = strictFinancials ? legacySum(financialRows.map((row) => ({ ...row, value: row.totalAmount })), ready) : legacyOperationalSum(financialRows.map((row) => ({ value: row.totalAmount })));
   return { totalProducts, totalOrders, totalRevenue, averageOrderValue: totalRevenue === null ? null : totalOrders ? totalRevenue / totalOrders : 0, ordersByStatus: statusMap(statuses), topProducts: [...products].map(([name, value]) => ({ name, ...value })).sort((a, b) => (b.revenue ?? -Infinity) - (a.revenue ?? -Infinity)).slice(0, 10), lastSyncedAt: lastShop?.lastSyncedAt || null, dateFrom, dateTo };
 }
 
@@ -142,7 +144,7 @@ export async function legacyMarketplaceStatsResponse(request: NextRequest, platf
     const session = await getSessionFromRequest(request);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const ownerIds = await marketplaceOwnerIds(session);
-    const stats = platform === "lazada" ? await lazadaStats(ownerIds, request.nextUrl.searchParams) : platform === "shopee" ? await shopeeStats(ownerIds, request.nextUrl.searchParams) : platform === "tiktok" ? await tiktokStats(ownerIds, request.nextUrl.searchParams) : await shopifyStats(ownerIds, request.nextUrl.searchParams);
+    const stats = platform === "lazada" ? await lazadaStats(ownerIds, request.nextUrl.searchParams, false) : platform === "shopee" ? await shopeeStats(ownerIds, request.nextUrl.searchParams, false) : platform === "tiktok" ? await tiktokStats(ownerIds, request.nextUrl.searchParams, false) : await shopifyStats(ownerIds, request.nextUrl.searchParams, false);
     return NextResponse.json(stats, { headers: { Deprecation: "true", Link: "</api/[platform]/stats?apiVersion=2026-analytics-v1>; rel=successor-version", "x-marketplace-analytics-contract": "legacy" } });
   } catch {
     return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 });
@@ -152,10 +154,11 @@ export async function legacyMarketplaceStatsResponse(request: NextRequest, platf
 type LegacyProduct = { id: string; itemName: string; stock: number; imageUrl: string | null; status: string; price?: number; identifier: Record<string, string | number> };
 type LegacySales = { quantity: number | null; revenue: number | null };
 
-function addLegacySale(sales: Map<string, LegacySales>, name: string, quantity: unknown, revenue: unknown, row: { financialQuality?: string | null }, ready: boolean) {
-  const value = sales.get(name) ?? { quantity: ready ? 0 : null, revenue: ready ? 0 : null };
-  const knownQuantity = legacyKnownNumber(quantity, row, ready);
-  const knownRevenue = legacyKnownNumber(revenue, row, ready);
+function addLegacySale(sales: Map<string, LegacySales>, name: string, quantity: unknown, revenue: unknown, row: { financialQuality?: string | null }, ready: boolean, strictFinancials = true) {
+  const available = !strictFinancials || ready;
+  const value = sales.get(name) ?? { quantity: available ? 0 : null, revenue: available ? 0 : null };
+  const knownQuantity = strictFinancials ? legacyKnownNumber(quantity, row, ready) : legacyOperationalNumber(quantity);
+  const knownRevenue = strictFinancials ? legacyKnownNumber(revenue, row, ready) : legacyOperationalNumber(revenue);
   value.quantity = value.quantity !== null && knownQuantity !== null ? value.quantity + knownQuantity : null;
   value.revenue = value.revenue !== null && knownRevenue !== null ? value.revenue + knownRevenue : null;
   sales.set(name, value);
@@ -181,15 +184,16 @@ async function legacyShopIds(platform: MarketplacePlatform, ownerIds: string[], 
   return (await prisma.shopifyShop.findMany({ where: { userId: { in: ownerIds }, ...(shopId ? { id: shopId } : {}) }, select: { id: true } })).map((shop) => shop.id);
 }
 
-function legacyTrendResult(rows: Array<{ createdAt: Date | null; total: number | null; financialQuality?: string | null; id?: string }>, granularity: string, ready: boolean) {
+function legacyTrendResult(rows: Array<{ createdAt: Date | null; total: number | null; financialQuality?: string | null; id?: string }>, granularity: string, ready: boolean, strictFinancials = true) {
   const grouped = new Map<string, { revenue: number | null; orders: number }>();
   const countedOrders = new Set<string>();
   for (const row of rows) {
     if (!row.createdAt) continue;
     const date = new Date(row.createdAt);
     const period = granularity === "weekly" ? `${date.getFullYear()}-W${String(Math.ceil(((date.getTime() - new Date(date.getFullYear(), 0, 1).getTime()) / 86_400_000 + new Date(date.getFullYear(), 0, 1).getDay() + 1) / 7)).padStart(2, "0")}` : granularity === "monthly" ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}` : date.toISOString().slice(0, 10);
-    const value = grouped.get(period) ?? { revenue: ready ? 0 : null, orders: 0 };
-    const total = legacyKnownNumber(row.total, row, ready);
+    const available = !strictFinancials || ready;
+    const value = grouped.get(period) ?? { revenue: available ? 0 : null, orders: 0 };
+    const total = strictFinancials ? legacyKnownNumber(row.total, row, ready) : legacyOperationalNumber(row.total);
     value.revenue = value.revenue !== null && total !== null ? value.revenue + total : null;
     const orderKey = row.id ? `${period}:${row.id}` : "";
     if (!orderKey || !countedOrders.has(orderKey)) value.orders++;
@@ -199,7 +203,7 @@ function legacyTrendResult(rows: Array<{ createdAt: Date | null; total: number |
   return { data: [...grouped].map(([period, value]) => ({ period, ...value })).sort((a, b) => a.period.localeCompare(b.period)), granularity };
 }
 
-async function legacyRevenueTrend(platform: MarketplacePlatform, ownerIds: string[], params: URLSearchParams) {
+async function legacyRevenueTrend(platform: MarketplacePlatform, ownerIds: string[], params: URLSearchParams, strictFinancials = true) {
   const shopIds = await legacyShopIds(platform, ownerIds, params);
   const granularity = params.get("granularity") || "daily";
   if (!shopIds.length) return { data: [], granularity };
@@ -207,54 +211,54 @@ async function legacyRevenueTrend(platform: MarketplacePlatform, ownerIds: strin
   const from = params.get("dateFrom") ? new Date(params.get("dateFrom")!) : new Date(Date.now() - 90 * 86_400_000);
   const to = params.get("dateTo") ? new Date(params.get("dateTo")!) : undefined;
   if (to) to.setHours(23, 59, 59, 999);
-  if (platform === "shopee") return legacyTrendResult((await prisma.shopeeOrder.findMany({ where: { shopId: { in: shopIds }, orderStatus: { not: "CANCELLED" }, shopeeCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } }, select: { shopeeCreatedAt: true, totalAmount: true, financialQuality: true } })).map((row) => ({ createdAt: row.shopeeCreatedAt, total: row.totalAmount, financialQuality: row.financialQuality })), granularity, ready);
-  if (platform === "lazada") return legacyTrendResult((await prisma.lazadaOrder.findMany({ where: { shopId: { in: shopIds }, orderStatus: { not: "cancelled" }, lazadaCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } }, select: { lazadaCreatedAt: true, totalAmount: true, financialQuality: true } })).map((row) => ({ createdAt: row.lazadaCreatedAt, total: row.totalAmount, financialQuality: row.financialQuality })), granularity, ready);
-  if (platform === "tiktok") return legacyTrendResult((await prisma.tikTokOrderItem.findMany({ where: { order: { shopId: { in: shopIds }, orderStatus: { not: "CANCELLED" }, tiktokCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } } }, select: { orderId: true, subtotalAmount: true, financialQuality: true, order: { select: { tiktokCreatedAt: true } } } })).map((item) => ({ id: item.orderId, createdAt: item.order.tiktokCreatedAt, total: item.subtotalAmount, financialQuality: item.financialQuality })), granularity, ready);
-  return legacyTrendResult((await prisma.shopifyOrder.findMany({ where: { shopId: { in: shopIds }, orderStatus: { not: "cancelled" }, shopifyCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } }, select: { shopifyCreatedAt: true, totalAmount: true, financialQuality: true } })).map((row) => ({ createdAt: row.shopifyCreatedAt, total: row.totalAmount, financialQuality: row.financialQuality })), granularity, ready);
+  if (platform === "shopee") return legacyTrendResult((await prisma.shopeeOrder.findMany({ where: { shopId: { in: shopIds }, orderStatus: { not: "CANCELLED" }, shopeeCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } }, select: { shopeeCreatedAt: true, totalAmount: true, financialQuality: true } })).map((row) => ({ createdAt: row.shopeeCreatedAt, total: row.totalAmount, financialQuality: row.financialQuality })), granularity, ready, strictFinancials);
+  if (platform === "lazada") return legacyTrendResult((await prisma.lazadaOrder.findMany({ where: { shopId: { in: shopIds }, orderStatus: { not: "cancelled" }, lazadaCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } }, select: { lazadaCreatedAt: true, totalAmount: true, financialQuality: true } })).map((row) => ({ createdAt: row.lazadaCreatedAt, total: row.totalAmount, financialQuality: row.financialQuality })), granularity, ready, strictFinancials);
+  if (platform === "tiktok") return legacyTrendResult((await prisma.tikTokOrderItem.findMany({ where: { order: { shopId: { in: shopIds }, orderStatus: { not: "CANCELLED" }, tiktokCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } } }, select: { orderId: true, subtotalAmount: true, financialQuality: true, order: { select: { tiktokCreatedAt: true } } } })).map((item) => ({ id: item.orderId, createdAt: item.order.tiktokCreatedAt, total: item.subtotalAmount, financialQuality: item.financialQuality })), granularity, ready, strictFinancials);
+  return legacyTrendResult((await prisma.shopifyOrder.findMany({ where: { shopId: { in: shopIds }, orderStatus: { not: "cancelled" }, shopifyCreatedAt: { gte: from, ...(to ? { lte: to } : {}) } }, select: { shopifyCreatedAt: true, totalAmount: true, financialQuality: true } })).map((row) => ({ createdAt: row.shopifyCreatedAt, total: row.totalAmount, financialQuality: row.financialQuality })), granularity, ready, strictFinancials);
 }
 
-async function legacyProducts(platform: MarketplacePlatform, ownerIds: string[], params: URLSearchParams) {
+async function legacyProducts(platform: MarketplacePlatform, ownerIds: string[], params: URLSearchParams, strictFinancials = true) {
   const shopIds = await legacyShopIds(platform, ownerIds, params, true);
   const ready = await legacyFinancialReady(platform, shopIds);
   if (platform === "shopee") {
     const shops = await prisma.shopeeShop.findMany({ where: { id: { in: shopIds } }, select: { lowStockThreshold: true } });
     const [products, items] = await Promise.all([prisma.shopeeProduct.findMany({ where: { shopId: { in: shopIds } }, select: { id: true, shopeeItemId: true, itemName: true, price: true, stock: true, imageUrl: true, status: true } }), prisma.shopeeOrderItem.findMany({ where: { order: { shopId: { in: shopIds }, shopeeCreatedAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, orderStatus: { not: "CANCELLED" } } }, select: { productName: true, quantity: true, subtotal: true, order: { select: { financialQuality: true } } } })]);
-    const sales = new Map<string, LegacySales>(); for (const item of items) addLegacySale(sales, item.productName, item.quantity, item.subtotal, item.order, ready);
-    return productPerformance(products.map((product) => ({ id: product.id, itemName: product.itemName, stock: product.stock, imageUrl: product.imageUrl, status: product.status, price: product.price, identifier: { shopeeItemId: product.shopeeItemId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), ready);
+    const sales = new Map<string, LegacySales>(); for (const item of items) addLegacySale(sales, item.productName, item.quantity, item.subtotal, item.order, ready, strictFinancials);
+    return productPerformance(products.map((product) => ({ id: product.id, itemName: product.itemName, stock: product.stock, imageUrl: product.imageUrl, status: product.status, price: product.price, identifier: { shopeeItemId: product.shopeeItemId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), !strictFinancials || ready);
   }
   if (platform === "lazada") {
     const shops = await prisma.lazadaShop.findMany({ where: { id: { in: shopIds } }, select: { lowStockThreshold: true } });
     const [products, items] = await Promise.all([prisma.lazadaProduct.findMany({ where: { shopId: { in: shopIds } }, select: { id: true, lazadaItemId: true, itemName: true, price: true, stock: true, imageUrl: true, status: true } }), prisma.lazadaOrderItem.findMany({ where: { order: { shopId: { in: shopIds }, lazadaCreatedAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, orderStatus: { not: "CANCELLED" } } }, select: { productName: true, quantity: true, price: true, financialQuality: true } })]);
-    const sales = new Map<string, LegacySales>(); for (const item of items) addLegacySale(sales, item.productName, item.quantity, item.price === null || item.quantity === null ? null : item.price * item.quantity, item, ready);
-    return productPerformance(products.map((product) => ({ id: product.id, itemName: product.itemName, stock: product.stock, imageUrl: product.imageUrl, status: product.status, price: product.price, identifier: { lazadaItemId: product.lazadaItemId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), ready);
+    const sales = new Map<string, LegacySales>(); for (const item of items) addLegacySale(sales, item.productName, item.quantity, item.price === null || item.quantity === null ? null : item.price * item.quantity, item, ready, strictFinancials);
+    return productPerformance(products.map((product) => ({ id: product.id, itemName: product.itemName, stock: product.stock, imageUrl: product.imageUrl, status: product.status, price: product.price, identifier: { lazadaItemId: product.lazadaItemId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), !strictFinancials || ready);
   }
   if (platform === "tiktok") {
     const shops = await prisma.tikTokShop.findMany({ where: { id: { in: shopIds } }, select: { lowStockThreshold: true } });
     const [products, items] = await Promise.all([prisma.tikTokProduct.findMany({ where: { shopId: { in: shopIds } }, select: { id: true, tiktokProductId: true, title: true, mainImageUrl: true, status: true, variants: { select: { totalQuantity: true } } } }), prisma.tikTokOrderItem.findMany({ where: { order: { shopId: { in: shopIds }, tiktokCreatedAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, orderStatus: { not: "CANCELLED" } } }, select: { productName: true, quantity: true, subtotalAmount: true, financialQuality: true } })]);
-    const sales = new Map<string, LegacySales>(); for (const item of items) addLegacySale(sales, item.productName, item.quantity, item.subtotalAmount, item, ready);
-    return productPerformance(products.map((product) => ({ id: product.id, itemName: product.title, stock: product.variants.reduce((sum, variant) => sum + variant.totalQuantity, 0), imageUrl: product.mainImageUrl, status: product.status, identifier: { channelItemId: product.tiktokProductId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), ready);
+    const sales = new Map<string, LegacySales>(); for (const item of items) addLegacySale(sales, item.productName, item.quantity, item.subtotalAmount, item, ready, strictFinancials);
+    return productPerformance(products.map((product) => ({ id: product.id, itemName: product.title, stock: product.variants.reduce((sum, variant) => sum + variant.totalQuantity, 0), imageUrl: product.mainImageUrl, status: product.status, identifier: { channelItemId: product.tiktokProductId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), !strictFinancials || ready);
   }
   const shops = await prisma.shopifyShop.findMany({ where: { id: { in: shopIds } }, select: { lowStockThreshold: true } });
   const [products, items] = await Promise.all([prisma.shopifyProduct.findMany({ where: { shopId: { in: shopIds } }, select: { id: true, shopifyProductId: true, title: true, totalInventory: true, featuredImageUrl: true, status: true } }), prisma.shopifyOrderItem.findMany({ where: { order: { shopId: { in: shopIds }, shopifyCreatedAt: { gte: new Date(Date.now() - 30 * 86_400_000) }, orderStatus: { not: "CANCELLED" } } }, select: { name: true, quantity: true, price: true, discountedPrice: true, order: { select: { financialQuality: true } } } })]);
   const sales = new Map<string, LegacySales>();
   for (const item of items) {
-    const price = legacyKnownNumber(item.discountedPrice ?? item.price, item.order, ready);
-    const quantity = legacyKnownNumber(item.quantity, item.order, ready);
-    addLegacySale(sales, item.name, item.quantity, price === null || quantity === null ? null : price * quantity, item.order, ready);
+    const price = strictFinancials ? legacyKnownNumber(item.discountedPrice ?? item.price, item.order, ready) : legacyOperationalNumber(item.discountedPrice ?? item.price);
+    const quantity = strictFinancials ? legacyKnownNumber(item.quantity, item.order, ready) : legacyOperationalNumber(item.quantity);
+    addLegacySale(sales, item.name, item.quantity, price === null || quantity === null ? null : price * quantity, item.order, ready, strictFinancials);
   }
-  return productPerformance(products.map((product) => ({ id: product.id, itemName: product.title, stock: product.totalInventory, imageUrl: product.featuredImageUrl, status: product.status, identifier: { channelItemId: product.shopifyProductId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), ready);
+  return productPerformance(products.map((product) => ({ id: product.id, itemName: product.title, stock: product.totalInventory, imageUrl: product.featuredImageUrl, status: product.status, identifier: { channelItemId: product.shopifyProductId } })), sales, Math.min(...shops.map((shop) => shop.lowStockThreshold), 10), !strictFinancials || ready);
 }
 
 function emptyShopeeBuyers() { return { totalBuyers: 0, repeatBuyers: 0, repeatRate: 0, avgOrdersPerBuyer: 0, topBuyers: [], geographicDistribution: [], spendingTiers: [] }; }
 
-async function legacyBuyers(ownerIds: string[], params: URLSearchParams) {
+async function legacyBuyers(ownerIds: string[], params: URLSearchParams, strictFinancials = true) {
   const shopIds = await legacyShopIds("shopee", ownerIds, params);
   if (!shopIds.length) return emptyShopeeBuyers();
   const ready = await legacyFinancialReady("shopee", shopIds);
   const orders = await prisma.shopeeOrder.findMany({ where: { shopId: { in: shopIds }, buyerUsername: { not: "" } }, select: { buyerUsername: true, totalAmount: true, financialQuality: true } });
   const buyerRows = new Map<string, Array<{ value: number; financialQuality: string | null }>>();
   for (const order of orders) { const buyer = buyerRows.get(order.buyerUsername!) ?? []; buyer.push({ value: order.totalAmount, financialQuality: order.financialQuality }); buyerRows.set(order.buyerUsername!, buyer); }
-  const buyers = [...buyerRows].map(([username, rows]) => ({ username, totalSpent: legacySum(rows, ready), orderCount: rows.length })).sort((a, b) => (b.totalSpent ?? -Infinity) - (a.totalSpent ?? -Infinity));
+  const buyers = [...buyerRows].map(([username, rows]) => ({ username, totalSpent: strictFinancials ? legacySum(rows, ready) : legacyOperationalSum(rows), orderCount: rows.length })).sort((a, b) => (b.totalSpent ?? -Infinity) - (a.totalSpent ?? -Infinity));
   const totalBuyers = buyers.length; const repeatBuyers = buyers.filter((buyer) => buyer.orderCount >= 2).length;
   const tiers = { under50: 0, "50to200": 0, "200to500": 0, over500: 0 };
   for (const buyer of buyers) { if (buyer.totalSpent === null) continue; if (buyer.totalSpent < 50) tiers.under50++; else if (buyer.totalSpent < 200) tiers["50to200"]++; else if (buyer.totalSpent < 500) tiers["200to500"]++; else tiers.over500++; }
@@ -288,7 +292,7 @@ function legacyPercentile(values: number[], percentile: number) {
   return sorted[Math.max(0, Math.ceil(percentile / 100 * sorted.length) - 1)] ?? 0;
 }
 
-export async function legacyClv(ownerIds: string[], params: URLSearchParams) {
+export async function legacyClv(ownerIds: string[], params: URLSearchParams, strictFinancials = true) {
   const shopIds = await legacyShopIds("shopee", ownerIds, params);
   const empty = { summary: { totalBuyers: 0, avgClv: 0, avgRecency: 0, avgFrequency: 0, avgMonetary: 0 }, segments: { champions: 0, loyal: 0, potential: 0, atRisk: 0, lost: 0 }, churnRisk: { high: 0, medium: 0, low: 0 }, topBuyersByClv: [] };
   if (!shopIds.length) return empty;
@@ -297,11 +301,11 @@ export async function legacyClv(ownerIds: string[], params: URLSearchParams) {
     prisma.shopeeOrder.findMany({ where: { shopId: { in: shopIds }, buyerUsername: { not: "" }, orderStatus: { not: "CANCELLED" } }, select: { buyerUsername: true, totalAmount: true, financialQuality: true, shopeeCreatedAt: true } }),
   ]);
   if (!rows.length) return empty;
-  if (!ready) return { ...empty, summary: { ...empty.summary, avgClv: null, avgMonetary: null } };
+  if (strictFinancials && !ready) return { ...empty, summary: { ...empty.summary, avgClv: null, avgMonetary: null } };
   const now = new Date();
   const buyerRows = new Map<string, { totalSpent: number; orderCount: number; first: Date; last: Date }>();
   for (const row of rows) {
-    const totalAmount = legacyKnownNumber(row.totalAmount, row, ready);
+    const totalAmount = strictFinancials ? legacyKnownNumber(row.totalAmount, row, ready) : legacyOperationalNumber(row.totalAmount);
     if (totalAmount === null) return { ...empty, summary: { ...empty.summary, avgClv: null, avgMonetary: null } };
     const username = row.buyerUsername!;
     const date = row.shopeeCreatedAt ?? now;
@@ -338,10 +342,10 @@ export async function legacyMarketplaceMetricResponse(request: NextRequest, plat
     const ownerIds = await marketplaceOwnerIds(session);
     const params = request.nextUrl.searchParams;
     const legacy = (body: unknown) => NextResponse.json(body, { headers: { Deprecation: "true", "x-marketplace-analytics-contract": "legacy" } });
-    if (metric === "revenue-trend") return legacy(await legacyRevenueTrend(platform, ownerIds, params));
-    if (metric === "products") return NextResponse.json(await legacyProducts(platform, ownerIds, params));
-    if (platform === "shopee" && metric === "buyers") return NextResponse.json(await legacyBuyers(ownerIds, params));
-    if (platform === "shopee" && metric === "clv") return NextResponse.json(await legacyClv(ownerIds, params));
+    if (metric === "revenue-trend") return legacy(await legacyRevenueTrend(platform, ownerIds, params, false));
+    if (metric === "products") return NextResponse.json(await legacyProducts(platform, ownerIds, params, false));
+    if (platform === "shopee" && metric === "buyers") return NextResponse.json(await legacyBuyers(ownerIds, params, false));
+    if (platform === "shopee" && metric === "clv") return NextResponse.json(await legacyClv(ownerIds, params, false));
     if (platform === "shopee" && metric === "profit") return NextResponse.json(await legacyProfit(ownerIds, params));
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   } catch {

@@ -6,11 +6,15 @@ import { Package } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 
 interface MarketplaceTopProductsTableProps {
-  data: { name: string; revenue: number; quantity: number }[];
+  data: { name: string; revenue: number | null; quantity: number | null }[];
 }
 
 export default function MarketplaceTopProductsTable({ data }: MarketplaceTopProductsTableProps) {
   const products = data.slice(0, 8);
+  const formatValue = (value: number | null) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? value.toLocaleString()
+      : "Unavailable";
 
   return (
     <Card className="bg-gradient-to-br from-card to-card/50 backdrop-blur-sm border border-border/50">
@@ -45,11 +49,11 @@ export default function MarketplaceTopProductsTable({ data }: MarketplaceTopProd
                   </span>
                 </div>
                 <span className="text-right font-medium tabular-nums">
-                  {formatMoney(product.revenue, "MYR")}
+                  {product.revenue === null ? "Unavailable" : formatMoney(product.revenue, "MYR")}
                 </span>
                 <span className="text-right">
                   <Badge variant="secondary" className="tabular-nums text-xs">
-                    {product.quantity.toLocaleString()}
+                    {formatValue(product.quantity)}
                   </Badge>
                 </span>
               </div>

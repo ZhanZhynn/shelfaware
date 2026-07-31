@@ -313,3 +313,32 @@ export interface TikTokDistrictInfo {
 export interface TikTokGetOrderDetailData {
   orders: TikTokOrderSummary[];
 }
+
+// ─── Finance (v202501) ────────────────────────────────────────────────────
+
+export interface TikTokOrderStatementTransaction {
+  sku_id?: string;
+  sku_name?: string;
+  statement_id?: string;
+  product_name?: string;
+  quantity?: string;
+  settlement_amount?: string;
+  revenue_amount?: string;
+  shipping_cost_amount?: string;
+  fee_tax_amount?: string;
+  revenue_breakdown?: Record<string, unknown>;
+  shipping_cost_breakdown?: Record<string, unknown>;
+  fee_tax_breakdown?: Record<string, unknown>;
+}
+
+export interface TikTokOrderStatementTransactionsData {
+  order_id?: string;
+  order_create_time?: number;
+  currency?: string;
+  revenue_amount?: string;
+  fee_and_tax_amount?: string;
+  shipping_cost_amount?: string;
+  settlement_amount?: string;
+  sku_transactions?: TikTokOrderStatementTransaction[];
+  total_count?: number;
+}

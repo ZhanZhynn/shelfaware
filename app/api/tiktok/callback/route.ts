@@ -10,6 +10,7 @@ import prisma from "@/prisma/client";
 import { tiktokCallbackQuerySchema } from "@/lib/validations/tiktok";
 import { logger } from "@/lib/logger";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -107,6 +108,7 @@ export async function GET(request: NextRequest) {
         },
       });
     }
+    await invalidateMarketplaceAnalytics("tiktok");
 
     logger.info(`[TikTok Auth] Shop ${shopInfo.name} (${shopInfo.id}) connected for user ${userId}`);
 

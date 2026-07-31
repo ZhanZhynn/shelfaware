@@ -16,6 +16,7 @@ import {
 import { shopifyCallbackQuerySchema } from "@/lib/validations/shopify";
 import { logger } from "@/lib/logger";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -84,6 +85,7 @@ export async function GET(request: NextRequest) {
       tokenData.access_token,
       tokenData.scope,
     );
+    await invalidateMarketplaceAnalytics("shopify");
 
     logger.info(`[Shopify Callback] Shop ${shop} connected for user ${session.id}`);
 

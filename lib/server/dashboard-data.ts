@@ -408,11 +408,11 @@ export async function getDashboardForAdmin(
     }
 
     const lazadaRevenue = lazadaOrdersForCurrency.reduce(
-      (total, order) => total + (currency.convert(order.totalAmount, order.currency, false, order.lazadaCreatedAt ?? order.createdAt) ?? 0),
+      (total, order) => order.totalAmount === null ? total : total + (currency.convert(order.totalAmount, order.currency, false, order.lazadaCreatedAt ?? order.createdAt) ?? 0),
       0,
     );
     const includedLazadaOrders = lazadaOrdersForCurrency.filter(
-      (order) => currency.convert(order.totalAmount, order.currency, false, order.lazadaCreatedAt ?? order.createdAt) !== null,
+      (order) => order.totalAmount !== null && currency.convert(order.totalAmount, order.currency, false, order.lazadaCreatedAt ?? order.createdAt) !== null,
     ).length;
     lazadaOrderAnalytics = {
       totalOrders: lazadaOrderCount,

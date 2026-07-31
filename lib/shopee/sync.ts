@@ -8,8 +8,9 @@
 import { getShopeeSDK } from "./server";
 import type { ItemStatus } from "@congminh1254/shopee-sdk/schemas";
 import prisma from "@/prisma/client";
-import { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
+import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
+import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
 
 // Shopee order status mapping to our internal status
 const ORDER_STATUS_MAP: Record<string, string> = {
@@ -30,11 +31,6 @@ const PAYMENT_STATUS_MAP: Record<string, string> = {
   COMPLETED: "paid",
   CANCELLED: "refunded",
 };
-
-/** Cast value to Prisma InputJsonValue for JSON fields */
-function toInputJson(value: unknown): Prisma.InputJsonValue {
-  return value as Prisma.InputJsonValue;
-}
 
 // ─── Sync Lock (per-shop mutex) ──────────────────────────────────────────────
 
@@ -678,9 +674,15 @@ export async function syncShopeeOrders(
           : null;
 
         const existing = await prisma.shopeeOrder.findFirst({
-          where: { shopeeOrderId: sn },
+          where: { shopId: shop.id, shopeeOrderId: sn },
         });
 
+        const commissionFee = parseSourceNumber(orderIncome.commission_fee, "shopee.escrow.order_income.commission_fee");
+        const serviceFee = parseSourceNumber(orderIncome.service_fee, "shopee.escrow.order_income.service_fee");
+        const sellerTxnFee = parseSourceNumber(orderIncome.seller_transaction_fee, "shopee.escrow.order_income.seller_transaction_fee");
+        const shippingFee = parseSourceNumber(orderIncome.actual_shipping_fee, "shopee.escrow.order_income.actual_shipping_fee");
+        const estimatedShippingFee = parseSourceNumber(orderIncome.estimated_shipping_fee, "shopee.escrow.order_income.estimated_shipping_fee");
+        const sellerIncome = parseSourceNumber(orderIncome.escrow_amount, "shopee.escrow.order_income.escrow_amount");
         const orderData = {
           shopId: shop.id,
           userId,
@@ -702,12 +704,17 @@ export async function syncShopeeOrders(
           updatedAt: new Date(),
           updatedBy: actorId,
           // Fee fields from escrow API
-          commissionFee: Number(orderIncome.commission_fee || 0),
-          serviceFee: Number(orderIncome.service_fee || 0),
-          sellerTxnFee: Number(orderIncome.seller_transaction_fee || 0),
-          shippingFee: Number(orderIncome.actual_shipping_fee || orderIncome.final_shipping_fee || 0),
-          estimatedShippingFee: Number(orderIncome.estimated_shipping_fee || 0),
-          sellerIncome: Number(orderIncome.escrow_amount || 0),
+          commissionFee: commissionFee.value,
+          serviceFee: serviceFee.value,
+          sellerTxnFee: sellerTxnFee.value,
+          shippingFee: shippingFee.value,
+          estimatedShippingFee: estimatedShippingFee.value,
+          sellerIncome: sellerIncome.value,
+          financialQuality: "unknown",
+          financialRevision: "source-v1",
+          qualityMarkedAt: new Date(),
+          sourceObservedAt: new Date(),
+          rawFinancialPayload: sanitizeMarketplaceRawPayload({ order_income: orderIncome, buyer_payment_info: buyerPaymentInfo }),
           buyerPaymentMethod: String(buyerPaymentInfo.buyer_payment_method || detail?.payment_method || ""),
           // SLA fields from package detail
           shipByDate: pkgInfo?.shipByDate || null,
@@ -912,13 +919,16 @@ export async function syncShopeeReturns(
           where: { returnSn },
         });
 
+        const refund = parseSourceNumber(ret.refund_amount, "shopee.return.refund_amount");
         const returnData = {
           shopId: shop.id,
           userId,
           returnSn,
           orderSn: String(ret.order_sn || ""),
           status: String(ret.status || ""),
-          refundAmount: Number(ret.refund_amount || 0),
+          refundAmount: refund.value,
+          financialQuality: refund.quality,
+          sourceObservedAt: refund.value === null ? null : new Date(),
           currency: String(ret.currency || ""),
           reason: String(ret.reason || ""),
           textReason: String(ret.text_reason || ""),
@@ -934,8 +944,8 @@ export async function syncShopeeReturns(
           validationType: String(ret.validation_type || ""),
           returnShipDueDate: ret.return_ship_due_date ? new Date(Number(ret.return_ship_due_date) * 1000) : null,
           returnSellerDueDate: ret.return_seller_due_date ? new Date(Number(ret.return_seller_due_date) * 1000) : null,
-          images: toInputJson(ret.image || []),
-          items: toInputJson(ret.item || []),
+          images: sanitizeMarketplaceRawPayload(ret.image || []),
+          items: sanitizeMarketplaceRawPayload(ret.item || []),
           buyerUsername: String((ret.user as Record<string, unknown>)?.username || ""),
           buyerEmail: String((ret.user as Record<string, unknown>)?.email || ""),
           shopeeCreatedAt: ret.create_time ? new Date(Number(ret.create_time) * 1000) : null,

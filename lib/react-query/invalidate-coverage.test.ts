@@ -90,6 +90,7 @@ const API_WRITE_ROUTE_INVALIDATION_SPEC: Record<string, readonly string[]> = {
   "app/api/sourcing/cases/route.ts": ["invalidateAllServerCaches"],
   "app/api/sourcing/cases/[id]/commands/route.ts": ["invalidateAllServerCaches"],
   "app/api/exchange-rates/refresh/route.ts": ["invalidateAllServerCaches"],
+  "app/api/marketplace/analytics/backfill/route.ts": ["invalidateMarketplaceAnalytics"],
 };
 
 /** Update mutations must refresh the open detail view (setQueryData or invalidateQueries on detail) */
@@ -141,6 +142,7 @@ const SERVER_INVALIDATE_PATTERNS = [
   "invalidateOnOrderChange",
   "invalidateOnCategoryOrSupplierChange",
   "invalidateAllServerCaches",
+  "invalidateMarketplaceAnalytics",
   "invalidateCache(",
 ];
 

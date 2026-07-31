@@ -10,6 +10,7 @@ import prisma from "@/prisma/client";
 import { lazadaCallbackQuerySchema } from "@/lib/validations/lazada";
 import { logger } from "@/lib/logger";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -103,6 +104,7 @@ export async function GET(request: NextRequest) {
         },
       });
     }
+    await invalidateMarketplaceAnalytics("lazada");
 
     logger.info(`[Lazada Auth] Seller ${sellerId} connected for user ${userId}`);
 

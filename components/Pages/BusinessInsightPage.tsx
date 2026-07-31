@@ -67,12 +67,14 @@ import { exportToExcel, exportToCSV } from "@/lib/export";
 import { formatMoney } from "@/lib/money";
 import type { ProductForHome } from "@/lib/server/home-data";
 import type { OrderForPage } from "@/lib/server/orders-data";
-import type { CombinedOrder, CombinedInsights } from "@/lib/server/combined-orders-data";
+import type { CombinedInsights } from "@/lib/server/combined-orders-data";
+import { buildOrderTrendByMonth } from "@/lib/business-insights/order-trend";
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"];
 const SOURCE_COLORS: Record<string, string> = {
   wms: "#0088FE",
   shopee: "#FF8042",
+  lazada: "#7C3AED",
 };
 
 export type BusinessInsightPageProps = {
@@ -431,32 +433,8 @@ export default function BusinessInsightPage({
 
   // Sales / order trend by month (WMS + Shopee combined) — respects date range filter
   const orderTrendByMonth = useMemo(() => {
-    const months = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
     const orders = allCombinedOrders;
-    if (!orders || orders.length === 0) {
-      return months.map((month) => ({
-        month,
-        totalValue: 0,
-        orderCount: 0,
-        wmsValue: 0,
-        wmsCount: 0,
-        shopeeValue: 0,
-        shopeeCount: 0,
-      }));
-    }
+    if (!orders || orders.length === 0) return buildOrderTrendByMonth([]);
     let filtered = orders;
     if (dateRange.startDate || dateRange.endDate) {
       filtered = orders.filter((order) => {
@@ -475,63 +453,7 @@ export default function BusinessInsightPage({
         return true;
       });
     }
-    const byMonth = new Map<
-      string,
-      {
-        totalValue: number;
-        orderCount: number;
-        wmsValue: number;
-        wmsCount: number;
-        shopeeValue: number;
-        shopeeCount: number;
-      }
-    >();
-    filtered.forEach((order) => {
-      const date = new Date(order.createdAt);
-      const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-      const current = byMonth.get(monthKey) || {
-        totalValue: 0,
-        orderCount: 0,
-        wmsValue: 0,
-        wmsCount: 0,
-        shopeeValue: 0,
-        shopeeCount: 0,
-      };
-      const isShopee = order.source === "shopee";
-      byMonth.set(monthKey, {
-        totalValue: current.totalValue + order.total,
-        orderCount: current.orderCount + 1,
-        wmsValue: current.wmsValue + (isShopee ? 0 : order.total),
-        wmsCount: current.wmsCount + (isShopee ? 0 : 1),
-        shopeeValue: current.shopeeValue + (isShopee ? order.total : 0),
-        shopeeCount: current.shopeeCount + (isShopee ? 1 : 0),
-      });
-    });
-    // Determine the year from the most recent order
-    const dataYear =
-      filtered.length > 0 && filtered[0]?.createdAt
-        ? new Date(filtered[0].createdAt).getUTCFullYear()
-        : new Date().getUTCFullYear();
-    return months.map((month, index) => {
-      const monthKey = `${dataYear}-${String(index + 1).padStart(2, "0")}`;
-      const data = byMonth.get(monthKey) || {
-        totalValue: 0,
-        orderCount: 0,
-        wmsValue: 0,
-        wmsCount: 0,
-        shopeeValue: 0,
-        shopeeCount: 0,
-      };
-      return {
-        month,
-        totalValue: data.totalValue,
-        orderCount: data.orderCount,
-        wmsValue: data.wmsValue,
-        wmsCount: data.wmsCount,
-        shopeeValue: data.shopeeValue,
-        shopeeCount: data.shopeeCount,
-      };
-    });
+    return buildOrderTrendByMonth(filtered);
   }, [allCombinedOrders, dateRange]);
 
   /**
@@ -1164,11 +1086,12 @@ export default function BusinessInsightPage({
                                   totalValue: "Total Revenue",
                                   wmsValue: "WMS Revenue",
                                   shopeeValue: "Shopee Revenue",
+                                  lazadaValue: "Lazada Revenue",
                                 };
                                 return [
                                   value != null
                                     ? formatMoney(Number(value), "MYR")
-                                    : "$0",
+                                    : "Unavailable",
                                   labels[name as string] || name,
                                 ];
                               }}
@@ -1189,6 +1112,14 @@ export default function BusinessInsightPage({
                               fill={SOURCE_COLORS.shopee}
                               name="shopeeValue"
                             />
+                            <Area
+                              type="monotone"
+                              dataKey="lazadaValue"
+                              stackId="revenue"
+                              stroke={SOURCE_COLORS.lazada}
+                              fill={SOURCE_COLORS.lazada}
+                              name="lazadaValue"
+                            />
                           </AreaChart>
                         </ResponsiveChartContainer>
                         <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
@@ -1206,7 +1137,24 @@ export default function BusinessInsightPage({
                             />
                             Shopee
                           </span>
+                          <span className="flex items-center gap-1">
+                            <span
+                              className="inline-block w-3 h-3 rounded-sm"
+                              style={{ backgroundColor: SOURCE_COLORS.lazada }}
+                            />
+                            Lazada
+                          </span>
                         </div>
+                        {orderTrendByMonth.some(
+                          (row) =>
+                            row.wmsValue === null ||
+                            row.shopeeValue === null ||
+                            row.lazadaValue === null,
+                        ) && (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Revenue is partial where a source order total is unavailable.
+                          </p>
+                        )}
                       </ChartCard>
                       <ChartCard
                         title="Order Count by Month"

@@ -21,6 +21,8 @@ import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
+import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
+import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
 import type {
   TikTokProductSummary,
   TikTokOrderSummary,
@@ -449,7 +451,7 @@ export async function syncTikTokOrders(
               const paymentStatus = PAYMENT_STATUS_MAP[order.status] || "unpaid";
 
               const existing = await prisma.tikTokOrder.findFirst({
-                where: { tiktokOrderId: order.id },
+                where: { shopId: shop.id, tiktokOrderId: order.id },
               });
 
               const orderData = {
@@ -460,9 +462,14 @@ export async function syncTikTokOrders(
                 fulfillmentType: order.fulfillment_type || null,
                 shippingType: order.shipping_type || null,
                 currency: order.payment?.currency || null,
-                payment: order.payment ? JSON.parse(JSON.stringify(order.payment)) : undefined,
+                payment: order.payment ? toInputJson(order.payment) : undefined,
+                financialQuality: "unknown",
+                financialRevision: "source-v1",
+                qualityMarkedAt: new Date(),
+                sourceObservedAt: new Date(),
+                rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
                 recipientAddress: order.recipient_address
-                  ? JSON.parse(JSON.stringify(order.recipient_address))
+                  ? toInputJson(order.recipient_address)
                   : undefined,
                 isCod: order.is_cod ?? false,
                 buyerUserId: order.user_id || null,
@@ -495,7 +502,7 @@ export async function syncTikTokOrders(
 
               // Upsert order items
               const dbOrder = existing || (await prisma.tikTokOrder.findFirst({
-                where: { tiktokOrderId: order.id },
+                where: { shopId: shop.id, tiktokOrderId: order.id },
               }));
 
               if (dbOrder && order.line_items) {
@@ -509,7 +516,7 @@ export async function syncTikTokOrders(
                 for (const item of order.line_items) {
                   if (item.sku_id) {
                     const variant = await prisma.tikTokProductVariant.findFirst({
-                      where: { tiktokSkuId: item.sku_id },
+                      where: { shopId: shop.id, tiktokSkuId: item.sku_id },
                       select: { id: true },
                     });
                     if (variant) {
@@ -519,6 +526,8 @@ export async function syncTikTokOrders(
                 }
 
                 for (const item of order.line_items) {
+                  const originalPrice = parseSourceNumber(item.original_price, "tiktok.line_items.original_price");
+                  const price = parseSourceNumber(item.sale_price, "tiktok.line_items.sale_price");
                   await prisma.tikTokOrderItem.create({
                     data: {
                       orderId: dbOrder.id,
@@ -531,13 +540,18 @@ export async function syncTikTokOrders(
                       skuName: item.sku_name || null,
                       sellerSku: item.seller_sku || null,
                       productImageUrl: item.sku_image || null,
-                      quantity: 1,
-                      originalPrice: parseFloat(item.original_price || "0"),
-                      price: parseFloat(item.sale_price || "0"),
-                      discount: item.seller_discount ? parseFloat(item.seller_discount) : 0,
-                      subtotalAmount: 0,
-                      taxAmount: 0,
-                      refundAmount: 0,
+                      quantity: null,
+                      originalPrice: originalPrice.value,
+                      price: price.value,
+                      discount: null,
+                      subtotalAmount: null,
+                      taxAmount: null,
+                      refundAmount: null,
+                      financialQuality: "unknown",
+                      financialRevision: "source-v1",
+                      qualityMarkedAt: new Date(),
+                      sourceObservedAt: new Date(),
+                       rawFinancialPayload: sanitizeMarketplaceRawPayload(item),
                       currency: item.currency || null,
                       isGift: item.is_gift ?? false,
                       saleAttrs: undefined,
@@ -647,7 +661,7 @@ function normalizeSkuData(sku: TikTokProductSKU) {
     totalQuantity,
     imageUrl: sku.image_url || null,
     status: sku.status || "NORMAL",
-    salesAttrs: salesAttrs ? JSON.parse(JSON.stringify(salesAttrs)) : null,
+    salesAttrs: salesAttrs ? toInputJson(salesAttrs) : null,
     lastSyncedAt: new Date(),
   };
 }

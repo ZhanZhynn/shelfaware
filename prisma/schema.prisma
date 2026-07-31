@@ -979,12 +979,17 @@ model ShopeeOrder {
   completedAt          DateTime? // Completion time
   cancelledAt          DateTime? // Cancellation time
   // Fee/commission tracking (from Shopee escrow detail)
-  commissionFee        Float?            @default(0) // Shopee platform commission
-  serviceFee           Float?            @default(0) // Shopee service fee
-  sellerTxnFee         Float?            @default(0) // Seller transaction fee
-  shippingFee          Float?            @default(0) // Actual shipping fee (from escrow)
-  estimatedShippingFee Float?            @default(0) // Estimated shipping fee (from escrow) — compare with actual to find weight/dimension issues
-  sellerIncome         Float?            @default(0) // Net seller income after all fees
+   commissionFee        Float? // Shopee platform commission; null when escrow omitted it
+   serviceFee           Float? // Shopee service fee; null when escrow omitted it
+   sellerTxnFee         Float? // Seller transaction fee; null when escrow omitted it
+   shippingFee          Float? // Actual shipping fee; null when absent or semantics unverified
+   estimatedShippingFee Float? // Estimated shipping fee; never substituted for actual shipping
+   sellerIncome         Float? // Net seller income; null when escrow omitted it
+    financialQuality     String?           @default("legacy-unverified")
+    financialRevision    String?           @default("legacy-v0")
+   qualityMarkedAt      DateTime?
+   sourceObservedAt     DateTime?
+   rawFinancialPayload  Json?
   buyerPaymentMethod   String? // Payment method used by buyer
   // SLA / shipping deadline tracking (from getPackageDetail)
   shipByDate           DateTime? // Ship-by deadline (Unix seconds from Shopee)
@@ -998,6 +1003,8 @@ model ShopeeOrder {
   @@index([userId])
   @@index([orderStatus])
   @@index([shopeeCreatedAt])
+  // Additive lookup index. Existing global unique IDs are retained pending duplicate audit.
+  @@index([shopId, shopeeOrderId])
   @@index([createdAt])
   @@index([shipByDate])
 }
@@ -1051,7 +1058,9 @@ model ShopeeReturn {
   returnSn                 String     @unique // Shopee return serial number
   orderSn                  String // FK to ShopeeOrder.shopeeOrderId
   status                   String // REQUESTED, PROCESSING, ACCEPTED, COMPLETED, CANCELLED
-  refundAmount             Float      @default(0)
+  refundAmount             Float?
+  financialQuality         String     @default("legacy-unverified")
+  sourceObservedAt         DateTime?
   currency                 String?
   reason                   String?
   textReason               String?
@@ -1331,7 +1340,7 @@ model LazadaOrder {
   orderNumber       String? // Lazada order_number
   orderStatus       String // pending, confirmed, packed, ready_to_ship, shipped, delivered, cancelled, returned
   paymentStatus     String            @default("unpaid")
-  totalAmount       Float
+   totalAmount       Float?
   shippingFee       Float?
   currency          String?
   customerFirstName String?
@@ -1352,12 +1361,18 @@ model LazadaOrder {
   createdAt         DateTime          @default(now()) @db.Date
   updatedAt         DateTime?         @db.Date
   shop              LazadaShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  items             LazadaOrderItem[]
+   items             LazadaOrderItem[]
+   financialQuality  String            @default("legacy-unverified")
+   financialRevision String            @default("legacy-v0")
+   qualityMarkedAt   DateTime?
+   sourceObservedAt  DateTime?
+   rawFinancialPayload Json?
 
   @@index([shopId])
   @@index([userId])
   @@index([orderStatus])
   @@index([lazadaCreatedAt])
+  @@index([shopId, lazadaOrderId])
   @@index([createdAt])
 }
 
@@ -1372,14 +1387,19 @@ model LazadaOrderItem {
   shopSku           String?
   productName       String
   variation         String?
-  quantity          Int
-  price             Float
+   quantity          Int?
+   price             Float?
   paidPrice         Float?
   itemPrice         Float?
   currency          String?
   status            String
   shipmentProvider  String?
-  trackingNumber    String?
+   trackingNumber    String?
+   financialQuality  String      @default("legacy-unverified")
+   financialRevision String      @default("legacy-v0")
+   qualityMarkedAt   DateTime?
+   sourceObservedAt  DateTime?
+   rawFinancialPayload Json?
   createdAt         DateTime    @default(now()) @db.Date
   order             LazadaOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
@@ -1527,12 +1547,18 @@ model TikTokOrder {
   createdAt        DateTime          @default(now()) @db.Date
   updatedAt        DateTime?         @db.Date
   shop             TikTokShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  items            TikTokOrderItem[]
+   items            TikTokOrderItem[]
+    financialQuality String            @default("legacy-unverified")
+    financialRevision String           @default("legacy-v0")
+   qualityMarkedAt  DateTime?
+   sourceObservedAt DateTime?
+   rawFinancialPayload Json?
 
   @@index([shopId])
   @@index([userId])
   @@index([orderStatus])
   @@index([tiktokCreatedAt])
+  @@index([shopId, tiktokOrderId])
   @@index([createdAt])
 }
 
@@ -1548,13 +1574,18 @@ model TikTokOrderItem {
   skuName               String?
   sellerSku             String?
   productImageUrl       String?
-  quantity              Int
-  originalPrice         Float // Pre-discount unit price
-  price                 Float // Actual unit price after discount
-  discount              Float?                @default(0)
-  subtotalAmount        Float
-  taxAmount             Float?                @default(0)
-  refundAmount          Float?                @default(0)
+   quantity              Int?
+   originalPrice         Float? // Pre-discount unit price, only when supplied
+   price                 Float? // Actual unit price, only when supplied
+   discount              Float?
+   subtotalAmount        Float?
+   taxAmount             Float?
+   refundAmount          Float?
+   financialQuality     String                 @default("legacy-unverified")
+   financialRevision    String                 @default("legacy-v0")
+   qualityMarkedAt      DateTime?
+   sourceObservedAt     DateTime?
+   rawFinancialPayload  Json?
   currency              String? // Line-item currency supplied by TikTok
   isGift                Boolean?              @default(false)
   saleAttrs             Json? // Array of {attribute_id, attribute_name, attribute_value_name}
@@ -1671,12 +1702,18 @@ model ShopifyOrder {
   createdAt         DateTime           @default(now()) @db.Date
   updatedAt         DateTime?          @db.Date
   shop              ShopifyShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  items             ShopifyOrderItem[]
+   items             ShopifyOrderItem[]
+    financialQuality  String             @default("legacy-unverified")
+    financialRevision String             @default("legacy-v0")
+   qualityMarkedAt   DateTime?
+   sourceObservedAt  DateTime?
+   rawFinancialPayload Json?
 
   @@index([shopId])
   @@index([userId])
   @@index([orderStatus])
   @@index([shopifyCreatedAt])
+  @@index([shopId, shopifyOrderId])
 }
 
 model ShopifyOrderItem {
@@ -1700,4 +1737,187 @@ model ShopifyOrderItem {
   @@index([orderId])
   @@index([shopId])
   @@index([variantId])
+}
+
+// Marketplace analytics state is deliberately channel-neutral: finance APIs and
+// history permissions differ by seller, region, and OAuth grant.
+model MarketplaceAnalyticsCapability {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  platform    String
+  shopId      String   @db.ObjectId
+  connectionId String? @db.ObjectId
+  capability  String // orders, finance, refunds, settlements, buyer_identity
+  state       String   @default("unknown") // unknown, pending, available, unavailable, unauthorized, failed
+  detail      String?
+  checkedAt   DateTime @default(now())
+  observedAt  DateTime?
+  endpointVersion String?
+  grantFingerprint String?
+  observedFields String[] @default([])
+  errorCode   String?
+  retryAt     DateTime?
+  updatedAt   DateTime? @updatedAt
+  connection  MarketplaceAnalyticsConnection? @relation(fields: [connectionId], references: [id])
+
+  @@unique([platform, shopId, capability])
+  @@index([userId, platform])
+}
+
+// Canonical analytics ownership is additive: legacy state continues to use
+// platform/shopId until it is associated during a subsequent authorized write.
+model MarketplaceAnalyticsConnection {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
+  platform       String
+  shopId         String   @db.ObjectId
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  capabilities   MarketplaceAnalyticsCapability[]
+  backfills      MarketplaceAnalyticsBackfill[]
+  readiness      MarketplaceAnalyticsReadiness[]
+  reconciliations MarketplaceAnalyticsReconciliation[]
+
+  @@unique([platform, shopId])
+  @@index([userId, platform])
+}
+
+// Finance is usable only after an explicit reconciliation, independently of
+// endpoint capability and row-level provenance.
+model MarketplaceAnalyticsReadiness {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String   @db.ObjectId
+  platform         String
+  shopId           String   @db.ObjectId
+  connectionId     String?  @db.ObjectId
+  financeReady     Boolean  @default(false)
+  reconciledAt     DateTime?
+  reconciliationId String?
+  detail           String?
+  updatedAt        DateTime @updatedAt
+  connection       MarketplaceAnalyticsConnection? @relation(fields: [connectionId], references: [id])
+
+  @@unique([platform, shopId])
+  @@index([userId, platform])
+}
+
+model MarketplaceAnalyticsBackfill {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String   @db.ObjectId
+  platform         String
+  shopId           String   @db.ObjectId
+  connectionId     String?  @db.ObjectId
+  stream           String // orders, finance, refunds, settlements
+  status           String   @default("pending") // pending, running, retrying, completed, failed, cancelled
+  cursor           Json?
+  windowStart      DateTime?
+  windowEnd        DateTime?
+  earliestReturned DateTime?
+  error            String?
+  retryCount       Int      @default(0)
+  maxAttempts      Int      @default(5)
+  nextAttemptAt    DateTime?
+  leaseOwner       String?
+  leaseExpiresAt   DateTime?
+  claimedAt        DateTime?
+  lastAttemptAt    DateTime?
+  completedAt      DateTime?
+  checkpointAt     DateTime?
+  pageCount        Int      @default(0)
+  itemCount        Int      @default(0)
+  idempotencyKey   String?
+  terminalReason   String?
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  connection       MarketplaceAnalyticsConnection? @relation(fields: [connectionId], references: [id])
+
+  @@unique([platform, shopId, stream])
+  @@index([userId, platform, status])
+}
+
+// One immutable operator request may target a mutable backfill job. Keeping this
+// separate makes retries safe without allowing a later request to overwrite its key.
+model MarketplaceAnalyticsBackfillRequest {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String   @db.ObjectId
+  platform           String
+  shopId             String   @db.ObjectId
+  stream             String
+  idempotencyKey     String
+  action             String
+  payloadFingerprint String
+  outcome            String   @default("processing") // processing, accepted, cancelled, rejected
+  statusCode         Int      @default(202)
+  errorCode          String?
+  errorMessage       String?
+  cancelled          Boolean?
+  jobId              String?  @db.ObjectId
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([userId, platform, shopId, stream, idempotencyKey])
+  @@index([platform, shopId, stream, createdAt])
+}
+
+// Metadata-only reconciliation evidence. Amounts are fixed-point strings and are
+// never populated from marketplace payloads by this application.
+model MarketplaceAnalyticsReconciliation {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String   @db.ObjectId
+  platform           String
+  shopId             String   @db.ObjectId
+  connectionId       String?  @db.ObjectId
+  periodStart        DateTime
+  periodEnd          DateTime
+  calculationVersion String
+  evidenceHash       String
+  evidenceReference  String?
+  currency           String?
+  expectedMinor      String?
+  actualMinor        String?
+  deltaMinor         String?
+  scale              Int      @default(2)
+  reviewerId         String?  @db.ObjectId
+  residualCategory   String?
+  decision           String   @default("pending") // pending, approved, rejected
+  expiresAt          DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  connection         MarketplaceAnalyticsConnection? @relation(fields: [connectionId], references: [id])
+
+  @@index([platform, shopId, decision, expiresAt])
+  @@index([connectionId])
+}
+
+// Raw signed finance rows are retained without forcing regional fee names into
+// a lossy enum. Adapters can normalize them into the shared calculator later.
+model MarketplaceFinancialRecord {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String   @db.ObjectId
+  platform      String
+  shopId        String   @db.ObjectId
+  externalId    String
+  orderExternalId String?
+  itemExternalId String?
+  transactionType String?
+  feeType       String?
+  feeName       String?
+   // New finance writers use fixed-point minor units; amount remains only for legacy rows.
+   amountMinor    String?
+   amountScale    Int      @default(2)
+   analyticsConnectionId String?
+   amount        Float?
+   financialQuality String @default("unknown")
+   unknownReason String?
+   sourceObservedAt DateTime?
+  currency      String?
+  occurredAt    DateTime?
+  rawPayload    Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([platform, shopId, externalId])
+  @@index([analyticsConnectionId])
+  @@index([platform, shopId, orderExternalId])
+  @@index([occurredAt])
 }

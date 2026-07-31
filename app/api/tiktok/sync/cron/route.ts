@@ -9,7 +9,7 @@ import crypto from "crypto";
 import prisma from "@/prisma/client";
 import { setActiveShop, syncTikTokAll } from "@/lib/tiktok";
 import { logger } from "@/lib/logger";
-import { invalidateAllServerCaches } from "@/lib/cache";
+import { invalidateAllServerCaches, invalidateMarketplaceAnalytics } from "@/lib/cache";
 
 export const runtime = "nodejs";
 
@@ -72,7 +72,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    void invalidateAllServerCaches();
+    await invalidateAllServerCaches();
+    await invalidateMarketplaceAnalytics("tiktok");
     return NextResponse.json({
       message: `Synced ${shops.length} shop(s)`,
       results,

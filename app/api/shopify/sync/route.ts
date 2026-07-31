@@ -10,7 +10,7 @@ import { syncShopifyProducts, syncShopifyOrders, syncShopifyAll, isShopSyncing, 
 import { shopifySyncBodySchema } from "@/lib/validations/shopify";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { invalidateCache } from "@/lib/cache/cache-utils";
+import { invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate cache after sync
     await invalidateCache("shopify:*");
+    await invalidateMarketplaceAnalytics("shopify");
 
     return NextResponse.json(result);
   } catch (error) {

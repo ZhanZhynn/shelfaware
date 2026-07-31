@@ -15,7 +15,7 @@ export type UnknownCurrencyRecord = {
   source: "Shopee order" | "Shopee return" | "Lazada order";
   recordId: string;
   reference: string;
-  amount: number;
+  amount: number | null;
   occurredAt: string | null;
 };
 

@@ -15,6 +15,7 @@ import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
+import { sanitizeMarketplaceRawPayload } from "@/lib/marketplace/json";
 import type { ShopifyProductNode, ShopifyOrderNode } from "./types";
 
 // ─── Sync Lock (per-shop mutex) ───────────────────────────────────────────
@@ -297,6 +298,10 @@ export async function syncShopifyOrders(
             cancelledAt: order.cancelledAt ? new Date(order.cancelledAt) : null,
             lastSyncedAt: new Date(),
             updatedAt: new Date(),
+            // This query has original/gross values but no verified current/refund reconciliation.
+            financialQuality: "legacy-unverified",
+            sourceObservedAt: new Date(),
+            rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
           };
 
           let dbOrder;

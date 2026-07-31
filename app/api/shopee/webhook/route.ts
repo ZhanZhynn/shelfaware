@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
-import { invalidateCache } from "@/lib/cache/cache-utils";
+import { invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { verifyHmacSha256Hex } from "@/lib/auth/hmac-utils";
 
 export const runtime = "nodejs";
@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate related caches
     await Promise.all([
+      invalidateMarketplaceAnalytics("shopee"),
       invalidateCache(`shopee:stats:*`),
       invalidateCache(`shopee:orders:*`),
       invalidateCache(`shopee:products:*`),

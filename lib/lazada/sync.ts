@@ -8,10 +8,11 @@
 import { getLazadaSDK, setActiveSeller, validateLazadaToken } from "./server";
 import { getAllProductsCustom, getAllOrdersCustom, getMultipleOrderItemsCustom } from "./custom-api";
 import prisma from "@/prisma/client";
-import { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
+import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
+import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
 import type { LazadaOrderDetail } from "lazada-api-client";
 import type { OrderItem } from "./custom-api";
 
@@ -367,8 +368,8 @@ export async function syncLazadaOrders(
           const internalStatus = ORDER_STATUS_MAP[orderStatus] || "pending";
           const paymentStatus = PAYMENT_STATUS_MAP[orderStatus] || "unpaid";
 
-          const totalAmount = parseFloat(order.price || "0");
-          const shippingFee = parseFloat(order.shipping_fee || "0");
+          const totalAmount = parseSourceNumber(order.price, "lazada.order.price").value;
+          const shippingFee = parseSourceNumber(order.shipping_fee, "lazada.order.shipping_fee").value;
           const itemCurrencies = [...new Set(orderItems
             .map((item) => item.currency?.trim().toUpperCase())
             .filter((currency): currency is string => Boolean(currency)))];
@@ -377,7 +378,7 @@ export async function syncLazadaOrders(
           const currency = itemCurrencies.length === 1 ? itemCurrencies[0] : null;
 
           const existing = await prisma.lazadaOrder.findFirst({
-            where: { lazadaOrderId: String(orderId) },
+            where: { shopId: shop.id, lazadaOrderId: String(orderId) },
           });
 
           const orderData = {
@@ -393,10 +394,15 @@ export async function syncLazadaOrders(
             remarks: order.remarks || null,
             trackingNumber: orderItems[0]?.tracking_number || null,
             trackingCarrier: orderItems[0]?.shipment_provider || null,
-            shippingAddress: order.address_shipping ? JSON.parse(JSON.stringify(order.address_shipping)) as Prisma.InputJsonValue : undefined,
-            billingAddress: order.address_billing ? JSON.parse(JSON.stringify(order.address_billing)) as Prisma.InputJsonValue : undefined,
+            shippingAddress: order.address_shipping ? toInputJson(order.address_shipping) : undefined,
+            billingAddress: order.address_billing ? toInputJson(order.address_billing) : undefined,
             lazadaCreatedAt: order.created_at ? new Date(order.created_at) : null,
             lazadaUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+            financialQuality: "unknown",
+            financialRevision: "source-v1",
+            qualityMarkedAt: new Date(),
+            sourceObservedAt: new Date(),
+            rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
           };
 
           if (existing) {
@@ -419,7 +425,7 @@ export async function syncLazadaOrders(
 
           // Upsert order items
           const dbOrder = existing || (await prisma.lazadaOrder.findFirst({
-            where: { lazadaOrderId: String(orderId) },
+             where: { shopId: shop.id, lazadaOrderId: String(orderId) },
           }));
 
           if (dbOrder) {
@@ -441,14 +447,20 @@ export async function syncLazadaOrders(
                   shopSku: item.shop_sku || null,
                   productName: item.name || "Unknown Product",
                   variation: item.variation || null,
-                  quantity: 1, // Lazada items are typically qty 1 per line
-                  price: parseFloat(item.item_price || "0"),
-                  paidPrice: parseFloat(item.paid_price || "0"),
-                  itemPrice: parseFloat(item.item_price || "0"),
+                   // Row multiplicity has not been verified. Do not manufacture unit sales.
+                   quantity: null,
+                   price: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
+                   paidPrice: parseSourceNumber(item.paid_price, "lazada.item.paid_price").value,
+                   itemPrice: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
                   currency: item.currency || null,
                   status: ORDER_STATUS_MAP[itemStatus] || internalStatus,
                   shipmentProvider: item.shipment_provider || null,
-                  trackingNumber: item.tracking_number || null,
+                   trackingNumber: item.tracking_number || null,
+                    financialQuality: "unknown",
+                    financialRevision: "source-v1",
+                    qualityMarkedAt: new Date(),
+                    sourceObservedAt: new Date(),
+                     rawFinancialPayload: sanitizeMarketplaceRawPayload(item),
                 },
               });
             }

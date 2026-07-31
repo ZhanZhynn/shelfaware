@@ -146,7 +146,9 @@ async function calculatePnl(
   const shopeeShipping = sum(shopeeOrders, (o) => o.shippingFee ?? 0, (o) => o.currency, (o) => o.shopeeCreatedAt);
 
   const wmsReturnsTotal = sum(wmsReturns, (o) => o.total, (o) => o.currency, (o) => o.createdAt, true);
-  const shopeeReturnsTotal = sum(shopeeReturns, (r) => r.refundAmount, (r) => r.currency, (r) => r.shopeeCreatedAt);
+  // Newly observed return amounts can be unknown; never manufacture a zero refund.
+  const knownShopeeReturns = shopeeReturns.filter((returnRow): returnRow is typeof returnRow & { refundAmount: number } => returnRow.refundAmount !== null);
+  const shopeeReturnsTotal = sum(knownShopeeReturns, (r) => r.refundAmount, (r) => r.currency, (r) => r.shopeeCreatedAt);
 
   const revenue = { wms: wmsRevenue, shopee: shopeeRevenue, total: wmsRevenue + shopeeRevenue };
   const cogs = { wms: wmsCogs, shopee: shopeeCogs, total: wmsCogs + shopeeCogs };

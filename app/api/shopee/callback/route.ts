@@ -10,6 +10,7 @@ import { prisma } from "@/prisma/client";
 import { shopeeCallbackQuerySchema } from "@/lib/validations/shopee";
 import { logger } from "@/lib/logger";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -95,6 +96,7 @@ export async function GET(request: NextRequest) {
         },
       });
     }
+    await invalidateMarketplaceAnalytics("shopee");
 
     logger.info(`[Shopee Auth] Shop ${shop_id} connected for user ${userId}`);
 

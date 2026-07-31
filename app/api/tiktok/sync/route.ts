@@ -9,7 +9,7 @@ import { setActiveShop, syncTikTokProducts, syncTikTokOrders, syncTikTokAll, isS
 import { tiktokSyncBodySchema } from "@/lib/validations/tiktok";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
-import { invalidateCache } from "@/lib/cache/cache-utils";
+import { invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate cache after sync
     await invalidateCache("tiktok:*");
+    await invalidateMarketplaceAnalytics("tiktok");
 
     return NextResponse.json(result);
   } catch (error) {

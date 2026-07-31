@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
-import { invalidateCache, cacheKeys } from "@/lib/cache/cache-utils";
+import { invalidateCache, cacheKeys, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 
 export async function GET(
@@ -85,6 +85,7 @@ export async function DELETE(
 
     // Invalidate cache
     await invalidateCache(cacheKeys.shopee.pattern);
+    await invalidateMarketplaceAnalytics("shopee");
 
     logger.info(
       `[Shopee Shop] Shop ${shop.shopId} disconnected for user ${session.id}`,

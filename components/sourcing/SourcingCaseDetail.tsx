@@ -8,6 +8,7 @@ import {
   FileText,
   ImageIcon,
   Plus,
+  Send,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -105,7 +106,8 @@ export default function SourcingCaseDetail({
   basePath?: string;
 }) {
   const [mounted, setMounted] = useState(false);
-  const [dialog, setDialog] = useState<"confirm_submit" | "confirm_submit_all" | null>(null);
+  const [dialog, setDialog] = useState<"confirm_submit" | "confirm_submit_all" | "confirm_delete" | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
@@ -372,46 +374,66 @@ export default function SourcingCaseDetail({
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
             {offers.map((quote: any) => (
-              <button
+              <div
                 key={offerKey(quote)}
-                type="button"
-                onClick={() => chooseQuote(quote)}
-                className={`rounded-lg border p-4 text-left text-sm ${activeQuoteId === quote.id ? "border-sky-500 ring-1 ring-sky-500" : "hover:bg-muted/50"}`}
+                className={`relative rounded-lg border p-4 text-left text-sm ${activeQuoteId === quote.id ? "border-sky-500 ring-1 ring-sky-500" : "hover:bg-muted/50"}`}
               >
-                <div className="flex justify-between gap-2">
+                <button
+                  type="button"
+                  className="absolute inset-0"
+                  onClick={() => chooseQuote(quote)}
+                  aria-label={`Select ${quote.supplierName} offer`}
+                />
+                <div className="relative flex justify-between gap-2">
                   <b>{quote.supplierName}</b>
-                  <span className="capitalize text-muted-foreground">
-                    {label(quote.status)}
+                  <span className="flex items-center gap-2">
+                    <span className="capitalize text-muted-foreground">
+                      {label(quote.status)}
+                    </span>
+                    {quote.status === "draft" && item.capabilities.canEditQuote && (
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTarget({ id: quote.id, name: quote.supplierName });
+                          setDialog("confirm_delete");
+                        }}
+                        aria-label={`Delete ${quote.supplierName} draft`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </span>
                 </div>
-                <p className="mt-2">
+                <p className="relative mt-2">
                   {quote.unitPriceRmb == null
                     ? "No price"
                     : formatMoney(quote.unitPriceRmb, "CNY")}{" "}
                   / unit
                 </p>
                 {typeof quote.landedCostSnapshot?.landed === "number" && (
-                  <p>
+                  <p className="relative">
                     Landed:{" "}
                     {formatMoney(quote.landedCostSnapshot.landed, "MYR")} /
                     piece
                   </p>
                 )}
-                <p>
+                <p className="relative">
                   MOQ: {quote.moq ?? "-"} | Lead time:{" "}
                   {quote.leadTimeDays ?? "-"} days
                 </p>
-                <p>
+                <p className="relative">
                   Payment: {quote.paymentTerms || "-"} | Risk:{" "}
                   {quote.riskLevel || "-"}
                 </p>
                 {Array.isArray(quote.certifications) &&
                   quote.certifications.length > 0 && (
-                    <p>Compliance: {quote.certifications.join(", ")}</p>
+                    <p className="relative">Compliance: {quote.certifications.join(", ")}</p>
                   )}
                 {Array.isArray(quote.priceBreaks) &&
                   quote.priceBreaks.length > 0 && (
-                    <p>
+                    <p className="relative">
                       Price breaks:{" "}
                       {quote.priceBreaks
                         .map(
@@ -421,13 +443,13 @@ export default function SourcingCaseDetail({
                         .join(" | ")}
                     </p>
                   )}
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="relative mt-1 text-xs text-muted-foreground">
                   Revision {quote.revision}
                   {item.selectedQuoteId === quote.id
                     ? " | Approved selection"
                     : ""}
                 </p>
-              </button>
+              </div>
             ))}
           </CardContent>
         </Card>
@@ -669,6 +691,7 @@ export default function SourcingCaseDetail({
             </div>
             <div className="flex justify-end">
               <Button
+                size="icon"
                 disabled={!commentBody.trim()}
                 isLoading={comment.isPending}
                 onClick={async () => {
@@ -681,7 +704,7 @@ export default function SourcingCaseDetail({
                   setMentionedUserIds([]);
                 }}
               >
-                Post comment
+                <Send className="h-4 w-4" />
               </Button>
             </div>
           </div>
@@ -767,6 +790,35 @@ export default function SourcingCaseDetail({
               onClick={() => run("submit_all_drafts")}
             >
               Submit all drafts
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={dialog === "confirm_delete"}
+        onOpenChange={(open) => !open && setDialog(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete draft offer</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete the draft offer from
+            {deleteTarget ? ` ${deleteTarget.name}` : ""}? This action cannot
+            be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              isLoading={command.isPending}
+              onClick={() => {
+                if (deleteTarget) run("delete_quote", { quoteId: deleteTarget.id });
+              }}
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

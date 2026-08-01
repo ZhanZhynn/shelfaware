@@ -47,6 +47,7 @@ type Command = {
     | "save_quote"
     | "submit_quote"
     | "submit_all_drafts"
+    | "delete_quote"
     | "request_changes"
     | "approve"
     | "reject"
@@ -582,6 +583,31 @@ export async function runSourcingCommand(
         quoteIds: drafts.map((d) => d.id),
         count: drafts.length,
       });
+      return updated;
+    }
+    if (command.action === "delete_quote") {
+      requireAssigned();
+      if (!editableStages.includes(item.stage))
+        throw new SourcingAccessError(
+          "Quotes cannot be changed at this stage",
+          409,
+        );
+      if (!command.quoteId)
+        throw new SourcingAccessError("A quote must be selected", 400);
+      const target = await tx.sourcingQuote.findFirst({
+        where: { id: command.quoteId, caseId, status: "draft" },
+      });
+      if (!target)
+        throw new SourcingAccessError(
+          "Only draft quotes can be deleted",
+          409,
+        );
+      await tx.sourcingQuote.delete({ where: { id: target.id } });
+      await event(tx, caseId, item.workspaceId, actor.id, "delete_quote", {
+        quoteId: target.id,
+        supplierName: target.supplierName,
+      });
+      const updated = await bump({ version: { increment: 1 } });
       return updated;
     }
     if (

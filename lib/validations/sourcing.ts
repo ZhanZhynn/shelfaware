@@ -88,6 +88,7 @@ export const sourcingCommandSchema = z
       "save_quote",
       "submit_quote",
       "submit_all_drafts",
+      "delete_quote",
       "request_changes",
       "approve",
       "reject",
@@ -109,7 +110,7 @@ export const sourcingCommandSchema = z
     if (["create_quote", "save_quote", "submit_quote"].includes(value.action) && !value.quote) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quote"], message: "A valid quote is required" });
     }
-    if (["save_quote", "submit_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
+    if (["save_quote", "submit_quote", "delete_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quoteId"], message: "A quote must be selected" });
     }
     if (

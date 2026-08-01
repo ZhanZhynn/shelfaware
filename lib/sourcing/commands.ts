@@ -12,7 +12,7 @@ import { canEditQuote, quoteGroupKey } from "./workflow";
 import { ObjectId } from "mongodb";
 import { convertMoney } from "@/lib/money";
 import {
-  getCurrentExchangeRate,
+  getOrRefreshExchangeRate,
   isExchangeRateFresh,
 } from "@/lib/exchange-rates/service";
 import {
@@ -46,6 +46,7 @@ type Command = {
     | "create_quote"
     | "save_quote"
     | "submit_quote"
+    | "submit_all_drafts"
     | "request_changes"
     | "approve"
     | "reject"
@@ -282,7 +283,7 @@ export async function runSourcingCommand(
   // a MongoDB transaction open, and the snapshot is persisted on approval.
   const approvalReferenceRate =
     command.action === "approve" && !command.fxRateOverride
-      ? await getCurrentExchangeRate("CNY", "MYR")
+      ? await getOrRefreshExchangeRate("CNY", "MYR")
       : null;
   const requireAssigned = () => {
     if (
@@ -511,6 +512,75 @@ export async function runSourcingCommand(
       await event(tx, caseId, item.workspaceId, actor.id, command.action, {
         quoteId: quote.id,
         revision: quote.revision,
+      });
+      return updated;
+    }
+    if (command.action === "submit_all_drafts") {
+      requireAssigned();
+      if (!editableStages.includes(item.stage))
+        throw new SourcingAccessError(
+          "Quotes cannot be changed at this stage",
+          409,
+        );
+      const drafts = await tx.sourcingQuote.findMany({
+        where: { caseId, status: "draft" },
+      });
+      if (drafts.length === 0)
+        throw new SourcingAccessError("No draft quotes to submit", 400);
+      const now = new Date();
+      for (const draft of drafts) {
+        if (!draft.unitPriceRmb && !draft.overrideCostMyr)
+          throw new SourcingAccessError(
+            `Quote "${draft.supplierName}" requires a supplier cost or RM override before submission`,
+            400,
+          );
+        const landedCostSnapshot = calculateSourcingLandedCost(
+          {
+            unitCostCny: draft.unitPriceRmb,
+            piecesPerSellingUnit: draft.piecesPerSellingUnit,
+            cartonLengthCm: draft.cartonLengthCm,
+            cartonWidthCm: draft.cartonWidthCm,
+            cartonHeightCm: draft.cartonHeightCm,
+            piecesPerCarton: draft.piecesPerCarton,
+            marketPriceMyr: draft.marketPriceMyr,
+            marketPack: draft.marketPack,
+            overrideCostMyr: draft.overrideCostMyr,
+          },
+          costConfig,
+        );
+        if (!landedCostSnapshot)
+          throw new SourcingAccessError(
+            `Quote "${draft.supplierName}" requires a supplier cost or RM override before submission`,
+            400,
+          );
+        await tx.sourcingQuote.update({
+          where: { id: draft.id },
+          data: {
+            status: "submitted",
+            submittedAt: now,
+            costParamsSnapshot: json(costConfig),
+            landedCostSnapshot: json(landedCostSnapshot),
+          },
+        });
+      }
+      const updated = await bump({
+        stage: "quoted",
+        slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
+        slaRule: "approval",
+      });
+      await completeSourcingSla(tx, caseId, "quote_submission", now);
+      await tx.sourcingSlaRecord.create({
+        data: {
+          workspaceId: item.workspaceId,
+          caseId,
+          rule: "approval",
+          startedAt: now,
+          dueAt: dueAtForSourcingSla("approval", now, slaConfig),
+        },
+      });
+      await event(tx, caseId, item.workspaceId, actor.id, "submit_all_drafts", {
+        quoteIds: drafts.map((d) => d.id),
+        count: drafts.length,
       });
       return updated;
     }

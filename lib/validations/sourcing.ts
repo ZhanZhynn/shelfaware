@@ -87,6 +87,7 @@ export const sourcingCommandSchema = z
       "create_quote",
       "save_quote",
       "submit_quote",
+      "submit_all_drafts",
       "request_changes",
       "approve",
       "reject",

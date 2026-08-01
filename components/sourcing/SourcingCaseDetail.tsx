@@ -5,15 +5,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import {
-  CheckCircle,
   FileText,
   ImageIcon,
-  MessageSquare,
   Plus,
-  RefreshCw,
   Trash2,
   Upload,
-  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import {
   useCreateSourcingComment,
   useDeleteSourcingAttachment,
@@ -41,7 +38,6 @@ import {
   useSourcingCommand,
   useSourcingMembers,
   useSourcingSuppliers,
-  useUpdateSourcingNextAction,
   useUploadSourcingAttachment,
 } from "@/hooks/queries";
 import { formatMoney } from "@/lib/money";
@@ -109,21 +105,14 @@ export default function SourcingCaseDetail({
   basePath?: string;
 }) {
   const [mounted, setMounted] = useState(false);
-  const [dialog, setDialog] = useState<"assign" | "reason" | null>(null);
-  const [reasonAction, setReasonAction] = useState("request_changes");
-  const [reason, setReason] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
+  const [dialog, setDialog] = useState<"confirm_submit" | "confirm_submit_all" | null>(null);
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
-  const [nextAction, setNextAction] = useState("");
-  const [nextActionAt, setNextActionAt] = useState("");
-  const [slaDueAt, setSlaDueAt] = useState("");
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const { data: item, isLoading, error } = useSourcingCase(caseId);
   const command = useSourcingCommand();
   const comment = useCreateSourcingComment();
-  const updateNextAction = useUpdateSourcingNextAction();
   const { data: attachmentData } = useSourcingAttachments(caseId);
   const uploadAttachment = useUploadSourcingAttachment();
   const deleteAttachment = useDeleteSourcingAttachment();
@@ -150,18 +139,6 @@ export default function SourcingCaseDetail({
     setMounted(true);
   }, []);
   useEffect(() => {
-    if (!item) return;
-    setNextAction(item.nextAction || "");
-    setNextActionAt(
-      item.nextActionAt
-        ? new Date(item.nextActionAt).toISOString().slice(0, 16)
-        : "",
-    );
-    setSlaDueAt(
-      item.slaDueAt ? new Date(item.slaDueAt).toISOString().slice(0, 16) : "",
-    );
-  }, [item]);
-  useEffect(() => {
     form.reset(activeQuote ? quoteValues(activeQuote) : emptyQuote);
   }, [activeQuote, form]);
 
@@ -187,7 +164,6 @@ export default function SourcingCaseDetail({
         ...extra,
       });
       setDialog(null);
-      setReason("");
     } catch {
       // The mutation hook already displays the API error as a toast.
     }
@@ -206,20 +182,29 @@ export default function SourcingCaseDetail({
     options?: { hint?: string; required?: boolean },
   ) => (
     <label className="grid gap-1 text-sm font-medium">
-      <span>
+      <span className="flex items-center gap-1">
         {title}
         {options?.required ? " *" : ""}
+        {options?.hint && (
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                  ?
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="w-64 text-xs">
+                {options.hint}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </span>
       <Input
         type={type}
         required={options?.required}
         {...form.register(name as any)}
       />
-      {options?.hint && (
-        <span className="text-xs font-normal text-muted-foreground">
-          {options.hint}
-        </span>
-      )}
     </label>
   );
   const offers = Object.values(
@@ -377,148 +362,6 @@ export default function SourcingCaseDetail({
             ))
           ) : (
             <p className="text-sm text-muted-foreground">No attachments yet.</p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Next action and SLA</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
-          <label className="grid gap-1 font-medium sm:col-span-3">
-            Next action
-            <Input
-              value={nextAction}
-              disabled={!item.capabilities.canUpdateNextAction}
-              maxLength={500}
-              onChange={(event) => setNextAction(event.target.value)}
-              placeholder="Follow up with supplier"
-            />
-          </label>
-          <label className="grid gap-1 font-medium">
-            Next action at
-            <Input
-              type="datetime-local"
-              disabled={!item.capabilities.canUpdateNextAction}
-              value={nextActionAt}
-              onChange={(event) => setNextActionAt(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1 font-medium">
-            SLA due at
-            <Input
-              type="datetime-local"
-              disabled={!item.capabilities.canUpdateNextAction}
-              value={slaDueAt}
-              onChange={(event) => setSlaDueAt(event.target.value)}
-            />
-          </label>
-          {item.capabilities.canUpdateNextAction && (
-            <div className="flex items-end">
-              <Button
-                isLoading={updateNextAction.isPending}
-                onClick={() =>
-                  updateNextAction.mutateAsync({
-                    id: item.id,
-                    version: item.version,
-                    nextAction,
-                    nextActionAt: nextActionAt || null,
-                    slaDueAt: slaDueAt || null,
-                  })
-                }
-              >
-                Save
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Workflow</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {item.capabilities.canAssign && (
-            <Button variant="outline" onClick={() => setDialog("assign")}>
-              Assign sourcer
-            </Button>
-          )}
-          {item.capabilities.canDecide && item.stage === "quoted" && (
-            <>
-              <Button
-                disabled={!selectedSubmitted}
-                className="bg-green-600 text-white hover:bg-green-700"
-                onClick={() =>
-                  selectedSubmitted &&
-                  run("approve", { quoteId: selectedSubmitted.id })
-                }
-              >
-                <CheckCircle className="h-4 w-4" />
-                Approve selected offer
-              </Button>
-              <Button
-                disabled={!selectedSubmitted}
-                className="bg-amber-500 text-white hover:bg-amber-600"
-                onClick={() => {
-                  setReasonAction("request_changes");
-                  setDialog("reason");
-                }}
-              >
-                <MessageSquare className="h-4 w-4" />
-                Request changes
-              </Button>
-              <Button
-                disabled={!selectedSubmitted}
-                variant="destructive"
-                onClick={() => {
-                  setReasonAction("reject");
-                  setDialog("reason");
-                }}
-              >
-                <XCircle className="h-4 w-4" />
-                Reject
-              </Button>
-            </>
-          )}
-          {item.capabilities.canDecide &&
-            ["sourcing", "changes_requested"].includes(item.stage) && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setReasonAction("cannot_source");
-                  setDialog("reason");
-                }}
-              >
-                Cannot source
-              </Button>
-            )}
-          {item.capabilities.canDecide &&
-            item.stage === "changes_requested" && (
-              <p className="basis-full rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-200">
-                Changes requested. Waiting for the assigned sourcer to update
-                and resubmit this offer.
-              </p>
-            )}
-          {item.capabilities.canOrder && (
-            <Button onClick={() => run("confirm_order")}>
-              Create purchase order
-            </Button>
-          )}
-          {item.capabilities.canArchive && (
-            <Button variant="outline" onClick={() => run("archive")}>
-              Archive
-            </Button>
-          )}
-          {item.stage === "archived" && item.capabilities.canAssign && (
-            <>
-              <Button variant="outline" onClick={() => run("revive")}>
-                <RefreshCw className="h-4 w-4" />
-                Revive
-              </Button>
-              <Button variant="outline" onClick={() => run("repeat")}>
-                Repeat
-              </Button>
-            </>
           )}
         </CardContent>
       </Card>
@@ -757,9 +600,19 @@ export default function SourcingCaseDetail({
                     <Button
                       type="button"
                       isLoading={command.isPending}
-                      onClick={() => saveQuote("submit_quote")}
+                      onClick={() => setDialog("confirm_submit")}
                     >
                       Submit offer
+                    </Button>
+                  )}
+                  {offers.filter((q: any) => q.status === "draft").length > 1 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      isLoading={command.isPending}
+                      onClick={() => setDialog("confirm_submit_all")}
+                    >
+                      Submit all drafts
                     </Button>
                   )}
                 </div>
@@ -872,63 +725,48 @@ export default function SourcingCaseDetail({
         </CardContent>
       </Card>
       <Dialog
-        open={dialog === "assign"}
+        open={dialog === "confirm_submit"}
         onOpenChange={(open) => !open && setDialog(null)}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign sourcer</DialogTitle>
+            <DialogTitle>Submit quote</DialogTitle>
           </DialogHeader>
-          <Select value={assigneeId} onValueChange={setAssigneeId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select member" />
-            </SelectTrigger>
-            <SelectContent>
-              {members
-                .filter((member: any) => member.role === "sourcer")
-                .map((member: any) => (
-                  <SelectItem key={member.id} value={member.id}>
-                    {member.name || member.email}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to submit this quote? Once submitted, the
+            quote cannot be changed unless a new quote is submitted.
+          </p>
           <DialogFooter>
-            <Button
-              disabled={!assigneeId}
-              onClick={() => run("assign", { assigneeId })}
-            >
-              Assign
+            <Button variant="outline" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => saveQuote("submit_quote")}>
+              Submit quote
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog
-        open={dialog === "reason"}
+        open={dialog === "confirm_submit_all"}
         onOpenChange={(open) => !open && setDialog(null)}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{label(reasonAction)}</DialogTitle>
+            <DialogTitle>Submit all draft quotes</DialogTitle>
           </DialogHeader>
-          <Textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            placeholder="Explain the decision"
-          />
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to submit all draft quotes? Once submitted,
+            quotes cannot be changed unless new quotes are submitted.
+          </p>
           <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
             <Button
-              disabled={!reason.trim()}
-              onClick={() =>
-                run(reasonAction, {
-                  reason,
-                  ...(selectedSubmitted
-                    ? { quoteId: selectedSubmitted.id }
-                    : {}),
-                })
-              }
+              isLoading={command.isPending}
+              onClick={() => run("submit_all_drafts")}
             >
-              Confirm
+              Submit all drafts
             </Button>
           </DialogFooter>
         </DialogContent>

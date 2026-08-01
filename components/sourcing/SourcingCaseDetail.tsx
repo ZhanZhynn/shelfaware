@@ -376,15 +376,13 @@ export default function SourcingCaseDetail({
             {offers.map((quote: any) => (
               <div
                 key={offerKey(quote)}
-                className={`relative rounded-lg border p-4 text-left text-sm ${activeQuoteId === quote.id ? "border-sky-500 ring-1 ring-sky-500" : "hover:bg-muted/50"}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => chooseQuote(quote)}
+                onKeyDown={(e) => e.key === "Enter" && chooseQuote(quote)}
+                className={`cursor-pointer rounded-lg border p-4 text-left text-sm ${activeQuoteId === quote.id ? "border-sky-500 ring-1 ring-sky-500" : "hover:bg-muted/50"}`}
               >
-                <button
-                  type="button"
-                  className="absolute inset-0"
-                  onClick={() => chooseQuote(quote)}
-                  aria-label={`Select ${quote.supplierName} offer`}
-                />
-                <div className="relative flex justify-between gap-2">
+                <div className="flex justify-between gap-2">
                   <b>{quote.supplierName}</b>
                   <span className="flex items-center gap-2">
                     <span className="capitalize text-muted-foreground">
@@ -393,7 +391,7 @@ export default function SourcingCaseDetail({
                     {quote.status === "draft" && item.capabilities.canEditQuote && (
                       <button
                         type="button"
-                        className="text-muted-foreground hover:text-destructive"
+                        className="relative z-10 text-muted-foreground hover:text-destructive"
                         onClick={(e) => {
                           e.stopPropagation();
                           setDeleteTarget({ id: quote.id, name: quote.supplierName });
@@ -406,34 +404,34 @@ export default function SourcingCaseDetail({
                     )}
                   </span>
                 </div>
-                <p className="relative mt-2">
+                <p className="mt-2">
                   {quote.unitPriceRmb == null
                     ? "No price"
                     : formatMoney(quote.unitPriceRmb, "CNY")}{" "}
                   / unit
                 </p>
                 {typeof quote.landedCostSnapshot?.landed === "number" && (
-                  <p className="relative">
+                  <p>
                     Landed:{" "}
                     {formatMoney(quote.landedCostSnapshot.landed, "MYR")} /
                     piece
                   </p>
                 )}
-                <p className="relative">
+                <p>
                   MOQ: {quote.moq ?? "-"} | Lead time:{" "}
                   {quote.leadTimeDays ?? "-"} days
                 </p>
-                <p className="relative">
+                <p>
                   Payment: {quote.paymentTerms || "-"} | Risk:{" "}
                   {quote.riskLevel || "-"}
                 </p>
                 {Array.isArray(quote.certifications) &&
                   quote.certifications.length > 0 && (
-                    <p className="relative">Compliance: {quote.certifications.join(", ")}</p>
+                    <p>Compliance: {quote.certifications.join(", ")}</p>
                   )}
                 {Array.isArray(quote.priceBreaks) &&
                   quote.priceBreaks.length > 0 && (
-                    <p className="relative">
+                    <p>
                       Price breaks:{" "}
                       {quote.priceBreaks
                         .map(
@@ -443,7 +441,7 @@ export default function SourcingCaseDetail({
                         .join(" | ")}
                     </p>
                   )}
-                <p className="relative mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   Revision {quote.revision}
                   {item.selectedQuoteId === quote.id
                     ? " | Approved selection"

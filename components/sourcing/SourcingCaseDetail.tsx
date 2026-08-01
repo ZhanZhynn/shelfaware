@@ -465,7 +465,9 @@ export default function SourcingCaseDetail({
           />
         )}
       {item.capabilities.canEditQuote &&
-        editableStages.includes(item.stage) && (
+        (editableStages.includes(item.stage) ||
+          (item.stage === "quoted" &&
+            offers.some((q: any) => q.status === "draft"))) && (
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">

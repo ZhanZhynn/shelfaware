@@ -22,7 +22,7 @@ export function canEditQuote(
   stage: string,
 ) {
   return (
-    ["draft", "sourcing", "changes_requested"].includes(stage) &&
+    (["draft", "sourcing", "changes_requested"].includes(stage) || stage === "quoted") &&
     (globalAdmin || (role === "sourcer" && assignedToId === userId))
   );
 }

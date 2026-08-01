@@ -365,7 +365,8 @@ export async function runSourcingCommand(
       ["create_quote", "save_quote", "submit_quote"].includes(command.action)
     ) {
       requireAssigned();
-      if (!editableStages.includes(item.stage))
+      const stageEditable = editableStages.includes(item.stage) || (command.action === "submit_quote" && item.stage === "quoted");
+      if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
           409,
@@ -518,7 +519,8 @@ export async function runSourcingCommand(
     }
     if (command.action === "submit_all_drafts") {
       requireAssigned();
-      if (!editableStages.includes(item.stage))
+      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
           409,
@@ -587,7 +589,8 @@ export async function runSourcingCommand(
     }
     if (command.action === "delete_quote") {
       requireAssigned();
-      if (!editableStages.includes(item.stage))
+      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
           409,

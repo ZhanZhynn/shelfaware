@@ -473,10 +473,12 @@ export default function SourcingCaseDetail({
         </TabsList>
         <TabsContent value="quotes" className="space-y-6">
       <Tabs value={quoteView} onValueChange={setQuoteView} className="space-y-4">
+        {basePath.startsWith("/admin") && (
         <TabsList className="grid h-auto w-full grid-cols-2">
           <TabsTrigger value="compare">View offers</TabsTrigger>
           <TabsTrigger value="what-if" disabled={offers.length === 0}>What-if calculation</TabsTrigger>
         </TabsList>
+        )}
         <TabsContent value="compare" className="space-y-4">
       {offers.length > 0 ? (
         <Card>

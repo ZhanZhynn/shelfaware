@@ -25,7 +25,7 @@ type CaseGroup = "needs_action" | "submitted" | "completed" | "rejected" | "arch
 
 const GROUP_META: Record<CaseGroup, { label: string; badge: "warning" | "info" | "success" | "destructive" | "secondary"; accent: string; activeFilter: string; inactiveFilter: string }> = {
   needs_action: { label: "Needs Action", badge: "warning", accent: "border-l-orange-500", activeFilter: "border-orange-500 bg-orange-500 text-white", inactiveFilter: "border-orange-300 bg-transparent text-orange-600 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400 dark:hover:bg-orange-950" },
-  submitted:    { label: "Submitted",    badge: "info",     accent: "border-l-blue-500",   activeFilter: "border-blue-500 bg-blue-500 text-white", inactiveFilter: "border-blue-300 bg-transparent text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950" },
+  submitted:    { label: "Pending Approval",    badge: "info",     accent: "border-l-blue-500",   activeFilter: "border-blue-500 bg-blue-500 text-white", inactiveFilter: "border-blue-300 bg-transparent text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950" },
   completed:    { label: "Completed",    badge: "success",  accent: "border-l-emerald-500", activeFilter: "border-emerald-500 bg-emerald-500 text-white", inactiveFilter: "border-emerald-300 bg-transparent text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950" },
   rejected:     { label: "Rejected",     badge: "destructive", accent: "border-l-red-500",  activeFilter: "border-red-500 bg-red-500 text-white", inactiveFilter: "border-red-300 bg-transparent text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950" },
   archived:     { label: "Archived",     badge: "secondary", accent: "border-l-gray-400",   activeFilter: "border-gray-400 bg-gray-400 text-white", inactiveFilter: "border-gray-300 bg-transparent text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-900" },
@@ -36,7 +36,7 @@ const STAGE_TO_GROUP: Record<string, CaseGroup> = {
   sourcing: "needs_action",
   changes_requested: "needs_action",
   quoted: "submitted",
-  approved: "completed",
+  approved: "needs_action",
   ordered: "completed",
   shipped: "completed",
   received: "completed",

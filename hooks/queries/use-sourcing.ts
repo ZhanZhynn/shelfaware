@@ -286,9 +286,9 @@ export function useUploadSourcingAttachment() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: ({ id, file }: { id: string; file: File }) =>
+    mutationFn: ({ id, file, quoteId }: { id: string; file: File; quoteId?: string }) =>
       apiClient.sourcing
-        .uploadAttachment(id, file)
+        .uploadAttachment(id, file, quoteId)
         .then((response) => response.data),
     ...mutationOptions(queryClient, toast, "Attachment uploaded"),
   });

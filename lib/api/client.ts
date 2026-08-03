@@ -1229,9 +1229,10 @@ class ApiClient {
           status: response.status,
           statusText: response.statusText,
         })),
-    uploadAttachment: async (id: string, file: File) => {
+    uploadAttachment: async (id: string, file: File, quoteId?: string) => {
       const formData = new FormData();
       formData.append("file", file);
+      if (quoteId) formData.append("quoteId", quoteId);
       return this.client
         .post(API_ENDPOINTS.sourcing.attachments(id), formData)
         .then((response) => ({

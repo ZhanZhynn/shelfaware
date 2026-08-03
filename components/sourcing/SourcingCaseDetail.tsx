@@ -13,6 +13,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -30,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import {
   useCreateSourcingComment,
@@ -61,6 +63,19 @@ const emptyQuote = {
   priceBreaks: [],
 };
 const offerKey = (quote: any) => quote.quoteGroupId || quote.id;
+const stageBadgeVariant: Record<string, "secondary" | "warning" | "info" | "success" | "destructive"> = {
+  draft: "secondary",
+  sourcing: "warning",
+  changes_requested: "warning",
+  quoted: "info",
+  approved: "success",
+  ordered: "info",
+  shipped: "info",
+  received: "success",
+  rejected: "destructive",
+  cannot_source: "destructive",
+  archived: "secondary",
+};
 
 function quoteValues(quote: any): SourcingQuoteInput {
   return {
@@ -111,6 +126,8 @@ export default function SourcingCaseDetail({
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
   const [commentBody, setCommentBody] = useState("");
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
+  const [mentionSearch, setMentionSearch] = useState<string | null>(null);
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const { data: item, isLoading, error } = useSourcingCase(caseId);
   const command = useSourcingCommand();
@@ -219,6 +236,42 @@ export default function SourcingCaseDetail({
   );
   const chooseQuote = (quote: any) => setActiveQuoteId(quote.id);
   const attachments = attachmentData || item.attachments || [];
+  const activeQuoteAttachments = activeQuote
+    ? attachments.filter((attachment: any) => attachment.quoteId === activeQuote.id)
+    : [];
+  const unassignedAttachments = attachments.filter((attachment: any) => !attachment.quoteId);
+  const canEditQuotes =
+    item.capabilities.canEditQuote &&
+    (editableStages.includes(item.stage) ||
+      (item.stage === "quoted" && offers.some((quote: any) => quote.status === "draft")));
+  const canEditActiveQuote = canEditQuotes && (!activeQuote || activeQuote.status === "draft");
+  const mentionCandidates = mentionSearch === null
+    ? []
+    : members.filter((member: any) =>
+        `${member.name || ""} ${member.email || ""}`.toLowerCase().includes(mentionSearch.toLowerCase()),
+      );
+
+  const updateCommentBody = (value: string, cursor: number) => {
+    setCommentBody(value);
+    const match = value.slice(0, cursor).match(/(^|\s)@([^\s@]*)$/);
+    if (match) {
+      setMentionSearch(match[2] ?? "");
+      setMentionStart(cursor - (match[2]?.length || 0) - 1);
+    } else {
+      setMentionSearch(null);
+      setMentionStart(null);
+    }
+  };
+
+  const chooseMention = (member: any) => {
+    if (mentionStart === null || mentionSearch === null) return;
+    const name = member.name || member.email;
+    const end = mentionStart + mentionSearch.length + 1;
+    setCommentBody(`${commentBody.slice(0, mentionStart)}@${name} ${commentBody.slice(end)}`);
+    setMentionedUserIds((ids) => ids.includes(member.id) ? ids : [...ids, member.id]);
+    setMentionSearch(null);
+    setMentionStart(null);
+  };
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
@@ -232,9 +285,9 @@ export default function SourcingCaseDetail({
             {item.route === "other" ? "Other supplier route" : "Yiwu route"}
           </p>
         </div>
-        <span className="rounded-full bg-muted px-3 py-1 text-sm capitalize">
+        <Badge variant={stageBadgeVariant[item.stage] || "secondary"} className="capitalize">
           {label(item.stage)}
-        </span>
+        </Badge>
       </div>
       <Card>
         <CardHeader>
@@ -288,86 +341,19 @@ export default function SourcingCaseDetail({
           </p>
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle>Attachments</CardTitle>
-            <div>
-              <input
-                ref={attachmentInputRef}
-                className="sr-only"
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  await uploadAttachment.mutateAsync({ id: item.id, file });
-                  event.target.value = "";
-                }}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                isLoading={uploadAttachment.isPending}
-                onClick={() => attachmentInputRef.current?.click()}
-              >
-                <Upload className="h-4 w-4" />
-                Add file
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Images, PDFs, and spreadsheet files up to 10 MB.
-          </p>
-          {attachments.length ? (
-            attachments.map((attachment: any) => (
-              <div
-                key={attachment.id}
-                className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm"
-              >
-                <a
-                  className="flex min-w-0 flex-1 items-center gap-2 hover:text-sky-600"
-                  href={attachment.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {attachment.mimeType.startsWith("image/") ? (
-                    <ImageIcon className="h-4 w-4 shrink-0" />
-                  ) : (
-                    <FileText className="h-4 w-4 shrink-0" />
-                  )}
-                  <span className="truncate">{attachment.fileName}</span>
-                </a>
-                <span className="hidden text-xs text-muted-foreground sm:inline">
-                  {Math.ceil(attachment.fileSize / 1024)} KB
-                </span>
-                {attachment.canDelete && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    isLoading={deleteAttachment.isPending}
-                    onClick={() =>
-                      deleteAttachment.mutate({
-                        id: item.id,
-                        attachmentId: attachment.id,
-                      })
-                    }
-                    aria-label={`Delete ${attachment.fileName}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">No attachments yet.</p>
-          )}
-        </CardContent>
-      </Card>
-      {offers.length > 0 && (
+      <Tabs defaultValue="quotes" className="space-y-4">
+        <TabsList className="grid h-auto w-full grid-cols-2">
+          <TabsTrigger value="quotes" className="gap-2 py-2">
+            Quotes / offers
+            <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">{offers.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="purchase-orders" className="gap-2 py-2">
+            Purchase orders
+            <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">{(item.orders || []).filter((order: any) => order.purchaseOrder).length}</span>
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="quotes" className="space-y-6">
+      {offers.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>Supplier offer comparison</CardTitle>
@@ -385,9 +371,9 @@ export default function SourcingCaseDetail({
                 <div className="flex justify-between gap-2">
                   <b>{quote.supplierName}</b>
                   <span className="flex items-center gap-2">
-                    <span className="capitalize text-muted-foreground">
+                    <Badge variant={quote.status === "submitted" ? "info" : "secondary"} className="capitalize">
                       {label(quote.status)}
-                    </span>
+                    </Badge>
                     {quote.status === "draft" && item.capabilities.canEditQuote && (
                       <button
                         type="button"
@@ -451,6 +437,26 @@ export default function SourcingCaseDetail({
             ))}
           </CardContent>
         </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">No quotes or offers yet.</CardContent>
+        </Card>
+      )}
+      {unassignedAttachments.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Unassigned case files</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">These files were uploaded before quote attachments were introduced.</p>
+            {unassignedAttachments.map((attachment: any) => (
+              <a key={attachment.id} className="flex items-center gap-2 rounded-md border px-3 py-2 hover:text-sky-600" href={attachment.url} target="_blank" rel="noopener noreferrer">
+                {attachment.mimeType.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                <span className="truncate">{attachment.fileName}</span>
+              </a>
+            ))}
+          </CardContent>
+        </Card>
       )}
       {activeQuote &&
         item.capabilities.canAssign &&
@@ -464,26 +470,25 @@ export default function SourcingCaseDetail({
             quote={activeQuote}
           />
         )}
-      {item.capabilities.canEditQuote &&
-        (editableStages.includes(item.stage) ||
-          (item.stage === "quoted" &&
-            offers.some((q: any) => q.status === "draft"))) && (
+      {(activeQuote || canEditActiveQuote) && (
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>
                   {activeQuote
-                    ? `Edit ${activeQuote.supplierName} offer`
+                    ? `${canEditActiveQuote ? "Edit" : "View"} ${activeQuote.supplierName} offer`
                     : "New supplier offer"}
                 </CardTitle>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setActiveQuoteId(null)}
-                >
-                  <Plus className="h-4 w-4" />
-                  New offer
-                </Button>
+                {canEditQuotes && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setActiveQuoteId(null)}
+                  >
+                    <Plus className="h-4 w-4" />
+                    New offer
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -491,17 +496,16 @@ export default function SourcingCaseDetail({
                 className="grid gap-4 sm:grid-cols-2"
                 onSubmit={(event) => {
                   event.preventDefault();
+                  if (!canEditActiveQuote) return;
                   saveQuote(activeQuote ? "save_quote" : "create_quote");
                 }}
               >
-                <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground sm:col-span-2">
-                  Fields marked * are required. A supplier CNY cost or RM
-                  override is required before submission. Quote the
-                  supplier&apos;s actual selling unit, then state how many
-                  customer-facing pieces it contains. Carton details are needed
-                  to include freight; competitor pricing is optional and is only
-                  used for margin analysis.
-                </p>
+                {!canEditActiveQuote && (
+                  <p className="rounded-md border border-blue-200 bg-blue-50/50 p-3 text-sm text-blue-700 sm:col-span-2 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300">
+                    This submitted offer is locked. Create a new offer to submit a revision.
+                  </p>
+                )}
+                <fieldset disabled={!canEditActiveQuote} className="contents">
                 <label className="grid gap-1 text-sm font-medium">
                   Supplier
                   <Select
@@ -610,6 +614,62 @@ export default function SourcingCaseDetail({
                   Remarks
                   <Textarea {...form.register("remarks")} />
                 </label>
+                {activeQuote && (
+                  <div className="space-y-3 rounded-lg border bg-muted/20 p-4 sm:col-span-2">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">Quote attachments</p>
+                        <p className="text-xs text-muted-foreground">Images, PDFs, and spreadsheets up to 10 MB.</p>
+                      </div>
+                      <div>
+                        <input
+                          ref={attachmentInputRef}
+                          className="sr-only"
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/csv,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
+                          onChange={async (event) => {
+                            const file = event.target.files?.[0];
+                            if (!file) return;
+                            await uploadAttachment.mutateAsync({ id: item.id, file, quoteId: activeQuote.id });
+                            event.target.value = "";
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                          isLoading={uploadAttachment.isPending}
+                          onClick={() => attachmentInputRef.current?.click()}
+                        >
+                          <Upload className="h-4 w-4" />
+                          Add file
+                        </Button>
+                      </div>
+                    </div>
+                    {activeQuoteAttachments.length ? (
+                      <div className="space-y-2">
+                        {activeQuoteAttachments.map((attachment: any) => (
+                          <div key={attachment.id} className="flex items-center gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+                            <a className="flex min-w-0 flex-1 items-center gap-2 hover:text-sky-600" href={attachment.url} target="_blank" rel="noopener noreferrer">
+                              {attachment.mimeType.startsWith("image/") ? <ImageIcon className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
+                              <span className="truncate">{attachment.fileName}</span>
+                            </a>
+                            <span className="hidden text-xs text-muted-foreground sm:inline">{Math.ceil(attachment.fileSize / 1024)} KB</span>
+                            {attachment.canDelete && (
+                              <Button size="sm" type="button" variant="ghost" className="text-destructive hover:text-destructive" isLoading={deleteAttachment.isPending} onClick={() => deleteAttachment.mutate({ id: item.id, attachmentId: attachment.id })} aria-label={`Delete ${attachment.fileName}`}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No files attached to this quote.</p>
+                    )}
+                  </div>
+                )}
+                </fieldset>
+                {canEditActiveQuote && (
                 <div className="flex justify-end gap-2 sm:col-span-2">
                   <Button
                     type="submit"
@@ -638,60 +698,54 @@ export default function SourcingCaseDetail({
                     </Button>
                   )}
                 </div>
+                )}
               </form>
             </CardContent>
           </Card>
         )}
-      <SourcingPurchaseOrderPanel
-        orders={item.orders || []}
-        basePath={basePath}
-      />
+        </TabsContent>
+        <TabsContent value="purchase-orders">
+          <SourcingPurchaseOrderPanel
+            orders={item.orders || []}
+            basePath={basePath}
+          />
+        </TabsContent>
+      </Tabs>
       <Card>
         <CardHeader>
           <CardTitle>Comments</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-3">
+        <CardContent className="space-y-3">
+          <div className="relative">
             <Textarea
               value={commentBody}
-              onChange={(event) => setCommentBody(event.target.value)}
-              placeholder="Add a comment for the sourcing team"
+              onChange={(event) => updateCommentBody(event.target.value, event.target.selectionStart ?? event.target.value.length)}
+              placeholder="Write a comment. Type @ to notify a teammate."
               maxLength={4000}
+              className="min-h-20 pr-12"
             />
-            <div className="rounded-md border p-3">
-              <p className="mb-2 text-sm font-medium">
-                Notify members (optional)
-              </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {members.map((member: any) => (
-                  <label
+            {mentionSearch !== null && (
+              <div className="absolute bottom-full left-0 z-10 mb-2 w-full max-w-sm overflow-hidden rounded-md border bg-popover shadow-md">
+                {mentionCandidates.length ? mentionCandidates.map((member: any) => (
+                  <button
                     key={member.id}
-                    className="flex items-center gap-2 text-sm"
+                    type="button"
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => chooseMention(member)}
                   >
-                    <input
-                      type="checkbox"
-                      checked={mentionedUserIds.includes(member.id)}
-                      onChange={() =>
-                        setMentionedUserIds((ids) =>
-                          ids.includes(member.id)
-                            ? ids.filter((id) => id !== member.id)
-                            : [...ids, member.id],
-                        )
-                      }
-                    />
-                    {member.name || member.email}
-                  </label>
-                ))}
+                    <span>{member.name || member.email}</span>
+                    {member.name && <span className="text-xs text-muted-foreground">{member.email}</span>}
+                  </button>
+                )) : (
+                  <p className="px-3 py-2 text-sm text-muted-foreground">No matching members</p>
+                )}
               </div>
-              {members.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No workspace members available to mention.
-                </p>
-              )}
-            </div>
-            <div className="flex justify-end">
+            )}
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">Type <b>@</b> to select and notify workspace members.</p>
               <Button
-                size="icon"
+                size="sm"
                 disabled={!commentBody.trim()}
                 isLoading={comment.isPending}
                 onClick={async () => {
@@ -702,16 +756,19 @@ export default function SourcingCaseDetail({
                   });
                   setCommentBody("");
                   setMentionedUserIds([]);
+                  setMentionSearch(null);
+                  setMentionStart(null);
                 }}
               >
                 <Send className="h-4 w-4" />
+                Send
               </Button>
             </div>
           </div>
-          <div className="space-y-3">
+          <div className="space-y-2 border-t pt-3">
             {item.comments?.length ? (
               item.comments.map((entry: any) => (
-                <div key={entry.id} className="rounded-md border p-3">
+                <div key={entry.id} className="border-b pb-3 last:border-0 last:pb-0">
                   <div className="flex flex-wrap justify-between gap-2 text-sm">
                     <span className="font-medium">
                       {entry.author?.name ||
@@ -722,7 +779,7 @@ export default function SourcingCaseDetail({
                       {new Date(entry.createdAt).toLocaleString()}
                     </span>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm">
+                  <p className="mt-1 whitespace-pre-wrap text-sm">
                     {entry.body}
                   </p>
                   {Array.isArray(entry.mentionedUserIds) &&

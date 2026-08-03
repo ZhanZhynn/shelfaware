@@ -10,8 +10,10 @@ import { canEditQuote } from "@/lib/sourcing/workflow";
 import { getCurrentExchangeRate } from "@/lib/exchange-rates/service";
 import { sourcingPurchaseOrderEstimate } from "@/lib/sourcing/purchase-order-currency";
 import { updateSourcingNextAction } from "@/lib/sourcing/commands";
-import { sourcingNextActionSchema } from "@/lib/validations/sourcing";
+import { sourcingNextActionSchema, sourcingRequestUpdateSchema } from "@/lib/validations/sourcing";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { deleteSourcingAttachmentFromImageKit } from "@/lib/imagekit";
+import { deleteStoredSourcingAttachment } from "@/lib/sourcing/attachment-storage";
 import { ZodError } from "zod";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -64,12 +66,63 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try {
     const user = await getSessionFromRequest(request);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const input = sourcingNextActionSchema.parse(await request.json());
-    const item = await updateSourcingNextAction(user, (await params).id, input);
+    const id = (await params).id;
+    const body = await request.json();
+    if (body.request) {
+      const input = sourcingRequestUpdateSchema.parse(body.request);
+      const item = await prisma.sourcingCase.findUnique({ where: { id }, select: { id: true, workspaceId: true, stage: true, version: true } });
+      if (!item) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
+      const access = await requireWorkspaceRole(user, item.workspaceId, ["admin"]);
+      if (!access.globalAdmin && access.role !== "admin") throw new SourcingAccessError("Only workspace admins can edit requests", 403);
+      if (item.stage !== "draft") return NextResponse.json({ error: "Only draft requests can be edited" }, { status: 409 });
+      if (item.version !== input.version) return NextResponse.json({ error: "This request has changed. Refresh and try again." }, { status: 409 });
+      const updated = await prisma.sourcingCase.update({
+        where: { id },
+        data: {
+          title: input.title.trim(), description: input.description?.trim() || null,
+          size: input.size?.trim() || null, material: input.material?.trim() || null,
+          variant: input.variant?.trim() || null, specifications: input.specifications?.trim() || null,
+          referenceUrl: input.referenceUrl?.trim() || null, notes: input.notes?.trim() || null,
+          requestedQuantity: input.requestedQuantity ?? null, targetUnitPriceMyr: input.targetUnitPriceMyr ?? null,
+          route: input.route, version: { increment: 1 }, updatedAt: new Date(),
+        },
+      });
+      void invalidateAllServerCaches();
+      return NextResponse.json(updated);
+    }
+    const input = sourcingNextActionSchema.parse(body);
+    const item = await updateSourcingNextAction(user, id, input);
     void invalidateAllServerCaches();
     return NextResponse.json(item);
   } catch (error) {
     const status = error instanceof SourcingAccessError ? error.status : error instanceof ZodError ? 400 : 500;
     return NextResponse.json({ error: error instanceof Error ? error.message : "Sourcing request failed" }, { status });
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const user = await getSessionFromRequest(request);
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const item = await prisma.sourcingCase.findUnique({
+      where: { id: (await params).id },
+      include: { attachments: { select: { fileId: true, storage: true } }, orders: { select: { id: true } } },
+    });
+    if (!item) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
+    const access = await requireWorkspaceRole(user, item.workspaceId, ["admin"]);
+    if (!access.globalAdmin && access.role !== "admin") throw new SourcingAccessError("Only workspace admins can delete cases", 403);
+    if (!["draft", "cancelled"].includes(item.stage)) return NextResponse.json({ error: "Only draft or cancelled cases can be deleted" }, { status: 409 });
+    if (item.orders.length) return NextResponse.json({ error: "Cases with purchase orders cannot be deleted" }, { status: 409 });
+    await prisma.sourcingCase.delete({ where: { id: item.id } });
+    await Promise.all(item.attachments.map((attachment) =>
+      (attachment.storage === "mongodb"
+        ? deleteStoredSourcingAttachment(attachment.fileId)
+        : deleteSourcingAttachmentFromImageKit(attachment.fileId)
+      ).catch(() => {}),
+    ));
+    void invalidateAllServerCaches();
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Sourcing request deletion failed" }, { status: error instanceof SourcingAccessError ? error.status : 500 });
   }
 }

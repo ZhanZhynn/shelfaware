@@ -51,6 +51,10 @@ export const sourcingCaseSchema = z.object({
   assignedToId: z.string().min(1).optional().nullable(),
 });
 
+export const sourcingRequestUpdateSchema = sourcingCaseSchema
+  .omit({ workspaceId: true, photoUrls: true, assignedToId: true })
+  .extend({ version: z.number().int().positive() });
+
 export const sourcingQuoteSchema = z.object({
   supplierId: z.string().min(1).optional().nullable(),
   supplierName: z.string().trim().min(1, "Supplier is required").max(200),
@@ -94,6 +98,7 @@ export const sourcingCommandSchema = z
       "reject",
       "cannot_source",
       "confirm_order",
+      "cancel",
       "archive",
       "revive",
       "repeat",
@@ -174,6 +179,7 @@ export const sourcingCostSettingsSchema = z.object({
 });
 
 export type SourcingCaseInput = z.infer<typeof sourcingCaseSchema>;
+export type SourcingRequestUpdateInput = z.infer<typeof sourcingRequestUpdateSchema>;
 export type SourcingQuoteInput = z.infer<typeof sourcingQuoteSchema>;
 export type SourcingCommentInput = z.infer<typeof sourcingCommentSchema>;
 export type SourcingNextActionInput = z.infer<typeof sourcingNextActionSchema>;

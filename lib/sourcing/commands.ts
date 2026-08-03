@@ -53,6 +53,7 @@ type Command = {
     | "reject"
     | "cannot_source"
     | "confirm_order"
+    | "cancel"
     | "archive"
     | "revive"
     | "repeat";
@@ -619,6 +620,7 @@ export async function runSourcingCommand(
         "approve",
         "reject",
         "cannot_source",
+        "cancel",
         "archive",
         "revive",
         "repeat",
@@ -787,6 +789,29 @@ export async function runSourcingCommand(
           quoteId:
             command.action === "approve" ? latestSubmitted?.id : undefined,
           fxRateOverride: command.fxRateOverride,
+        });
+        return updated;
+      }
+      if (command.action === "cancel") {
+        if (["cancelled", "archived", "ordered", "shipped", "received", "rejected", "cannot_source"].includes(item.stage))
+          throw new SourcingAccessError(
+            "This case cannot be cancelled at its current stage",
+            409,
+          );
+        const now = new Date();
+        await tx.sourcingSlaRecord.updateMany({
+          where: { caseId, completedAt: null },
+          data: { completedAt: now },
+        });
+        const updated = await bump({
+          stage: "cancelled",
+          slaDueAt: null,
+          slaRule: null,
+          nextAction: null,
+          nextActionAt: null,
+        });
+        await event(tx, caseId, item.workspaceId, actor.id, "cancel", {
+          reason: command.reason,
         });
         return updated;
       }

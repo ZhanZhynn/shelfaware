@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- authenticated attachment URLs require the browser session cookie. */
 
 import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -41,15 +42,20 @@ import {
   useSourcingCommand,
   useSourcingMembers,
   useSourcingSuppliers,
+  useSourcingWorkspaces,
+  useUpdateSourcingRequest,
   useUploadSourcingAttachment,
 } from "@/hooks/queries";
 import { formatMoney } from "@/lib/money";
 import {
+  sourcingCaseSchema,
   sourcingQuoteSchema,
+  type SourcingCaseInput,
   type SourcingQuoteInput,
 } from "@/lib/validations/sourcing";
 import SourcingPurchaseOrderPanel from "./SourcingPurchaseOrderPanel";
 import { SourcingLandedCostCard } from "./SourcingLandedCostCard";
+import { SourcingRequestFields } from "./SourcingRequestFields";
 
 const editableStages = ["draft", "sourcing", "changes_requested"];
 const label = (value: string) => value.replaceAll("_", " ");
@@ -124,13 +130,18 @@ export default function SourcingCaseDetail({
   const [dialog, setDialog] = useState<"confirm_submit" | "confirm_submit_all" | "confirm_delete" | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
+  const [quoteView, setQuoteView] = useState("compare");
+  const [assigneeId, setAssigneeId] = useState("");
   const [commentBody, setCommentBody] = useState("");
   const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
   const [mentionSearch, setMentionSearch] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [editingRequest, setEditingRequest] = useState(false);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const draftPhotoInputRef = useRef<HTMLInputElement>(null);
   const { data: item, isLoading, error } = useSourcingCase(caseId);
   const command = useSourcingCommand();
+  const updateRequest = useUpdateSourcingRequest();
   const comment = useCreateSourcingComment();
   const { data: attachmentData } = useSourcingAttachments(caseId);
   const uploadAttachment = useUploadSourcingAttachment();
@@ -142,9 +153,14 @@ export default function SourcingCaseDetail({
   const { data: suppliers = [] } = useSourcingSuppliers(
     item?.workspaceId || "",
   );
+  const { data: workspaces = [] } = useSourcingWorkspaces();
   const form = useForm<SourcingQuoteInput>({
     resolver: zodResolver(sourcingQuoteSchema),
     defaultValues: emptyQuote,
+  });
+  const requestForm = useForm<SourcingCaseInput>({
+    resolver: zodResolver(sourcingCaseSchema),
+    defaultValues: { workspaceId: "", title: "", photoUrls: [], route: "yiwu" },
   });
   const activeQuote =
     item?.quotes?.find((quote: any) => quote.id === activeQuoteId) || null;
@@ -157,6 +173,22 @@ export default function SourcingCaseDetail({
   useEffect(() => {
     setMounted(true);
   }, []);
+  useEffect(() => {
+    setAssigneeId(item?.assignedToId || "");
+  }, [item?.assignedToId]);
+  useEffect(() => {
+    if (!item) return;
+    requestForm.reset({
+      workspaceId: item.workspaceId, title: item.title, description: item.description,
+      photoUrls: [], size: item.size, material: item.material, variant: item.variant,
+      specifications: item.specifications, referenceUrl: item.referenceUrl, notes: item.notes,
+      requestedQuantity: item.requestedQuantity, targetUnitPriceMyr: item.targetUnitPriceMyr,
+      route: item.route, assignedToId: item.assignedToId,
+    });
+  }, [item, requestForm]);
+  useEffect(() => {
+    if (item?.stage === "draft" && item.capabilities?.canAssign) setEditingRequest(true);
+  }, [item?.stage, item?.capabilities?.canAssign]);
   useEffect(() => {
     form.reset(activeQuote ? quoteValues(activeQuote) : emptyQuote);
   }, [activeQuote, form]);
@@ -234,12 +266,17 @@ export default function SourcingCaseDetail({
       return groups;
     }, {}),
   );
-  const chooseQuote = (quote: any) => setActiveQuoteId(quote.id);
+  const chooseQuote = (quote: any) => {
+    setActiveQuoteId(quote.id);
+    setQuoteView("compare");
+  };
   const attachments = attachmentData || item.attachments || [];
   const activeQuoteAttachments = activeQuote
     ? attachments.filter((attachment: any) => attachment.quoteId === activeQuote.id)
     : [];
-  const unassignedAttachments = attachments.filter((attachment: any) => !attachment.quoteId);
+  const caseAttachments = attachments.filter((attachment: any) => !attachment.quoteId);
+  const caseImages = caseAttachments.filter((attachment: any) => attachment.mimeType.startsWith("image/"));
+  const caseFiles = caseAttachments.filter((attachment: any) => !attachment.mimeType.startsWith("image/"));
   const canEditQuotes =
     item.capabilities.canEditQuote &&
     (editableStages.includes(item.stage) ||
@@ -280,18 +317,33 @@ export default function SourcingCaseDetail({
       </Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">{item.title}</h1>
-          <p className="text-muted-foreground">
-            {item.route === "other" ? "Other supplier route" : "Yiwu route"}
-          </p>
+          {item.stage === "draft" && item.capabilities.canAssign ? (
+            <>
+              <p className="text-sm font-medium text-sky-600">Sourcing request</p>
+              <h1 className="mt-1 text-2xl font-bold">What do you need us to source?</h1>
+              <p className="mt-1 text-muted-foreground">Start with a name and a photo. Add only the details you know.</p>
+            </>
+          ) : (
+            <>
+              <h1 className="text-2xl font-bold">{item.title}</h1>
+              <p className="text-muted-foreground">{item.route === "other" ? "Other supplier route" : "Yiwu route"}</p>
+            </>
+          )}
         </div>
         <Badge variant={stageBadgeVariant[item.stage] || "secondary"} className="capitalize">
           {label(item.stage)}
         </Badge>
       </div>
-      <Card>
+      {!(item.stage === "draft" && item.capabilities.canAssign) && <Card>
         <CardHeader>
-          <CardTitle>Request summary</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>Request summary</CardTitle>
+            {item.stage === "draft" && item.capabilities.canAssign && (
+              <Button type="button" size="sm" variant="outline" onClick={() => setEditingRequest((open) => !open)}>
+                {editingRequest ? "Close editor" : "Edit request"}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
           <p>
@@ -317,6 +369,30 @@ export default function SourcingCaseDetail({
             <b>Assignee:</b>{" "}
             {item.assignee?.name || item.assignee?.email || "Unassigned"}
           </p>
+          {item.capabilities.canAssign && ["draft", "sourcing", "changes_requested", "quoted"].includes(item.stage) && (
+            <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+              <label className="grid min-w-56 flex-1 gap-1 text-sm font-medium">
+                Assign or reassign sourcer
+                <Select value={assigneeId} onValueChange={setAssigneeId}>
+                  <SelectTrigger><SelectValue placeholder="Select a sourcer" /></SelectTrigger>
+                  <SelectContent>
+                    {members.filter((member: any) => member.role === "sourcer").map((member: any) => (
+                      <SelectItem key={member.id} value={member.id}>{member.name || member.email}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                disabled={!assigneeId || assigneeId === item.assignedToId}
+                isLoading={command.isPending}
+                onClick={() => command.mutate({ id: item.id, version: item.version, action: "assign", assigneeId })}
+              >
+                Update assignee
+              </Button>
+            </div>
+          )}
           <p>
             <b>Reference:</b>{" "}
             {item.referenceUrl ? (
@@ -340,8 +416,51 @@ export default function SourcingCaseDetail({
             <b>Notes:</b> {item.notes || "None"}
           </p>
         </CardContent>
-      </Card>
-      <Tabs defaultValue="quotes" className="space-y-4">
+      </Card>}
+      {editingRequest && item.stage === "draft" && item.capabilities.canAssign && (
+        <form className="space-y-5" onSubmit={requestForm.handleSubmit(async (values) => {
+          const updated: any = await updateRequest.mutateAsync({ id: item.id, version: item.version, ...values });
+          if (assigneeId && assigneeId !== item.assignedToId) await command.mutateAsync({ id: item.id, version: updated.version, action: "assign", assigneeId });
+        })}>
+          <SourcingRequestFields
+            form={requestForm}
+            photos={<div><div className="mb-2 flex items-center justify-between gap-3"><div><p className="text-sm font-medium">Photos</p><p className="text-xs text-muted-foreground">A product photo, screenshot, or sample is the fastest way to get an accurate quote.</p></div><span className="text-xs text-muted-foreground">{caseImages.length}/5</span></div><input ref={draftPhotoInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={async (event) => { const files = Array.from(event.target.files || []).slice(0, Math.max(0, 5 - caseImages.length)); for (const file of files) await uploadAttachment.mutateAsync({ id: item.id, file }); event.target.value = ""; }} /><button type="button" onClick={() => draftPhotoInputRef.current?.click()} className="flex min-h-28 w-full flex-col items-center justify-center rounded-lg border border-dashed border-sky-300 bg-sky-50/50 px-4 text-center hover:bg-sky-100/50"><Upload className="mb-2 h-6 w-6 text-sky-600" /><span className="font-medium text-sky-700">Add photos</span><span className="mt-1 text-xs text-muted-foreground">JPG, PNG, WEBP, or GIF. Up to 10 MB each.</span></button>{caseImages.length > 0 && <div className="mt-3 flex flex-wrap gap-3">{caseImages.map((attachment: any) => <div key={attachment.id} className="relative"><a href={attachment.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-md border bg-muted/20"><img src={attachment.url} alt={attachment.fileName} className="h-20 w-20 object-cover" /><span className="block w-20 truncate px-1.5 py-1 text-xs text-muted-foreground">{attachment.fileName}</span></a>{attachment.canDelete && <button type="button" className="absolute -right-2 -top-2 rounded-full bg-background p-1 text-destructive shadow" onClick={() => deleteAttachment.mutate({ id: item.id, attachmentId: attachment.id })} aria-label={`Delete ${attachment.fileName}`}><Trash2 className="h-3.5 w-3.5" /></button>}</div>)}</div>}</div>}
+            workspace={<label className="grid gap-1.5 text-sm font-medium">Workspace<Input value={workspaces.find((workspace: any) => workspace.id === item.workspaceId)?.name || item.workspaceId} disabled /></label>}
+            assignee={<label className="grid gap-1.5 text-sm font-medium">Assign to<Select value={assigneeId} onValueChange={setAssigneeId}><SelectTrigger><SelectValue placeholder="Assign later" /></SelectTrigger><SelectContent>{members.filter((member: any) => member.role === "sourcer").map((member: any) => <SelectItem key={member.id} value={member.id}>{member.name || member.email}</SelectItem>)}</SelectContent></Select></label>}
+            footer={<div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" isLoading={updateRequest.isPending} onClick={requestForm.handleSubmit((values) => updateRequest.mutate({ id: item.id, version: item.version, ...values }))}>Save draft</Button><Button type="submit" isLoading={updateRequest.isPending || command.isPending}>{assigneeId && assigneeId !== item.assignedToId ? "Save & assign" : "Save request"}</Button></div>}
+          />
+        </form>
+      )}
+      {item.stage !== "draft" && caseAttachments.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Reference images and files</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {caseImages.length > 0 && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                {caseImages.map((attachment: any) => (
+                  <a key={attachment.id} href={attachment.url} target="_blank" rel="noopener noreferrer" className="group overflow-hidden rounded-lg border bg-muted/20">
+                    <img src={attachment.url} alt={attachment.fileName} className="aspect-square w-full object-cover transition-transform group-hover:scale-105" />
+                    <span className="block truncate px-2 py-1.5 text-xs text-muted-foreground">{attachment.fileName}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {caseFiles.length > 0 && (
+              <div className="space-y-2 text-sm">
+                {caseFiles.map((attachment: any) => (
+                  <a key={attachment.id} className="flex items-center gap-2 rounded-md border px-3 py-2 hover:text-sky-600" href={attachment.url} target="_blank" rel="noopener noreferrer">
+                    <FileText className="h-4 w-4" />
+                    <span className="truncate">{attachment.fileName}</span>
+                  </a>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      {item.stage !== "draft" && <Tabs defaultValue="quotes" className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2">
           <TabsTrigger value="quotes" className="gap-2 py-2">
             Quotes / offers
@@ -353,6 +472,12 @@ export default function SourcingCaseDetail({
           </TabsTrigger>
         </TabsList>
         <TabsContent value="quotes" className="space-y-6">
+      <Tabs value={quoteView} onValueChange={setQuoteView} className="space-y-4">
+        <TabsList className="grid h-auto w-full grid-cols-2">
+          <TabsTrigger value="compare">View offers</TabsTrigger>
+          <TabsTrigger value="what-if" disabled={offers.length === 0}>What-if calculation</TabsTrigger>
+        </TabsList>
+        <TabsContent value="compare" className="space-y-4">
       {offers.length > 0 ? (
         <Card>
           <CardHeader>
@@ -442,22 +567,35 @@ export default function SourcingCaseDetail({
           <CardContent className="p-6 text-sm text-muted-foreground">No quotes or offers yet.</CardContent>
         </Card>
       )}
-      {unassignedAttachments.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Unassigned case files</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">These files were uploaded before quote attachments were introduced.</p>
-            {unassignedAttachments.map((attachment: any) => (
-              <a key={attachment.id} className="flex items-center gap-2 rounded-md border px-3 py-2 hover:text-sky-600" href={attachment.url} target="_blank" rel="noopener noreferrer">
-                {attachment.mimeType.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                <span className="truncate">{attachment.fileName}</span>
-              </a>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+        </TabsContent>
+        <TabsContent value="what-if" className="space-y-4">
+        {offers.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle>Supplier offer comparison</CardTitle></CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-2">
+              {offers.map((quote: any) => (
+                <div
+                  key={offerKey(quote)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setActiveQuoteId(quote.id)}
+                  onKeyDown={(event) => event.key === "Enter" && setActiveQuoteId(quote.id)}
+                  className={`cursor-pointer rounded-lg border p-4 text-left text-sm ${activeQuoteId === quote.id ? "border-sky-500 ring-1 ring-sky-500" : "hover:bg-muted/50"}`}
+                >
+                  <div className="flex justify-between gap-2">
+                    <b>{quote.supplierName}</b>
+                    <Badge variant={quote.status === "submitted" ? "info" : "secondary"} className="capitalize">{label(quote.status)}</Badge>
+                  </div>
+                  <p className="mt-2">{quote.unitPriceRmb == null ? "No price" : formatMoney(quote.unitPriceRmb, "CNY")} / unit</p>
+                  {typeof quote.landedCostSnapshot?.landed === "number" && <p>Landed: {formatMoney(quote.landedCostSnapshot.landed, "MYR")} / piece</p>}
+                  <p>MOQ: {quote.moq ?? "-"} | Lead time: {quote.leadTimeDays ?? "-"} days</p>
+                  <p>Payment: {quote.paymentTerms || "-"} | Risk: {quote.riskLevel || "-"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Revision {quote.revision}{item.selectedQuoteId === quote.id ? " | Approved selection" : ""}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       {activeQuote &&
         item.capabilities.canAssign &&
         (!item.capabilities.canEditQuote ||
@@ -470,6 +608,9 @@ export default function SourcingCaseDetail({
             quote={activeQuote}
           />
         )}
+        {!activeQuote && <Card><CardContent className="p-6 text-sm text-muted-foreground">Select an offer to model pricing scenarios.</CardContent></Card>}
+        </TabsContent>
+        <TabsContent value="compare" className="space-y-4">
       {(activeQuote || canEditActiveQuote) && (
           <Card>
             <CardHeader>
@@ -703,6 +844,9 @@ export default function SourcingCaseDetail({
             </CardContent>
           </Card>
         )}
+        {!activeQuote && <Card><CardContent className="p-6 text-sm text-muted-foreground">Select an offer to view its details.</CardContent></Card>}
+        </TabsContent>
+      </Tabs>
         </TabsContent>
         <TabsContent value="purchase-orders">
           <SourcingPurchaseOrderPanel
@@ -710,8 +854,8 @@ export default function SourcingCaseDetail({
             basePath={basePath}
           />
         </TabsContent>
-      </Tabs>
-      <Card>
+      </Tabs>}
+      {item.stage !== "draft" && <Card>
         <CardHeader>
           <CardTitle>Comments</CardTitle>
         </CardHeader>
@@ -803,7 +947,7 @@ export default function SourcingCaseDetail({
             )}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
       <Dialog
         open={dialog === "confirm_submit"}
         onOpenChange={(open) => !open && setDialog(null)}

@@ -608,6 +608,7 @@ model SourcingAttachment {
   fileSize     Int
   url          String
   fileId       String
+  storage      String?
   createdAt    DateTime     @default(now()) @db.Date
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)

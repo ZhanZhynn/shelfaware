@@ -106,7 +106,6 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
   if (pos.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle>Purchase order</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">No purchase order linked.</p>
         </CardContent>

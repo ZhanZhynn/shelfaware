@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { Ban, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -15,19 +16,20 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useIsRestoring } from "@tanstack/react-query";
-import { useSourcingCases, useSourcingWorkspaces } from "@/hooks/queries";
+import { useDeleteSourcingCase, useSourcingCases, useSourcingCommand, useSourcingWorkspaces } from "@/hooks/queries";
 import { SourcingSlaSettings } from "./SourcingSlaSettings";
 import { SourcingCostSettings } from "./SourcingCostSettings";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
-type CaseGroup = "needs_action" | "submitted" | "completed" | "rejected" | "archived";
+type CaseGroup = "needs_action" | "submitted" | "completed" | "rejected" | "cancelled" | "archived";
 
 const GROUP_META: Record<CaseGroup, { label: string; badge: "warning" | "info" | "success" | "destructive" | "secondary"; accent: string; activeFilter: string; inactiveFilter: string }> = {
   needs_action: { label: "Needs Action", badge: "warning", accent: "border-l-orange-500", activeFilter: "border-orange-500 bg-orange-500 text-white", inactiveFilter: "border-orange-300 bg-transparent text-orange-600 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400 dark:hover:bg-orange-950" },
   submitted:    { label: "Pending Approval",    badge: "info",     accent: "border-l-blue-500",   activeFilter: "border-blue-500 bg-blue-500 text-white", inactiveFilter: "border-blue-300 bg-transparent text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950" },
   completed:    { label: "Completed",    badge: "success",  accent: "border-l-emerald-500", activeFilter: "border-emerald-500 bg-emerald-500 text-white", inactiveFilter: "border-emerald-300 bg-transparent text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950" },
   rejected:     { label: "Rejected",     badge: "destructive", accent: "border-l-red-500",  activeFilter: "border-red-500 bg-red-500 text-white", inactiveFilter: "border-red-300 bg-transparent text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950" },
+  cancelled:    { label: "Cancelled",    badge: "secondary",   accent: "border-l-slate-400", activeFilter: "border-slate-500 bg-slate-500 text-white", inactiveFilter: "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-950" },
   archived:     { label: "Archived",     badge: "secondary", accent: "border-l-gray-400",   activeFilter: "border-gray-400 bg-gray-400 text-white", inactiveFilter: "border-gray-300 bg-transparent text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-900" },
 };
 
@@ -42,6 +44,7 @@ const STAGE_TO_GROUP: Record<string, CaseGroup> = {
   received: "completed",
   rejected: "rejected",
   cannot_source: "rejected",
+  cancelled: "cancelled",
   archived: "archived",
 };
 
@@ -61,6 +64,10 @@ export default function SourcingPortal({
   const { data: cases = [], isLoading, error } = useSourcingCases(activeWorkspace);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState<CaseGroup | "all">("all");
+  const [pendingAction, setPendingAction] = useState<{ type: "cancel" | "delete"; item: any } | null>(null);
+  const command = useSourcingCommand();
+  const deleteCase = useDeleteSourcingCase();
+  const isAdminView = basePath.startsWith("/admin");
 
   const counts = cases.reduce(
     (acc: Record<string, number>, item: any) => {
@@ -156,7 +163,7 @@ export default function SourcingPortal({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {(["all", "needs_action", "submitted", "completed", "rejected", "archived"] as const).map((key) => {
+            {(["all", "needs_action", "submitted", "completed", "rejected", "cancelled", "archived"] as const).map((key) => {
               const isActive = groupFilter === key;
               const meta = key === "all" ? null : GROUP_META[key];
               const count = counts[key] || 0;
@@ -211,12 +218,11 @@ export default function SourcingPortal({
                   item.slaDueAt || item.nextActionAt
                     ? new Date(item.slaDueAt || item.nextActionAt) < new Date()
                     : false;
+                const canCancel = isAdminView && !["cancelled", "ordered", "shipped", "received", "rejected", "cannot_source", "archived"].includes(item.stage);
+                const canDelete = isAdminView && ["draft", "cancelled"].includes(item.stage) && !item.orders?.length;
                 return (
-                  <Link
-                    key={item.id}
-                    href={`${basePath}/${item.id}`}
-                    className={`block rounded-lg border border-l-4 ${meta.accent} bg-card p-4 transition-colors hover:bg-muted/50`}
-                  >
+                  <div key={item.id} className={`relative rounded-lg border border-l-4 ${meta.accent} bg-card p-4 transition-colors hover:bg-muted/50`}>
+                  <Link href={`${basePath}/${item.id}`} className={`block ${(canCancel || canDelete) ? "pr-24 sm:pr-32" : ""}`}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -231,7 +237,7 @@ export default function SourcingPortal({
                           <span className="capitalize">{item.route || "yiwu"}</span>
                         </p>
                       </div>
-                      <div className="text-right shrink-0">
+                      <div className="flex items-center gap-2 text-right shrink-0">
                         <p className="text-xs text-muted-foreground">
                           {item.updatedAt
                             ? new Date(item.updatedAt).toLocaleDateString()
@@ -251,12 +257,47 @@ export default function SourcingPortal({
                       </p>
                     )}
                   </Link>
+                  {(canCancel || canDelete) && (
+                    <div className="absolute right-3 top-3 flex gap-1">
+                      {canCancel && <Button size="sm" variant="outline" onClick={() => setPendingAction({ type: "cancel", item })}><Ban className="h-3.5 w-3.5" />Cancel</Button>}
+                      {canDelete && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setPendingAction({ type: "delete", item })} aria-label={`Delete ${item.title}`}><Trash2 className="h-4 w-4" /></Button>}
+                    </div>
+                  )}
+                  </div>
                 );
               })}
             </div>
           )}
         </>
       )}
+      <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingAction?.type === "delete" ? "Delete sourcing request?" : "Cancel sourcing request?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction?.type === "delete"
+                ? "This permanently deletes a draft or cancelled request that has no purchase order."
+                : "This stops sourcing work, clears pending follow-ups, and moves the request to Cancelled."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep request</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!pendingAction) return;
+                if (pendingAction.type === "delete") {
+                  deleteCase.mutate({ id: pendingAction.item.id }, { onSuccess: () => setPendingAction(null) });
+                } else {
+                  command.mutate({ id: pendingAction.item.id, version: pendingAction.item.version, action: "cancel" }, { onSuccess: () => setPendingAction(null) });
+                }
+              }}
+            >
+              {pendingAction?.type === "delete" ? "Delete request" : "Cancel request"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

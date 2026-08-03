@@ -1221,6 +1221,22 @@ class ApiClient {
           status: response.status,
           statusText: response.statusText,
         })),
+    deleteCase: async (id: string) =>
+      this.client
+        .delete(API_ENDPOINTS.sourcing.case(id))
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    updateRequest: async (id: string, request: Record<string, unknown>) =>
+      this.client
+        .patch(API_ENDPOINTS.sourcing.case(id), { request })
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
     attachments: async (id: string) =>
       this.client
         .get(API_ENDPOINTS.sourcing.attachments(id))
@@ -1234,7 +1250,9 @@ class ApiClient {
       formData.append("file", file);
       if (quoteId) formData.append("quoteId", quoteId);
       return this.client
-        .post(API_ENDPOINTS.sourcing.attachments(id), formData)
+        .post(API_ENDPOINTS.sourcing.attachments(id), formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        })
         .then((response) => ({
           data: response.data,
           status: response.status,

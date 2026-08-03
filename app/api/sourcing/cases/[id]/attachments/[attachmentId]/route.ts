@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { deleteSourcingAttachmentFromImageKit } from "@/lib/imagekit";
+import { deleteStoredSourcingAttachment } from "@/lib/sourcing/attachment-storage";
 import { invalidateAllServerCaches } from "@/lib/cache";
 import {
   requireAssignedSourcer,
@@ -20,7 +21,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     requireAssignedSourcer(user, sourcingCase.assignedToId);
     const attachment = await prisma.sourcingAttachment.findFirst({ where: { id: attachmentId, caseId: sourcingCase.id, uploadedById: user.id } });
     if (!attachment) return NextResponse.json({ error: "Attachment not found or you do not own it" }, { status: 404 });
-    await deleteSourcingAttachmentFromImageKit(attachment.fileId);
+    if (attachment.storage === "mongodb") await deleteStoredSourcingAttachment(attachment.fileId);
+    else await deleteSourcingAttachmentFromImageKit(attachment.fileId);
     await prisma.sourcingAttachment.delete({ where: { id: attachment.id } });
     void invalidateAllServerCaches();
     return NextResponse.json({ success: true });

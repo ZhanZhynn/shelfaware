@@ -110,6 +110,7 @@ export async function getAbcAnalysisForUser(
             },
           },
           include: {
+            order: { select: { shopId: true } },
             variant: {
               select: {
                 id: true,
@@ -123,12 +124,68 @@ export async function getAbcAnalysisForUser(
           },
         });
 
+        const unlinkedModelIds = [
+          ...new Set(
+            shopeeItems
+              .filter((item) => !item.variant && item.shopeeModelId)
+              .map((item) => item.shopeeModelId as number),
+          ),
+        ];
+        const fallbackVariants = unlinkedModelIds.length > 0
+          ? await prisma.shopeeProductVariant.findMany({
+              where: { shopId: { in: shopIds }, modelId: { in: unlinkedModelIds } },
+              select: {
+                id: true,
+                modelName: true,
+                itemSku: true,
+                price: true,
+                stock: true,
+                product: { select: { id: true, itemName: true, itemSku: true, price: true, stock: true } },
+                shopId: true,
+                modelId: true,
+              },
+            })
+          : [];
+        const fallbackVariantLookup = new Map(
+          fallbackVariants.map((variant) => [`${variant.shopId}:${variant.modelId}`, variant]),
+        );
+        const unlinkedSkus = [
+          ...new Set(
+            shopeeItems
+              .filter((item) => !item.variant && item.sku)
+              .map((item) => item.sku as string),
+          ),
+        ];
+        const fallbackProducts = unlinkedSkus.length > 0
+          ? await prisma.shopeeProduct.findMany({
+              where: { shopId: { in: shopIds }, itemSku: { in: unlinkedSkus } },
+              select: { id: true, shopId: true, itemName: true, itemSku: true, price: true, stock: true },
+            })
+          : [];
+        const fallbackProductCandidates = new Map<string, typeof fallbackProducts>();
+        for (const product of fallbackProducts) {
+          const key = `${product.shopId}:${product.itemSku}:${product.itemName}`;
+          fallbackProductCandidates.set(key, [...(fallbackProductCandidates.get(key) ?? []), product]);
+        }
+        const fallbackProductLookup = new Map(
+          [...fallbackProductCandidates]
+            .filter(([, products]) => products.length === 1)
+            .map(([key, products]) => [key, products[0]]),
+        );
+
         // Fetch all channel mappings for Shopee products AND variants to enable merging
         const shopeeProductIds = [
-          ...new Set(shopeeItems.map((item) => item.variant?.product?.id).filter(Boolean) as string[]),
+          ...new Set(shopeeItems.map((item) => {
+            const variant = item.variant ?? fallbackVariantLookup.get(`${item.order.shopId}:${item.shopeeModelId}`);
+            const product = fallbackProductLookup.get(`${item.order.shopId}:${item.sku}:${item.productName}`);
+            return variant?.product?.id ?? product?.id;
+          }).filter(Boolean) as string[]),
         ];
         const shopeeVariantIds = [
-          ...new Set(shopeeItems.map((item) => item.variant?.id).filter(Boolean) as string[]),
+          ...new Set(shopeeItems.map((item) => {
+            const variant = item.variant ?? fallbackVariantLookup.get(`${item.order.shopId}:${item.shopeeModelId}`);
+            return variant?.id;
+          }).filter(Boolean) as string[]),
         ];
         const allChannelIds = [...new Set([...shopeeProductIds, ...shopeeVariantIds])];
         const channelMappings = allChannelIds.length > 0
@@ -146,8 +203,11 @@ export async function getAbcAnalysisForUser(
           const name = item.productName;
           const sku = item.sku ?? "";
           const price = item.price;
-          const variantId = item.variant?.id;
-          const shopeeProductId = item.variant?.product?.id;
+          const variant = item.variant ?? fallbackVariantLookup.get(`${item.order.shopId}:${item.shopeeModelId}`);
+          const product = fallbackProductLookup.get(`${item.order.shopId}:${item.sku}:${item.productName}`);
+          const stock = variant?.stock ?? variant?.product?.stock ?? product?.stock;
+          const variantId = variant?.id;
+          const shopeeProductId = variant?.product?.id ?? product?.id;
           // Check variant-level mapping first, then parent product-level
           const mappedWmsProductId = (variantId ? mappingLookup.get(variantId) : undefined)
             || (shopeeProductId ? mappingLookup.get(shopeeProductId) : undefined);
@@ -169,7 +229,7 @@ export async function getAbcAnalysisForUser(
                 revenue: item.subtotal,
                 unitsSold: item.quantity,
                 price,
-                stock: item.variant?.stock ?? item.variant?.product?.stock ?? 0,
+                stock: stock ?? 0,
               });
             }
           } else {
@@ -179,16 +239,18 @@ export async function getAbcAnalysisForUser(
             if (existing) {
               existing.revenue += item.subtotal;
               existing.unitsSold += item.quantity;
+              // Early order syncs can lack a variant link; preserve current stock once a linked item is found.
+              if (stock !== undefined) existing.stock = stock;
             } else {
               productSalesMap.set(`shopee-${productKey}`, {
-                productId: item.variantId ?? item.productId ?? `shopee-${productKey}`,
+                productId: variantId ?? item.productId ?? `shopee-${productKey}`,
                 productName: name,
                 sku,
                 channel: "Shopee",
                 revenue: item.subtotal,
                 unitsSold: item.quantity,
                 price,
-                stock: item.variant?.stock ?? item.variant?.product?.stock ?? 0,
+                stock: stock ?? 0,
               });
             }
           }

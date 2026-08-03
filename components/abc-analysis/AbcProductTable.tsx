@@ -21,9 +21,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import {
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Download,
+} from "lucide-react";
 import type { AbcProduct } from "@/types/abc-analysis";
 import { formatMoney } from "@/lib/money";
+import { exportToCSV, exportToExcel } from "@/lib/export";
+import { useToast } from "@/hooks/use-toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function formatCurrency(value: number): string {
   return formatMoney(value, "MYR");
@@ -35,6 +53,22 @@ const tierVariant: Record<string, "success" | "warning" | "destructive"> = {
   C: "destructive",
 };
 
+const exportColumns = [
+  { header: "ABC Tier", key: "tier", width: 10 },
+  { header: "Product", key: "name", width: 36 },
+  { header: "SKU", key: "sku", width: 18 },
+  { header: "Category", key: "category", width: 20 },
+  { header: "Channel", key: "channel", width: 12 },
+  { header: "Revenue (MYR)", key: "revenue", width: 18 },
+  { header: "Revenue %", key: "revenuePercent", width: 14 },
+  { header: "Cumulative %", key: "cumulativePercent", width: 16 },
+  { header: "Units Sold", key: "unitsSold", width: 14 },
+  { header: "Stock on Hand", key: "stockOnHand", width: 16 },
+  { header: "Unit Price (MYR)", key: "unitPrice", width: 18 },
+  { header: "Holding Value (MYR)", key: "holdingValue", width: 22 },
+  { header: "Days of Stock", key: "daysOfStock", width: 16 },
+];
+
 function SortableHeader({ label, onClick, isSorted, isDesc }: { label: string; onClick: () => void; isSorted?: boolean; isDesc?: boolean }) {
   return (
     <button onClick={onClick} className="flex items-center gap-1 hover:text-foreground">
@@ -45,6 +79,7 @@ function SortableHeader({ label, onClick, isSorted, isDesc }: { label: string; o
 }
 
 export default function AbcProductTable({ products }: { products: AbcProduct[] }) {
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<"all" | "A" | "B" | "C">("all");
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 10 });
@@ -56,6 +91,63 @@ export default function AbcProductTable({ products }: { products: AbcProduct[] }
       return searchMatch && tierMatch;
     });
   }, [products, search, tierFilter]);
+
+  const exportData = filteredData.map((product) => ({
+    tier: product.tier,
+    name: product.name,
+    sku: product.sku,
+    category: product.category ?? "",
+    channel: product.channel,
+    revenue: product.revenue,
+    revenuePercent: product.revenuePercent,
+    cumulativePercent: product.cumulativePercent,
+    unitsSold: product.unitsSold,
+    stockOnHand: product.stockOnHand,
+    unitPrice: product.unitPrice,
+    holdingValue: product.holdingValue,
+    daysOfStock: product.daysOfStock ?? "",
+  }));
+
+  function handleExport(format: "csv" | "excel") {
+    try {
+      if (format === "csv") {
+        exportToCSV(exportData, exportColumns, "shelfaware-abc-products");
+      } else {
+        void exportToExcel({
+          sheetName: "ABC Products",
+          fileName: "shelfaware-abc-products",
+          columns: exportColumns,
+          data: exportData,
+        })
+          .then(() => {
+            toast({
+              title: "Excel Export Successful",
+              description: `${exportData.length} ABC products exported.`,
+            });
+          })
+          .catch(() => {
+            toast({
+              title: "Export Failed",
+              description: "Failed to export ABC products. Please try again.",
+              variant: "destructive",
+            });
+          });
+      }
+
+      if (format === "csv") {
+        toast({
+          title: "CSV Export Successful",
+          description: `${exportData.length} ABC products exported.`,
+        });
+      }
+    } catch {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export ABC products. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }
 
   const columns: ColumnDef<AbcProduct>[] = useMemo(
     () => [
@@ -107,6 +199,18 @@ export default function AbcProductTable({ products }: { products: AbcProduct[] }
               <option value="B">B Items</option>
               <option value="C">C Items</option>
             </select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs" disabled={exportData.length === 0}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport("csv")}>Export CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("excel")}>Export Excel</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </CardHeader>

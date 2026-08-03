@@ -96,3 +96,16 @@ export async function getExchangeRateForDate(
 export function isExchangeRateFresh(rate: Pick<ExchangeRate, "fetchedAt">): boolean {
   return Date.now() - rate.fetchedAt.getTime() <= MAX_RATE_AGE_MS;
 }
+
+export async function getOrRefreshExchangeRate(
+  baseCurrency = "CNY",
+  quoteCurrency = "MYR",
+): Promise<ExchangeRate | null> {
+  const saved = await getCurrentExchangeRate(baseCurrency, quoteCurrency);
+  if (saved && isExchangeRateFresh(saved)) return saved;
+  try {
+    return await refreshExchangeRate(baseCurrency, quoteCurrency);
+  } catch {
+    return saved;
+  }
+}

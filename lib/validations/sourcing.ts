@@ -51,6 +51,10 @@ export const sourcingCaseSchema = z.object({
   assignedToId: z.string().min(1).optional().nullable(),
 });
 
+export const sourcingRequestUpdateSchema = sourcingCaseSchema
+  .omit({ workspaceId: true, photoUrls: true, assignedToId: true })
+  .extend({ version: z.number().int().positive() });
+
 export const sourcingQuoteSchema = z.object({
   supplierId: z.string().min(1).optional().nullable(),
   supplierName: z.string().trim().min(1, "Supplier is required").max(200),
@@ -87,11 +91,14 @@ export const sourcingCommandSchema = z
       "create_quote",
       "save_quote",
       "submit_quote",
+      "submit_all_drafts",
+      "delete_quote",
       "request_changes",
       "approve",
       "reject",
       "cannot_source",
       "confirm_order",
+      "cancel",
       "archive",
       "revive",
       "repeat",
@@ -108,7 +115,7 @@ export const sourcingCommandSchema = z
     if (["create_quote", "save_quote", "submit_quote"].includes(value.action) && !value.quote) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quote"], message: "A valid quote is required" });
     }
-    if (["save_quote", "submit_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
+    if (["save_quote", "submit_quote", "delete_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quoteId"], message: "A quote must be selected" });
     }
     if (
@@ -172,6 +179,7 @@ export const sourcingCostSettingsSchema = z.object({
 });
 
 export type SourcingCaseInput = z.infer<typeof sourcingCaseSchema>;
+export type SourcingRequestUpdateInput = z.infer<typeof sourcingRequestUpdateSchema>;
 export type SourcingQuoteInput = z.infer<typeof sourcingQuoteSchema>;
 export type SourcingCommentInput = z.infer<typeof sourcingCommentSchema>;
 export type SourcingNextActionInput = z.infer<typeof sourcingNextActionSchema>;

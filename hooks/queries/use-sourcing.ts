@@ -266,6 +266,23 @@ export function useSourcingCommand() {
     ...mutationOptions(queryClient, toast, "Sourcing case updated"),
   });
 }
+export function useDeleteSourcingCase() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => apiClient.sourcing.deleteCase(id).then((response) => response.data),
+    ...mutationOptions(queryClient, toast, "Sourcing case deleted"),
+  });
+}
+export function useUpdateSourcingRequest() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: ({ id, ...request }: Record<string, unknown> & { id: string }) =>
+      apiClient.sourcing.updateRequest(id, request).then((response) => response.data),
+    ...mutationOptions(queryClient, toast, "Sourcing request updated"),
+  });
+}
 export function useCreateSourcingComment() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -286,9 +303,9 @@ export function useUploadSourcingAttachment() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: ({ id, file }: { id: string; file: File }) =>
+    mutationFn: ({ id, file, quoteId }: { id: string; file: File; quoteId?: string }) =>
       apiClient.sourcing
-        .uploadAttachment(id, file)
+        .uploadAttachment(id, file, quoteId)
         .then((response) => response.data),
     ...mutationOptions(queryClient, toast, "Attachment uploaded"),
   });

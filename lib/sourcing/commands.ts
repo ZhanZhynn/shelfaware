@@ -12,7 +12,7 @@ import { canEditQuote, quoteGroupKey } from "./workflow";
 import { ObjectId } from "mongodb";
 import { convertMoney } from "@/lib/money";
 import {
-  getCurrentExchangeRate,
+  getOrRefreshExchangeRate,
   isExchangeRateFresh,
 } from "@/lib/exchange-rates/service";
 import {
@@ -46,11 +46,14 @@ type Command = {
     | "create_quote"
     | "save_quote"
     | "submit_quote"
+    | "submit_all_drafts"
+    | "delete_quote"
     | "request_changes"
     | "approve"
     | "reject"
     | "cannot_source"
     | "confirm_order"
+    | "cancel"
     | "archive"
     | "revive"
     | "repeat";
@@ -282,7 +285,7 @@ export async function runSourcingCommand(
   // a MongoDB transaction open, and the snapshot is persisted on approval.
   const approvalReferenceRate =
     command.action === "approve" && !command.fxRateOverride
-      ? await getCurrentExchangeRate("CNY", "MYR")
+      ? await getOrRefreshExchangeRate("CNY", "MYR")
       : null;
   const requireAssigned = () => {
     if (
@@ -363,7 +366,8 @@ export async function runSourcingCommand(
       ["create_quote", "save_quote", "submit_quote"].includes(command.action)
     ) {
       requireAssigned();
-      if (!editableStages.includes(item.stage))
+      const stageEditable = editableStages.includes(item.stage) || (command.action === "submit_quote" && item.stage === "quoted");
+      if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
           409,
@@ -514,12 +518,109 @@ export async function runSourcingCommand(
       });
       return updated;
     }
+    if (command.action === "submit_all_drafts") {
+      requireAssigned();
+      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      if (!stageEditable)
+        throw new SourcingAccessError(
+          "Quotes cannot be changed at this stage",
+          409,
+        );
+      const drafts = await tx.sourcingQuote.findMany({
+        where: { caseId, status: "draft" },
+      });
+      if (drafts.length === 0)
+        throw new SourcingAccessError("No draft quotes to submit", 400);
+      const now = new Date();
+      for (const draft of drafts) {
+        if (!draft.unitPriceRmb && !draft.overrideCostMyr)
+          throw new SourcingAccessError(
+            `Quote "${draft.supplierName}" requires a supplier cost or RM override before submission`,
+            400,
+          );
+        const landedCostSnapshot = calculateSourcingLandedCost(
+          {
+            unitCostCny: draft.unitPriceRmb,
+            piecesPerSellingUnit: draft.piecesPerSellingUnit,
+            cartonLengthCm: draft.cartonLengthCm,
+            cartonWidthCm: draft.cartonWidthCm,
+            cartonHeightCm: draft.cartonHeightCm,
+            piecesPerCarton: draft.piecesPerCarton,
+            marketPriceMyr: draft.marketPriceMyr,
+            marketPack: draft.marketPack,
+            overrideCostMyr: draft.overrideCostMyr,
+          },
+          costConfig,
+        );
+        if (!landedCostSnapshot)
+          throw new SourcingAccessError(
+            `Quote "${draft.supplierName}" requires a supplier cost or RM override before submission`,
+            400,
+          );
+        await tx.sourcingQuote.update({
+          where: { id: draft.id },
+          data: {
+            status: "submitted",
+            submittedAt: now,
+            costParamsSnapshot: json(costConfig),
+            landedCostSnapshot: json(landedCostSnapshot),
+          },
+        });
+      }
+      const updated = await bump({
+        stage: "quoted",
+        slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
+        slaRule: "approval",
+      });
+      await completeSourcingSla(tx, caseId, "quote_submission", now);
+      await tx.sourcingSlaRecord.create({
+        data: {
+          workspaceId: item.workspaceId,
+          caseId,
+          rule: "approval",
+          startedAt: now,
+          dueAt: dueAtForSourcingSla("approval", now, slaConfig),
+        },
+      });
+      await event(tx, caseId, item.workspaceId, actor.id, "submit_all_drafts", {
+        quoteIds: drafts.map((d) => d.id),
+        count: drafts.length,
+      });
+      return updated;
+    }
+    if (command.action === "delete_quote") {
+      requireAssigned();
+      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      if (!stageEditable)
+        throw new SourcingAccessError(
+          "Quotes cannot be changed at this stage",
+          409,
+        );
+      if (!command.quoteId)
+        throw new SourcingAccessError("A quote must be selected", 400);
+      const target = await tx.sourcingQuote.findFirst({
+        where: { id: command.quoteId, caseId, status: "draft" },
+      });
+      if (!target)
+        throw new SourcingAccessError(
+          "Only draft quotes can be deleted",
+          409,
+        );
+      await tx.sourcingQuote.delete({ where: { id: target.id } });
+      await event(tx, caseId, item.workspaceId, actor.id, "delete_quote", {
+        quoteId: target.id,
+        supplierName: target.supplierName,
+      });
+      const updated = await bump({ version: { increment: 1 } });
+      return updated;
+    }
     if (
       [
         "request_changes",
         "approve",
         "reject",
         "cannot_source",
+        "cancel",
         "archive",
         "revive",
         "repeat",
@@ -688,6 +789,29 @@ export async function runSourcingCommand(
           quoteId:
             command.action === "approve" ? latestSubmitted?.id : undefined,
           fxRateOverride: command.fxRateOverride,
+        });
+        return updated;
+      }
+      if (command.action === "cancel") {
+        if (["cancelled", "archived", "ordered", "shipped", "received", "rejected", "cannot_source"].includes(item.stage))
+          throw new SourcingAccessError(
+            "This case cannot be cancelled at its current stage",
+            409,
+          );
+        const now = new Date();
+        await tx.sourcingSlaRecord.updateMany({
+          where: { caseId, completedAt: null },
+          data: { completedAt: now },
+        });
+        const updated = await bump({
+          stage: "cancelled",
+          slaDueAt: null,
+          slaRule: null,
+          nextAction: null,
+          nextActionAt: null,
+        });
+        await event(tx, caseId, item.workspaceId, actor.id, "cancel", {
+          reason: command.reason,
         });
         return updated;
       }

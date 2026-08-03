@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
-import { deleteSourcingAttachmentFromImageKit, uploadSourcingAttachmentToImageKit } from "@/lib/imagekit";
+import { deleteStoredSourcingAttachment, storeSourcingAttachment } from "@/lib/sourcing/attachment-storage";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { invalidateAllServerCaches } from "@/lib/cache";
 import {
@@ -39,21 +39,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { user, sourcingCase } = await caseForUser(request, (await params).id);
     const limited = await withRateLimit(request, defaultRateLimits.standard, `sourcing:attachments:${user.id}`);
     if (limited) return limited;
-    const file = (await request.formData()).get("file");
+    const formData = await request.formData();
+    const file = formData.get("file");
+    const quoteId = formData.get("quoteId");
     if (!(file instanceof File)) return NextResponse.json({ error: "A file is required" }, { status: 400 });
+    if (quoteId !== null && typeof quoteId !== "string") return NextResponse.json({ error: "Invalid quote" }, { status: 400 });
+    if (quoteId) {
+      const quote = await prisma.sourcingQuote.findFirst({ where: { id: quoteId, caseId: sourcingCase.id }, select: { id: true } });
+      if (!quote) return NextResponse.json({ error: "Quote not found for this sourcing case" }, { status: 400 });
+    }
     const validationError = validateSourcingAttachment(file);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
-    const uploaded = await uploadSourcingAttachmentToImageKit(
-      Buffer.from(await file.arrayBuffer()),
-      file.name,
-      `/stock-inventory/sourcing/${sourcingCase.workspaceId}/${sourcingCase.id}/`,
-    );
+    const fileId = await storeSourcingAttachment(file.name, file.type, Buffer.from(await file.arrayBuffer()));
     try {
-      const attachment = await prisma.sourcingAttachment.create({ data: { workspaceId: sourcingCase.workspaceId, caseId: sourcingCase.id, uploadedById: user.id, fileName: file.name, mimeType: file.type, fileSize: file.size, url: uploaded.url, fileId: uploaded.fileId } });
+      const attachment = await prisma.sourcingAttachment.create({ data: { workspaceId: sourcingCase.workspaceId, caseId: sourcingCase.id, ...(quoteId ? { quoteId } : {}), uploadedById: user.id, fileName: file.name, mimeType: file.type, fileSize: file.size, url: "", fileId, storage: "mongodb" } });
+      const url = `/api/sourcing/cases/${sourcingCase.id}/attachments/${attachment.id}/file`;
+      const saved = await prisma.sourcingAttachment.update({ where: { id: attachment.id }, data: { url } });
       void invalidateAllServerCaches();
-      return NextResponse.json({ ...attachment, canDelete: true }, { status: 201 });
+      return NextResponse.json({ ...saved, canDelete: true }, { status: 201 });
     } catch (error) {
-      await deleteSourcingAttachmentFromImageKit(uploaded.fileId).catch(() => {});
+      await deleteStoredSourcingAttachment(fileId).catch(() => {});
       throw error;
     }
   } catch (error) { return failure(error); }

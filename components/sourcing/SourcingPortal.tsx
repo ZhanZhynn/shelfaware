@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Plus, Search, Upload } from "lucide-react";
+import { Ban, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -13,31 +14,42 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { useIsRestoring } from "@tanstack/react-query";
-import {
-  useBulkUpdateSourcingCases,
-  useCreateSupplierEvaluation,
-  useImportSourcingCases,
-  useSourcingAnalytics,
-  useSourcingCases,
-  useSourcingMembers,
-  useSourcingSlaPerformance,
-  useSourcingWorkspaces,
-  useSupplierScorecard,
-} from "@/hooks/queries";
+import { useDeleteSourcingCase, useSourcingCases, useSourcingCommand, useSourcingWorkspaces } from "@/hooks/queries";
 import { SourcingSlaSettings } from "./SourcingSlaSettings";
 import { SourcingCostSettings } from "./SourcingCostSettings";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
-const dueLabel = (item: {
-  nextAction?: string | null;
-  nextActionAt?: string | null;
-  slaDueAt?: string | null;
-}) => {
-  const dueAt = item.slaDueAt || item.nextActionAt;
-  if (!dueAt) return item.nextAction || "No next action";
-  return `${item.nextAction || "Action"}: ${new Date(dueAt).toLocaleDateString()}${new Date(dueAt) < new Date() ? " overdue" : ""}`;
+
+type CaseGroup = "needs_action" | "submitted" | "completed" | "rejected" | "cancelled" | "archived";
+
+const GROUP_META: Record<CaseGroup, { label: string; badge: "warning" | "info" | "success" | "destructive" | "secondary"; accent: string; activeFilter: string; inactiveFilter: string }> = {
+  needs_action: { label: "Needs Action", badge: "warning", accent: "border-l-orange-500", activeFilter: "border-orange-500 bg-orange-500 text-white", inactiveFilter: "border-orange-300 bg-transparent text-orange-600 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400 dark:hover:bg-orange-950" },
+  submitted:    { label: "Pending Approval",    badge: "info",     accent: "border-l-blue-500",   activeFilter: "border-blue-500 bg-blue-500 text-white", inactiveFilter: "border-blue-300 bg-transparent text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950" },
+  completed:    { label: "Completed",    badge: "success",  accent: "border-l-emerald-500", activeFilter: "border-emerald-500 bg-emerald-500 text-white", inactiveFilter: "border-emerald-300 bg-transparent text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950" },
+  rejected:     { label: "Rejected",     badge: "destructive", accent: "border-l-red-500",  activeFilter: "border-red-500 bg-red-500 text-white", inactiveFilter: "border-red-300 bg-transparent text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950" },
+  cancelled:    { label: "Cancelled",    badge: "secondary",   accent: "border-l-slate-400", activeFilter: "border-slate-500 bg-slate-500 text-white", inactiveFilter: "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-950" },
+  archived:     { label: "Archived",     badge: "secondary", accent: "border-l-gray-400",   activeFilter: "border-gray-400 bg-gray-400 text-white", inactiveFilter: "border-gray-300 bg-transparent text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-900" },
 };
+
+const STAGE_TO_GROUP: Record<string, CaseGroup> = {
+  draft: "needs_action",
+  sourcing: "needs_action",
+  changes_requested: "needs_action",
+  quoted: "submitted",
+  approved: "needs_action",
+  ordered: "completed",
+  shipped: "completed",
+  received: "completed",
+  rejected: "rejected",
+  cannot_source: "rejected",
+  cancelled: "cancelled",
+  archived: "archived",
+};
+
+const groupOf = (stage: string): CaseGroup => STAGE_TO_GROUP[stage] ?? "needs_action";
+
 export default function SourcingPortal({
   basePath = "/sourcing",
   manageMembers = false,
@@ -46,65 +58,38 @@ export default function SourcingPortal({
   manageMembers?: boolean;
 }) {
   const isRestoring = useIsRestoring();
-  const {
-    data: workspaces = [],
-    isLoading: loadingWorkspaces,
-    error: workspaceError,
-  } = useSourcingWorkspaces();
+  const { data: workspaces = [], isLoading: loadingWorkspaces, error: workspaceError } = useSourcingWorkspaces();
   const [workspaceId, setWorkspaceId] = useState("");
   const activeWorkspace = workspaceId || workspaces[0]?.id || "";
-  const {
-    data: cases = [],
-    isLoading,
-    error,
-  } = useSourcingCases(activeWorkspace);
-  const { data: members = [] } = useSourcingMembers(activeWorkspace, true);
-  const { data: analytics } = useSourcingAnalytics(activeWorkspace);
-  const { data: slaPerformance } = useSourcingSlaPerformance(activeWorkspace);
-  const { data: scorecard = [] } = useSupplierScorecard(activeWorkspace);
-  const evaluationMutation = useCreateSupplierEvaluation();
-  const importMutation = useImportSourcingCases();
-  const bulkMutation = useBulkUpdateSourcingCases();
-  const [evaluation, setEvaluation] = useState({
-    supplierId: "",
-    qualityRating: "5",
-    timelinessRating: "5",
-    communicationRating: "5",
-    valueRating: "5",
-    notes: "",
-  });
+  const { data: cases = [], isLoading, error } = useSourcingCases(activeWorkspace);
   const [search, setSearch] = useState("");
-  const [stage, setStage] = useState("all");
-  const [assignee, setAssignee] = useState("all");
-  const [actionFilter, setActionFilter] = useState("all");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [bulkAssignee, setBulkAssignee] = useState("");
-  const [bulkDue, setBulkDue] = useState("");
-  const [preview, setPreview] = useState<{
-    valid: number;
-    errors: { row: number; message: string }[];
-  } | null>(null);
+  const [groupFilter, setGroupFilter] = useState<CaseGroup | "all">("all");
+  const [pendingAction, setPendingAction] = useState<{ type: "cancel" | "delete"; item: any } | null>(null);
+  const command = useSourcingCommand();
+  const deleteCase = useDeleteSourcingCase();
+  const isAdminView = basePath.startsWith("/admin");
+
+  const counts = cases.reduce(
+    (acc: Record<string, number>, item: any) => {
+      const g = groupOf(item.stage);
+      acc[g] = (acc[g] || 0) + 1;
+      acc.all = (acc.all || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
   const filtered = cases.filter((item: any) => {
-    const due = item.slaDueAt || item.nextActionAt;
-    const overdue = due && new Date(due) < new Date();
-    return (
-      (stage === "all" || item.stage === stage) &&
-      (assignee === "all" || item.assignedToId === assignee) &&
-      (actionFilter === "all" ||
-        (actionFilter === "overdue"
-          ? overdue
-          : actionFilter === "needs_action"
-            ? !!due
-            : !!item.slaDueAt)) &&
-      item.title.toLowerCase().includes(search.toLowerCase())
-    );
+    const matchesGroup = groupFilter === "all" || groupOf(item.stage) === groupFilter;
+    const matchesSearch = item.title.toLowerCase().includes(search.toLowerCase());
+    return matchesGroup && matchesSearch;
   });
-  const canAssign =
-    workspaces.find((w: any) => w.id === activeWorkspace)?.canAssign ?? false;
-  // Persisted query restoration can synchronously replace an SSR-empty cache. Keep the shell stable until it finishes.
+
+  const canAssign = workspaces.find((w: any) => w.id === activeWorkspace)?.canAssign ?? false;
+
   if (isRestoring || loadingWorkspaces)
     return (
-      <main className="mx-auto max-w-6xl p-6">
+      <main className="mx-auto max-w-5xl p-6">
         <div className="h-36 animate-pulse rounded-xl bg-muted" />
       </main>
     );
@@ -114,14 +99,14 @@ export default function SourcingPortal({
         Unable to load sourcing workspaces.
       </main>
     );
+
   return (
-    <main className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+    <main className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Sourcing</h1>
           <p className="text-muted-foreground">
-            Source products, compare supplier quotes, and hand off approved
-            orders.
+            Source products, compare supplier quotes, and hand off approved orders.
           </p>
         </div>
         <div className="flex gap-2">
@@ -132,14 +117,8 @@ export default function SourcingPortal({
           )}
           {canAssign && (
             <Button asChild>
-              <Link
-                href={
-                  activeWorkspace
-                    ? `${basePath}/new?workspaceId=${activeWorkspace}`
-                    : `${basePath}/new`
-                }
-              >
-                <Plus /> New sourcing case
+              <Link href={activeWorkspace ? `${basePath}/new?workspaceId=${activeWorkspace}` : `${basePath}/new`}>
+                <Plus /> New case
               </Link>
             </Button>
           )}
@@ -153,63 +132,9 @@ export default function SourcingPortal({
         </Card>
       ) : (
         <>
-          {canAssign && (
-            <Card>
-              <CardContent className="flex flex-wrap items-center gap-3 p-4">
-                <label className="flex items-center gap-2 text-sm font-medium">
-                  <Upload className="h-4 w-4" />
-                  Import CSV/XLSX
-                  <Input
-                    className="w-56"
-                    type="file"
-                    accept=".csv,.xlsx"
-                    onChange={async (event) => {
-                      const file = event.target.files?.[0];
-                      if (!file || !activeWorkspace) return;
-                      const form = new FormData();
-                      form.set("workspaceId", activeWorkspace);
-                      form.set("file", file);
-                      const result = await importMutation.mutateAsync(form);
-                      setPreview(result);
-                    }}
-                  />
-                </label>
-                {preview && (
-                  <span className="text-sm text-muted-foreground">
-                    {preview.valid} valid rows, {preview.errors.length} errors{" "}
-                    {preview.errors[0] ? `(${preview.errors[0].message})` : ""}
-                  </span>
-                )}{" "}
-                {preview &&
-                  preview.valid > 0 &&
-                  preview.errors.length === 0 && (
-                    <Button
-                      size="sm"
-                      isLoading={importMutation.isPending}
-                      onClick={async () => {
-                        const input =
-                          document.querySelector<HTMLInputElement>(
-                            "input[type=file]",
-                          );
-                        const file = input?.files?.[0];
-                        if (!file) return;
-                        const form = new FormData();
-                        form.set("workspaceId", activeWorkspace);
-                        form.set("file", file);
-                        form.set("commit", "true");
-                        await importMutation.mutateAsync(form);
-                        setPreview(null);
-                      }}
-                    >
-                      Import valid cases
-                    </Button>
-                  )}
-              </CardContent>
-            </Card>
-          )}
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Select value={activeWorkspace} onValueChange={setWorkspaceId}>
-              <SelectTrigger>
+              <SelectTrigger className="w-56">
                 <SelectValue placeholder="Workspace" />
               </SelectTrigger>
               <SelectContent>
@@ -220,342 +145,52 @@ export default function SourcingPortal({
                 ))}
               </SelectContent>
             </Select>
-            <div className="relative">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
                 className="pl-9"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search requests"
+                placeholder="Search cases"
               />
             </div>
-            <Select value={stage} onValueChange={setStage}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All stages</SelectItem>
-                {[
-                  "draft",
-                  "sourcing",
-                  "changes_requested",
-                  "quoted",
-                  "approved",
-                  "ordered",
-                  "shipped",
-                  "received",
-                  "rejected",
-                  "cannot_source",
-                  "archived",
-                ].map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {stageLabel(value)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             {canAssign && (
-              <Select value={assignee} onValueChange={setAssignee}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Assignee" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All assignees</SelectItem>
-                  {members.map((member: any) => (
-                    <SelectItem
-                      key={member.userId || member.id}
-                      value={member.userId || member.id}
-                    >
-                      {member.user?.name ||
-                        member.user?.email ||
-                        member.name ||
-                        member.email}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-1">
+                <SourcingSlaSettings key={activeWorkspace} workspaceId={activeWorkspace} members={[]} />
+                <SourcingCostSettings key={`cost-${activeWorkspace}`} workspaceId={activeWorkspace} />
+              </div>
             )}
-            <Select value={actionFilter} onValueChange={setActionFilter}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All actions</SelectItem>
-                <SelectItem value="needs_action">Has next action</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-                <SelectItem value="sla">Has SLA</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
-          {canAssign && selected.length > 0 && (
-            <Card>
-              <CardContent className="flex flex-wrap items-end gap-3 p-4">
-                <b>{selected.length} selected</b>
-                <Select value={bulkAssignee} onValueChange={setBulkAssignee}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Reassign to" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {members
-                      .filter((member: any) => member.role === "sourcer")
-                      .map((member: any) => (
-                        <SelectItem
-                          key={member.userId || member.id}
-                          value={member.userId || member.id}
-                        >
-                          {member.user?.name ||
-                            member.user?.email ||
-                            member.name ||
-                            member.email}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  className="w-52"
-                  type="datetime-local"
-                  value={bulkDue}
-                  onChange={(event) => setBulkDue(event.target.value)}
-                />
-                <Button
-                  isLoading={bulkMutation.isPending}
-                  onClick={async () => {
-                    await bulkMutation.mutateAsync({
-                      workspaceId: activeWorkspace,
-                      caseIds: selected,
-                      ...(bulkAssignee ? { assignedToId: bulkAssignee } : {}),
-                      ...(bulkDue
-                        ? { nextActionAt: new Date(bulkDue).toISOString() }
-                        : {}),
-                    });
-                    setSelected([]);
-                  }}
+
+          <div className="flex flex-wrap gap-2">
+            {(["all", "needs_action", "submitted", "completed", "rejected", "cancelled", "archived"] as const).map((key) => {
+              const isActive = groupFilter === key;
+              const meta = key === "all" ? null : GROUP_META[key];
+              const count = counts[key] || 0;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setGroupFilter(key)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? meta
+                        ? meta.activeFilter
+                        : "border-foreground bg-foreground/10 text-foreground"
+                      : meta
+                        ? meta.inactiveFilter
+                        : "border-transparent bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
                 >
-                  Apply bulk update
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-          {analytics && (
-            <div className="grid gap-3 sm:grid-cols-4">
-              <Card>
-                <CardContent className="p-4 text-sm">
-                  <b>{analytics.totalCases}</b>
-                  <p className="text-muted-foreground">Total cases</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4 text-sm">
-                  <b>{analytics.submittedQuotes}</b>
-                  <p className="text-muted-foreground">Submitted quotes</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4 text-sm">
-                  <b>{analytics.overdueCases}</b>
-                  <p className="text-muted-foreground">Overdue SLA</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-4 text-sm">
-                  <b>
-                    {analytics.averageCycleHours == null
-                      ? "-"
-                      : `${Math.round(analytics.averageCycleHours)}h`}
-                  </b>
-                  <p className="text-muted-foreground">Avg completed cycle</p>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-          {slaPerformance && (
-            <Card>
-              <CardContent className="space-y-3 p-4 text-sm">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <p>
-                    <b>
-                      {slaPerformance.onTimeRate == null
-                        ? "-"
-                        : `${Math.round(slaPerformance.onTimeRate * 100)}%`}
-                    </b>
-                    <span className="block text-muted-foreground">
-                      SLA on-time rate
-                    </span>
-                  </p>
-                  <p>
-                    <b>{slaPerformance.breachCount}</b>
-                    <span className="block text-muted-foreground">
-                      SLA breaches
-                    </span>
-                  </p>
-                  <p>
-                    <b>{slaPerformance.openBreachCount}</b>
-                    <span className="block text-muted-foreground">
-                      Currently overdue
-                    </span>
-                  </p>
-                </div>
-                {slaPerformance.waitingByOwner.length > 0 && (
-                  <div className="border-t pt-3">
-                    <b>Time waiting by owner</b>
-                    {slaPerformance.waitingByOwner.map((owner: any) => (
-                      <p
-                        key={owner.ownerId}
-                        className="mt-1 text-muted-foreground"
-                      >
-                        {owner.ownerName}: {Math.round(owner.waitingHours)}h
-                        across {owner.openCount} open SLA
-                        {owner.openCount === 1 ? "" : "s"}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-          {canAssign && (
-            <div className="flex flex-wrap gap-2">
-              <SourcingSlaSettings
-                key={activeWorkspace}
-                workspaceId={activeWorkspace}
-                members={members}
-              />
-              <SourcingCostSettings
-                key={`cost-${activeWorkspace}`}
-                workspaceId={activeWorkspace}
-              />
-            </div>
-          )}
-          {scorecard.length > 0 && (
-            <Card>
-              <CardContent className="space-y-3 p-4 text-sm">
-                <b>Supplier scorecard</b>
-                {scorecard.slice(0, 3).map((supplier: any) => (
-                  <p key={supplier.supplierId}>
-                    {supplier.supplierName}:{" "}
-                    {supplier.defectRate == null
-                      ? "No receipt quality data"
-                      : `${(supplier.defectRate * 100).toFixed(1)}% defects`}{" "}
-                    ·{" "}
-                    {supplier.leadTimeDays == null
-                      ? "No lead-time data"
-                      : `${supplier.leadTimeDays.toFixed(1)}d lead time`}{" "}
-                    ·{" "}
-                    {supplier.onTimeRate == null
-                      ? "No delivery target"
-                      : `${(supplier.onTimeRate * 100).toFixed(0)}% on time`}{" "}
-                    ·{" "}
-                    {supplier.averageRatings.quality == null
-                      ? "Not evaluated"
-                      : `${supplier.averageRatings.quality.toFixed(1)}/5 quality`}
-                  </p>
-                ))}
-                {canAssign && (
-                  <form
-                    className="grid gap-2 border-t pt-3 sm:grid-cols-6"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!evaluation.supplierId) return;
-                      evaluationMutation.mutate(
-                        {
-                          workspaceId: activeWorkspace,
-                          ...evaluation,
-                          qualityRating: Number(evaluation.qualityRating),
-                          timelinessRating: Number(evaluation.timelinessRating),
-                          communicationRating: Number(
-                            evaluation.communicationRating,
-                          ),
-                          valueRating: Number(evaluation.valueRating),
-                        },
-                        {
-                          onSuccess: () =>
-                            setEvaluation({
-                              supplierId: "",
-                              qualityRating: "5",
-                              timelinessRating: "5",
-                              communicationRating: "5",
-                              valueRating: "5",
-                              notes: "",
-                            }),
-                        },
-                      );
-                    }}
-                  >
-                    <Select
-                      value={evaluation.supplierId}
-                      onValueChange={(supplierId) =>
-                        setEvaluation((current) => ({ ...current, supplierId }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Supplier" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {scorecard.map((supplier: any) => (
-                          <SelectItem
-                            key={supplier.supplierId}
-                            value={supplier.supplierId}
-                          >
-                            {supplier.supplierName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {(
-                      [
-                        ["qualityRating", "Quality"],
-                        ["timelinessRating", "Timeliness"],
-                        ["communicationRating", "Communication"],
-                        ["valueRating", "Value"],
-                      ] as const
-                    ).map(([field, label]) => (
-                      <Select
-                        key={field}
-                        value={evaluation[field]}
-                        onValueChange={(value) =>
-                          setEvaluation((current) => ({
-                            ...current,
-                            [field]: value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={label} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[1, 2, 3, 4, 5].map((rating) => (
-                            <SelectItem key={rating} value={String(rating)}>
-                              {label} {rating}/5
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ))}
-                    <Button
-                      type="submit"
-                      disabled={
-                        !evaluation.supplierId || evaluationMutation.isPending
-                      }
-                    >
-                      Save evaluation
-                    </Button>
-                    <Input
-                      className="sm:col-span-6"
-                      value={evaluation.notes}
-                      onChange={(event) =>
-                        setEvaluation((current) => ({
-                          ...current,
-                          notes: event.target.value,
-                        }))
-                      }
-                      maxLength={2000}
-                      placeholder="Optional post-order evaluation notes"
-                    />
-                  </form>
-                )}
-              </CardContent>
-            </Card>
-          )}
+                  {key === "all" ? "All" : meta!.label}
+                  <span className={`rounded-full px-1.5 text-xs ${isActive ? "bg-background/50" : "bg-muted-foreground/15"}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           {error ? (
             <Card>
               <CardContent className="p-6 text-destructive">
@@ -565,75 +200,104 @@ export default function SourcingPortal({
           ) : isLoading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((key) => (
-                <div
-                  key={key}
-                  className="h-20 animate-pulse rounded-xl bg-muted"
-                />
+                <div key={key} className="h-20 animate-pulse rounded-xl bg-muted" />
               ))}
             </div>
-          ) : !filtered.length ? (
+          ) : filtered.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center text-muted-foreground">
-                No sourcing cases match these filters.
+                No cases found.
               </CardContent>
             </Card>
           ) : (
-            <div className="overflow-hidden rounded-xl border">
-              <div className="hidden grid-cols-[2fr_repeat(6,1fr)] gap-3 border-b bg-muted/40 px-4 py-3 text-xs font-medium uppercase text-muted-foreground md:grid">
-                <span>Request</span>
-                <span>Stage</span>
-                <span>Route</span>
-                <span>Assignee</span>
-                <span>Next action</span>
-                <span>Latest quote</span>
-                <span>Updated</span>
-              </div>
+            <div className="space-y-2">
               {filtered.map((item: any) => {
-                const quote = item.quotes?.[0];
+                const group = groupOf(item.stage);
+                const meta = GROUP_META[group];
                 const isDue =
                   item.slaDueAt || item.nextActionAt
                     ? new Date(item.slaDueAt || item.nextActionAt) < new Date()
                     : false;
+                const canCancel = isAdminView && !["cancelled", "ordered", "shipped", "received", "rejected", "cannot_source", "archived"].includes(item.stage);
+                const canDelete = isAdminView && ["draft", "cancelled"].includes(item.stage) && !item.orders?.length;
                 return (
-                  <Link
-                    key={item.id}
-                    href={`${basePath}/${item.id}`}
-                    className="grid gap-2 border-b px-4 py-4 last:border-0 hover:bg-muted/40 md:grid-cols-[2fr_repeat(6,1fr)]"
-                  >
-                    <strong>{item.title}</strong>
-                    <span className="capitalize text-sm">
-                      {stageLabel(item.stage)}
-                    </span>
-                    <span className="capitalize text-sm">
-                      {item.route || "yiwu"}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      {item.assignee?.name ||
-                        item.assignee?.email ||
-                        "Unassigned"}
-                    </span>
-                    <span
-                      className={`text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}
-                    >
-                      {dueLabel(item)}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      {quote
-                        ? `r${quote.revision} ${quote.status}`
-                        : "No quote"}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      {item.updatedAt
-                        ? new Date(item.updatedAt).toLocaleDateString()
-                        : new Date(item.createdAt).toLocaleDateString()}
-                    </span>
+                  <div key={item.id} className={`relative rounded-lg border border-l-4 ${meta.accent} bg-card p-4 transition-colors hover:bg-muted/50`}>
+                  <Link href={`${basePath}/${item.id}`} className={`block ${(canCancel || canDelete) ? "pr-24 sm:pr-32" : ""}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold truncate">{item.title}</h3>
+                          <Badge variant={meta.badge} className="shrink-0">
+                            {stageLabel(item.stage)}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {item.assignee?.name || item.assignee?.email || "Unassigned"}
+                          <span className="mx-1.5">·</span>
+                          <span className="capitalize">{item.route || "yiwu"}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 text-right shrink-0">
+                        <p className="text-xs text-muted-foreground">
+                          {item.updatedAt
+                            ? new Date(item.updatedAt).toLocaleDateString()
+                            : new Date(item.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    {(item.nextAction || isDue) && (
+                      <p className={`mt-2 text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}>
+                        {item.nextAction || "Follow up"}
+                        {(item.slaDueAt || item.nextActionAt) && (
+                          <span className="ml-1">
+                            · {new Date(item.slaDueAt || item.nextActionAt).toLocaleDateString()}
+                            {isDue ? " (overdue)" : ""}
+                          </span>
+                        )}
+                      </p>
+                    )}
                   </Link>
+                  {(canCancel || canDelete) && (
+                    <div className="absolute right-3 top-3 flex gap-1">
+                      {canCancel && <Button size="sm" variant="outline" onClick={() => setPendingAction({ type: "cancel", item })}><Ban className="h-3.5 w-3.5" />Cancel</Button>}
+                      {canDelete && <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setPendingAction({ type: "delete", item })} aria-label={`Delete ${item.title}`}><Trash2 className="h-4 w-4" /></Button>}
+                    </div>
+                  )}
+                  </div>
                 );
               })}
             </div>
           )}
         </>
       )}
+      <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingAction?.type === "delete" ? "Delete sourcing request?" : "Cancel sourcing request?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction?.type === "delete"
+                ? "This permanently deletes a draft or cancelled request that has no purchase order."
+                : "This stops sourcing work, clears pending follow-ups, and moves the request to Cancelled."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep request</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!pendingAction) return;
+                if (pendingAction.type === "delete") {
+                  deleteCase.mutate({ id: pendingAction.item.id }, { onSuccess: () => setPendingAction(null) });
+                } else {
+                  command.mutate({ id: pendingAction.item.id, version: pendingAction.item.version, action: "cancel" }, { onSuccess: () => setPendingAction(null) });
+                }
+              }}
+            >
+              {pendingAction?.type === "delete" ? "Delete request" : "Cancel request"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

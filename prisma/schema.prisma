@@ -601,18 +601,21 @@ model SourcingAttachment {
   id           String       @id @default(auto()) @map("_id") @db.ObjectId
   workspaceId  String       @db.ObjectId
   caseId       String       @db.ObjectId
+  quoteId      String?      @db.ObjectId
   uploadedById String       @db.ObjectId
   fileName     String
   mimeType     String
   fileSize     Int
   url          String
   fileId       String
+  storage      String?
   createdAt    DateTime     @default(now()) @db.Date
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
   uploadedBy   User         @relation(fields: [uploadedById], references: [id])
 
   @@index([caseId, createdAt])
+  @@index([caseId, quoteId, createdAt])
   @@index([workspaceId, createdAt])
   @@index([uploadedById])
 }

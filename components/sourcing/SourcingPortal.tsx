@@ -223,7 +223,18 @@ export default function SourcingPortal({
                 return (
                   <div key={item.id} className={`relative rounded-lg border border-l-4 ${meta.accent} bg-card p-4 transition-colors hover:bg-muted/50`}>
                   <Link href={`${basePath}/${item.id}`} className={`block ${(canCancel || canDelete) ? "pr-24 sm:pr-32" : ""}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex items-start gap-3">
+                      {item.thumbnail && (
+                        <>
+                          {/* The file endpoint requires the browser session cookie. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={item.thumbnail.url}
+                            alt={item.thumbnail.fileName || "Case reference"}
+                            className="h-14 w-14 shrink-0 rounded-md border object-cover"
+                          />
+                        </>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-semibold truncate">{item.title}</h3>
@@ -233,11 +244,9 @@ export default function SourcingPortal({
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">
                           {item.assignee?.name || item.assignee?.email || "Unassigned"}
-                          <span className="mx-1.5">·</span>
-                          <span className="capitalize">{item.route || "yiwu"}</span>
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 text-right shrink-0">
+                      <div className="shrink-0 text-right">
                         <p className="text-xs text-muted-foreground">
                           {item.updatedAt
                             ? new Date(item.updatedAt).toLocaleDateString()

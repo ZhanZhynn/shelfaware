@@ -61,9 +61,7 @@ const editableStages = ["draft", "sourcing", "changes_requested"];
 const label = (value: string) => value.replaceAll("_", " ");
 const emptyQuote = {
   supplierName: "",
-  unitPriceRmb: 0,
   piecesPerSellingUnit: 1,
-  marketPack: 1,
   samplePhotoUrls: [],
   certifications: [],
   priceBreaks: [],
@@ -127,7 +125,9 @@ export default function SourcingCaseDetail({
   basePath?: string;
 }) {
   const [mounted, setMounted] = useState(false);
-  const [dialog, setDialog] = useState<"confirm_submit" | "confirm_submit_all" | "confirm_delete" | null>(null);
+  const [dialog, setDialog] = useState<"confirm_submit_all" | "confirm_delete" | "decision" | null>(null);
+  const [decisionAction, setDecisionAction] = useState<"request_changes" | "reject" | null>(null);
+  const [decisionReason, setDecisionReason] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
   const [quoteView, setQuoteView] = useState("compare");
@@ -158,9 +158,10 @@ export default function SourcingCaseDetail({
     resolver: zodResolver(sourcingQuoteSchema),
     defaultValues: emptyQuote,
   });
+  const selectedSupplierId = form.watch("supplierId");
   const requestForm = useForm<SourcingCaseInput>({
     resolver: zodResolver(sourcingCaseSchema),
-    defaultValues: { workspaceId: "", title: "", photoUrls: [], route: "yiwu" },
+    defaultValues: { workspaceId: "", title: "", photoUrls: [] },
   });
   const activeQuote =
     item?.quotes?.find((quote: any) => quote.id === activeQuoteId) || null;
@@ -183,7 +184,7 @@ export default function SourcingCaseDetail({
       photoUrls: [], size: item.size, material: item.material, variant: item.variant,
       specifications: item.specifications, referenceUrl: item.referenceUrl, notes: item.notes,
       requestedQuantity: item.requestedQuantity, targetUnitPriceMyr: item.targetUnitPriceMyr,
-      route: item.route, assignedToId: item.assignedToId,
+      assignedToId: item.assignedToId,
     });
   }, [item, requestForm]);
   useEffect(() => {
@@ -215,17 +216,21 @@ export default function SourcingCaseDetail({
         ...extra,
       });
       setDialog(null);
+      return true;
     } catch {
       // The mutation hook already displays the API error as a toast.
+      return false;
     }
   };
   const saveQuote = (action: "create_quote" | "save_quote" | "submit_quote") =>
-    form.handleSubmit((quote) =>
-      run(action, {
+    form.handleSubmit(async (quote) => {
+      const saved = await run(action, {
         quote,
         ...(activeQuoteId ? { quoteId: activeQuoteId } : {}),
-      }),
-    )();
+      });
+      if (saved && action === "submit_quote" && !activeQuoteId)
+        form.reset(emptyQuote);
+    })();
   const field = (
     name: keyof SourcingQuoteInput,
     title: string,
@@ -326,7 +331,6 @@ export default function SourcingCaseDetail({
           ) : (
             <>
               <h1 className="text-2xl font-bold">{item.title}</h1>
-              <p className="text-muted-foreground">{item.route === "other" ? "Other supplier route" : "Yiwu route"}</p>
             </>
           )}
         </div>
@@ -476,7 +480,7 @@ export default function SourcingCaseDetail({
         {basePath.startsWith("/admin") && (
         <TabsList className="grid h-auto w-full grid-cols-2">
           <TabsTrigger value="compare">View offers</TabsTrigger>
-          <TabsTrigger value="what-if" disabled={offers.length === 0}>What-if calculation</TabsTrigger>
+          <TabsTrigger value="what-if" >What-if calculation</TabsTrigger>
         </TabsList>
         )}
         <TabsContent value="compare" className="space-y-4">
@@ -485,9 +489,11 @@ export default function SourcingCaseDetail({
           <CardHeader>
             <CardTitle>Supplier offer comparison</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            {offers.map((quote: any) => (
-              <div
+            <CardContent className="grid gap-3 md:grid-cols-2">
+             {offers.map((quote: any) => {
+               const status = item.selectedQuoteId === quote.id ? "approved" : quote.status;
+               return (
+               <div
                 key={offerKey(quote)}
                 role="button"
                 tabIndex={0}
@@ -498,8 +504,8 @@ export default function SourcingCaseDetail({
                 <div className="flex justify-between gap-2">
                   <b>{quote.supplierName}</b>
                   <span className="flex items-center gap-2">
-                    <Badge variant={quote.status === "submitted" ? "info" : "secondary"} className="capitalize">
-                      {label(quote.status)}
+                    <Badge variant={status === "approved" ? "success" : status === "submitted" ? "info" : "secondary"} className="capitalize">
+                      {label(status)}
                     </Badge>
                     {quote.status === "draft" && item.capabilities.canEditQuote && (
                       <button
@@ -560,8 +566,9 @@ export default function SourcingCaseDetail({
                     ? " | Approved selection"
                     : ""}
                 </p>
-              </div>
-            ))}
+               </div>
+             );
+             })}
           </CardContent>
         </Card>
       ) : (
@@ -575,7 +582,9 @@ export default function SourcingCaseDetail({
           <Card>
             <CardHeader><CardTitle>Supplier offer comparison</CardTitle></CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-2">
-              {offers.map((quote: any) => (
+              {offers.map((quote: any) => {
+                const status = item.selectedQuoteId === quote.id ? "approved" : quote.status;
+                return (
                 <div
                   key={offerKey(quote)}
                   role="button"
@@ -586,7 +595,7 @@ export default function SourcingCaseDetail({
                 >
                   <div className="flex justify-between gap-2">
                     <b>{quote.supplierName}</b>
-                    <Badge variant={quote.status === "submitted" ? "info" : "secondary"} className="capitalize">{label(quote.status)}</Badge>
+                    <Badge variant={status === "approved" ? "success" : status === "submitted" ? "info" : "secondary"} className="capitalize">{label(status)}</Badge>
                   </div>
                   <p className="mt-2">{quote.unitPriceRmb == null ? "No price" : formatMoney(quote.unitPriceRmb, "CNY")} / unit</p>
                   {typeof quote.landedCostSnapshot?.landed === "number" && <p>Landed: {formatMoney(quote.landedCostSnapshot.landed, "MYR")} / piece</p>}
@@ -594,7 +603,8 @@ export default function SourcingCaseDetail({
                   <p>Payment: {quote.paymentTerms || "-"} | Risk: {quote.riskLevel || "-"}</p>
                   <p className="mt-1 text-xs text-muted-foreground">Revision {quote.revision}{item.selectedQuoteId === quote.id ? " | Approved selection" : ""}</p>
                 </div>
-              ))}
+              );
+              })}
             </CardContent>
           </Card>
         )}
@@ -610,9 +620,61 @@ export default function SourcingCaseDetail({
             quote={activeQuote}
           />
         )}
-        {!activeQuote && <Card><CardContent className="p-6 text-sm text-muted-foreground">Select an offer to model pricing scenarios.</CardContent></Card>}
-        </TabsContent>
+        {!activeQuote && (
+          <Card>
+            <CardContent className="p-6 text-sm text-muted-foreground">
+              {offers.length > 0
+                ? "Select an offer to model pricing scenarios."
+                : "No quotes or offers yet."}
+            </CardContent>
+          </Card>
+        )}
+            </TabsContent>
         <TabsContent value="compare" className="space-y-4">
+      {selectedSubmitted && item.capabilities.canDecide && item.stage === "quoted" && (
+        <Card className="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="font-medium">Review {selectedSubmitted.supplierName}&apos;s offer</p>
+              <p className="text-sm text-muted-foreground">Approve it, send it back for changes, or reject it.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                isLoading={command.isPending}
+                onClick={() => run("approve", { quoteId: selectedSubmitted.id })}
+              >
+                Approve offer
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={command.isPending}
+                onClick={() => {
+                  setDecisionAction("request_changes");
+                  setDecisionReason("");
+                  setDialog("decision");
+                }}
+              >
+                Request changes
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={command.isPending}
+                onClick={() => {
+                  setDecisionAction("reject");
+                  setDecisionReason("");
+                  setDialog("decision");
+                }}
+              >
+                Reject offer
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {(activeQuote || canEditActiveQuote) && (
           <Card>
             <CardHeader>
@@ -640,12 +702,12 @@ export default function SourcingCaseDetail({
                 onSubmit={(event) => {
                   event.preventDefault();
                   if (!canEditActiveQuote) return;
-                  saveQuote(activeQuote ? "save_quote" : "create_quote");
+                  saveQuote("submit_quote");
                 }}
               >
                 {!canEditActiveQuote && (
                   <p className="rounded-md border border-blue-200 bg-blue-50/50 p-3 text-sm text-blue-700 sm:col-span-2 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300">
-                    This submitted offer is locked. Create a new offer to submit a revision.
+                    This {item.selectedQuoteId === activeQuote.id ? "approved" : "submitted"} offer is locked. Create a new offer to submit a revision.
                   </p>
                 )}
                 <fieldset disabled={!canEditActiveQuote} className="contents">
@@ -663,6 +725,7 @@ export default function SourcingCaseDetail({
                       );
                       if (supplier)
                         form.setValue("supplierName", supplier.name);
+                      else form.setValue("supplierName", "");
                     }}
                   >
                     <SelectTrigger>
@@ -680,7 +743,7 @@ export default function SourcingCaseDetail({
                     </SelectContent>
                   </Select>
                 </label>
-                {field("supplierName", "Supplier name", "text", {
+                {!selectedSupplierId && field("supplierName", "Supplier name", "text", {
                   required: true,
                 })}
                 {field(
@@ -688,75 +751,30 @@ export default function SourcingCaseDetail({
                   "Supplier CNY cost / selling unit",
                   "number",
                   {
+                    required: true,
                     hint: "Price for one bag, pack, carton, or other unit quoted by the supplier.",
                   },
                 )}
-                {field(
-                  "piecesPerSellingUnit",
-                  "Pieces / supplier selling unit",
-                  "number",
-                  {
-                    required: true,
-                    hint: "For a 50-piece bag, enter 50. Use 1 only when the supplier sells one piece.",
-                  },
-                )}
-                {field(
-                  "overrideCostMyr",
-                  "RM override / selling unit",
-                  "number",
-                  {
-                    hint: "Optional. Use only when an agent has agreed an RM price for the same supplier unit.",
-                  },
-                )}
-                {field("moq", "MOQ", "number")}
-                {field("cartonLengthCm", "Carton length (cm)", "number", {
-                  hint: "Outer carton measurement. Needed to allocate freight by volume.",
-                })}
-                {field("cartonWidthCm", "Carton width (cm)", "number", {
-                  hint: "Outer carton measurement in centimetres.",
-                })}
-                {field("cartonHeightCm", "Carton height (cm)", "number", {
-                  hint: "Outer carton measurement in centimetres.",
-                })}
-                {field("piecesPerCarton", "Pieces / carton", "number", {
-                  hint: "Count individual customer-facing pieces, not bags or packs.",
-                })}
-                {field(
-                  "marketPriceMyr",
-                  "Competitor listing price (RM)",
-                  "number",
-                  {
-                    hint: "Optional. Enter the full Shopee/Lazada listing price.",
-                  },
-                )}
-                {field("marketPack", "Pieces / competitor listing", "number", {
-                  hint: "For a 10-piece competitor bundle, enter 10.",
-                })}
-                {field("cartonWeightKg", "Carton weight (kg)", "number")}
-                {field("leadTimeDays", "Lead time (days)", "number")}
-                <label className="grid gap-1 text-sm font-medium">
-                  Valid until
-                  <Input
-                    type="datetime-local"
-                    {...form.register("validUntil")}
-                  />
-                </label>
+                {field("moq", "MOQ (optional)", "number")}
+                {field("leadTimeDays", "Lead time in days (optional)", "number")}
                 <label className="grid gap-1 text-sm font-medium sm:col-span-2">
-                  Sample photo URLs, one per line
-                  <Textarea
-                    {...form.register("samplePhotoUrls", {
-                      setValueAs: (value) =>
-                        String(value)
-                          .split("\n")
-                          .map((url) => url.trim())
-                          .filter(Boolean),
-                    })}
-                  />
-                </label>
-                <label className="grid gap-1 text-sm font-medium sm:col-span-2">
-                  Remarks
+                  Notes (optional)
                   <Textarea {...form.register("remarks")} />
                 </label>
+                <details className="rounded-lg border p-4 sm:col-span-2">
+                  <summary className="cursor-pointer font-medium">Add shipping details (optional)</summary>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    {field("piecesPerSellingUnit", "Pieces / supplier selling unit", "number", {
+                      hint: "Leave as 1 unless the supplier sells packs or bundles.",
+                    })}
+                    {field("overrideCostMyr", "RM override / selling unit", "number")}
+                    {field("cartonLengthCm", "Carton length (cm)", "number")}
+                    {field("cartonWidthCm", "Carton width (cm)", "number")}
+                    {field("cartonHeightCm", "Carton height (cm)", "number")}
+                    {field("piecesPerCarton", "Pieces / carton", "number")}
+                    {field("cartonWeightKg", "Carton weight (kg)", "number")}
+                  </div>
+                </details>
                 {activeQuote && (
                   <div className="space-y-3 rounded-lg border bg-muted/20 p-4 sm:col-span-2">
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -815,21 +833,14 @@ export default function SourcingCaseDetail({
                 {canEditActiveQuote && (
                 <div className="flex justify-end gap-2 sm:col-span-2">
                   <Button
-                    type="submit"
+                    type="button"
                     variant="outline"
                     isLoading={command.isPending}
+                    onClick={() => saveQuote(activeQuote ? "save_quote" : "create_quote")}
                   >
-                    {activeQuote ? "Save draft" : "Create offer"}
-                  </Button>
-                  {activeQuote && (
-                    <Button
-                      type="button"
-                      isLoading={command.isPending}
-                      onClick={() => setDialog("confirm_submit")}
-                    >
-                      Submit offer
+                      Save draft
                     </Button>
-                  )}
+                  <Button type="submit" isLoading={command.isPending}>Submit offer</Button>
                   {offers.filter((q: any) => q.status === "draft").length > 1 && (
                     <Button
                       type="button"
@@ -846,7 +857,7 @@ export default function SourcingCaseDetail({
             </CardContent>
           </Card>
         )}
-        {!activeQuote && <Card><CardContent className="p-6 text-sm text-muted-foreground">Select an offer to view its details.</CardContent></Card>}
+        {!activeQuote && offers.length > 0 && <Card><CardContent className="p-6 text-sm text-muted-foreground">Select an offer to view its details.</CardContent></Card>}
         </TabsContent>
       </Tabs>
         </TabsContent>
@@ -951,23 +962,34 @@ export default function SourcingCaseDetail({
         </CardContent>
       </Card>}
       <Dialog
-        open={dialog === "confirm_submit"}
+        open={dialog === "decision"}
         onOpenChange={(open) => !open && setDialog(null)}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Submit quote</DialogTitle>
+            <DialogTitle>{decisionAction === "reject" ? "Reject offer" : "Request changes"}</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to submit this quote? Once submitted, the
-            quote cannot be changed unless a new quote is submitted.
-          </p>
+          <label className="grid gap-2 text-sm font-medium">
+            Reason
+            <Textarea
+              value={decisionReason}
+              onChange={(event) => setDecisionReason(event.target.value)}
+              placeholder={decisionAction === "reject" ? "Explain why this offer is not suitable" : "Explain what the sourcer should change"}
+              autoFocus
+            />
+          </label>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialog(null)}>
-              Cancel
-            </Button>
-            <Button onClick={() => saveQuote("submit_quote")}>
-              Submit quote
+            <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button
+              variant={decisionAction === "reject" ? "destructive" : "default"}
+              disabled={!decisionAction || !decisionReason.trim()}
+              isLoading={command.isPending}
+              onClick={() => {
+                if (!decisionAction || !selectedSubmitted) return;
+                run(decisionAction, { quoteId: selectedSubmitted.id, reason: decisionReason });
+              }}
+            >
+              {decisionAction === "reject" ? "Reject offer" : "Send change request"}
             </Button>
           </DialogFooter>
         </DialogContent>

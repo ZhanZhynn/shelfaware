@@ -9,7 +9,20 @@ import { normalizeSourcingListCase } from "@/lib/sourcing/contracts";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { ZodError } from "zod";
 
-export const sourcingListInclude = { quotes: { orderBy: { revision: "desc" as const }, take: 1 }, orders: true };
+export const sourcingListInclude = {
+  quotes: { orderBy: { revision: "desc" as const }, take: 1 },
+  orders: true,
+  attachments: {
+    where: {
+      mimeType: { startsWith: "image/" },
+      // MongoDB stores an omitted optional ID as unset, not null.
+      OR: [{ quoteId: null }, { quoteId: { isSet: false } }],
+    },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: { url: true, fileName: true },
+  },
+};
 
 function failure(error: unknown) {
   const status = error instanceof SourcingAccessError ? error.status : error instanceof ZodError ? 400 : 500;

@@ -4,7 +4,7 @@ import { sourcingCaseSchema, type SourcingCaseInput } from "@/lib/validations/so
 
 const headers: Record<string, keyof Omit<SourcingCaseInput, "workspaceId">> = {
   title: "title", name: "title", description: "description", quantity: "requestedQuantity", requestedquantity: "requestedQuantity",
-  targetunitpricemyr: "targetUnitPriceMyr", targetprice: "targetUnitPriceMyr", route: "route", assigneeid: "assignedToId",
+  targetunitpricemyr: "targetUnitPriceMyr", targetprice: "targetUnitPriceMyr", assigneeid: "assignedToId",
   size: "size", material: "material", variant: "variant", specifications: "specifications", referenceurl: "referenceUrl", notes: "notes",
 };
 

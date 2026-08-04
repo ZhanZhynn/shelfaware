@@ -43,7 +43,6 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
       workspaceId: params.get("workspaceId") || "",
       title: "",
       photoUrls: [],
-      route: "yiwu",
     },
   });
   const workspaceId = form.watch("workspaceId");
@@ -192,13 +191,6 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
             <CardTitle>Send request</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-sm font-medium">
-              Route
-              <Select value={form.watch("route")} onValueChange={(value: "yiwu" | "other") => form.setValue("route", value)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="yiwu">Yiwu</SelectItem><SelectItem value="other">Other supplier</SelectItem></SelectContent>
-              </Select>
-            </label>
             {canAssign ? (
               <label className="grid gap-1.5 text-sm font-medium">
                 Assign to
@@ -219,7 +211,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
             <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Save as template" className="w-44" />
             <Button type="button" variant="outline" disabled={!workspaceId || !templateName.trim()} isLoading={createTemplate.isPending} onClick={async () => {
               const values = form.getValues();
-              await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr, route: values.route } });
+              await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr } });
               setTemplateName("");
             }}>Save template</Button>
           </div>

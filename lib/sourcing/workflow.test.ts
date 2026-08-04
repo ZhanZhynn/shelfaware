@@ -35,7 +35,6 @@ describe("sourcing workflow semantics", () => {
       sourcingCaseSchema.safeParse({
         workspaceId: "w",
         title: "",
-        route: "yiwu",
       }).success,
     ).toBe(false);
     expect(
@@ -133,10 +132,17 @@ describe("sourcing workflow semantics", () => {
     ).toBe(false);
     expect(
       sourcingCommandSchema.safeParse({
+        action: "submit_quote",
+        version: 1,
+        quote: { supplierName: "Yiwu Co", unitPriceRmb: 1 },
+      }).success,
+    ).toBe(true);
+    expect(
+      sourcingCommandSchema.safeParse({
         action: "save_quote",
         version: 1,
         quote: { supplierName: "Yiwu Co", unitPriceRmb: 1 },
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 });

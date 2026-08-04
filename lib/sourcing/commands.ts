@@ -154,7 +154,6 @@ export async function createSourcingCase(
         specifications: input.specifications?.trim() || null,
         referenceUrl: input.referenceUrl?.trim() || null,
         notes: input.notes?.trim() || null,
-        route: input.route,
         requestedQuantity: input.requestedQuantity ?? null,
         targetUnitPriceMyr: input.targetUnitPriceMyr ?? null,
         assignedToId,
@@ -374,11 +373,6 @@ export async function runSourcingCommand(
         );
       if (!command.quote)
         throw new SourcingAccessError("A valid quote is required", 400);
-      if (
-        ["save_quote", "submit_quote"].includes(command.action) &&
-        !command.quoteId
-      )
-        throw new SourcingAccessError("A quote must be selected", 400);
       const latest = await tx.sourcingQuote.findFirst({
         where: { caseId },
         orderBy: { revision: "desc" },
@@ -482,7 +476,9 @@ export async function runSourcingCommand(
                 caseId,
                 quoteGroupId: new ObjectId().toHexString(),
                 revision,
-                status: "draft",
+                status: command.action === "submit_quote" ? "submitted" : "draft",
+                submittedAt:
+                  command.action === "submit_quote" ? new Date() : null,
                 ...quoteData,
                 createdById: actor.id,
               },
@@ -857,7 +853,6 @@ export async function runSourcingCommand(
           notes: item.notes,
           requestedQuantity: item.requestedQuantity,
           targetUnitPriceMyr: item.targetUnitPriceMyr,
-          route: item.route,
           stage: "draft",
           createdById: actor.id,
         },

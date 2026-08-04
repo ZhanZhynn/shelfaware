@@ -434,7 +434,6 @@ model SourcingCase {
   requestedQuantity  Int?
   targetUnitPriceMyr Float?
   selectedQuoteId    String?                @db.ObjectId
-  route              String                 @default("yiwu")
   stage              String                 @default("draft")
   version            Int                    @default(1)
   assignedToId       String?                @db.ObjectId

@@ -84,7 +84,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           variant: input.variant?.trim() || null, specifications: input.specifications?.trim() || null,
           referenceUrl: input.referenceUrl?.trim() || null, notes: input.notes?.trim() || null,
           requestedQuantity: input.requestedQuantity ?? null, targetUnitPriceMyr: input.targetUnitPriceMyr ?? null,
-          route: input.route, version: { increment: 1 }, updatedAt: new Date(),
+          version: { increment: 1 }, updatedAt: new Date(),
         },
       });
       void invalidateAllServerCaches();

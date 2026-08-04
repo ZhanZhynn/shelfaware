@@ -5,7 +5,6 @@ import type { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { SourcingCaseInput } from "@/lib/validations/sourcing";
 
 export function SourcingRequestFields({
@@ -48,9 +47,8 @@ export function SourcingRequestFields({
       </Card>
       <Card>
         <CardHeader><CardTitle>Send request</CardTitle></CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <label className="grid gap-1.5 text-sm font-medium">Route<Select value={form.watch("route")} onValueChange={(value: "yiwu" | "other") => form.setValue("route", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="yiwu">Yiwu</SelectItem><SelectItem value="other">Other supplier</SelectItem></SelectContent></Select></label>
-          {assignee}
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            {assignee}
         </CardContent>
       </Card>
       {footer}

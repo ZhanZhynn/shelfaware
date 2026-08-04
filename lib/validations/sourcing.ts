@@ -47,7 +47,6 @@ export const sourcingCaseSchema = z.object({
   notes: optionalText(4000),
   requestedQuantity: optionalNumber(z.coerce.number().int().positive()),
   targetUnitPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
-  route: z.enum(["yiwu", "other"]).default("yiwu"),
   assignedToId: z.string().min(1).optional().nullable(),
 });
 
@@ -115,7 +114,7 @@ export const sourcingCommandSchema = z
     if (["create_quote", "save_quote", "submit_quote"].includes(value.action) && !value.quote) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quote"], message: "A valid quote is required" });
     }
-    if (["save_quote", "submit_quote", "delete_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
+    if (["delete_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quoteId"], message: "A quote must be selected" });
     }
     if (

@@ -101,9 +101,10 @@ export interface ApiResponse<T> {
 /** Builds Axios instance with baseURL (/api), credentials, and request/response interceptors. */
 function createAxiosInstance(): AxiosInstance {
   const instance = axios.create({
+    // Use the deployed site's own origin in production so cookies and API calls stay same-origin.
     baseURL:
       process.env.NODE_ENV === "production"
-        ? "https://console.shelfaware.my/api"
+        ? "/api"
         : `${process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:3000"}/api`,
     headers: {
       "Content-Type": "application/json",

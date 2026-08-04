@@ -42,9 +42,9 @@ export async function POST(request: NextRequest) {
 
     // Validate file type
     const fileName = file.name || "";
-    if (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls")) {
+    if (!fileName.toLowerCase().endsWith(".xlsx")) {
       return NextResponse.json(
-        { error: "Invalid file type. Please upload an Excel file (.xlsx or .xls)" },
+        { error: "Invalid file type. Please upload a Shopee Excel export (.xlsx)" },
         { status: 400 },
       );
     }
@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate cache after import
     await invalidateCache(cacheKeys.shopee.pattern);
+    await invalidateCache(cacheKeys.abcAnalysis.pattern);
     await invalidateMarketplaceAnalytics("shopee");
 
     logger.info(

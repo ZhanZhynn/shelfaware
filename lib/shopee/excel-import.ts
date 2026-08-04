@@ -10,17 +10,6 @@ import prisma from "@/prisma/client";
 import { Prisma } from "@prisma/client";
 import { logger } from "@/lib/logger";
 
-// Shopee order status mapping (same as sync.ts)
-const ORDER_STATUS_MAP: Record<string, string> = {
-  UNPAID: "pending",
-  READY_TO_SHIP: "confirmed",
-  PROCESSED: "processing",
-  SHIPPED: "shipped",
-  COMPLETED: "delivered",
-  CANCELLED: "cancelled",
-  INVOICE_PENDING: "confirmed",
-};
-
 const PAYMENT_STATUS_MAP: Record<string, string> = {
   UNPAID: "unpaid",
   READY_TO_SHIP: "paid",
@@ -293,6 +282,27 @@ export async function importExcelOrders(
     throw new Error("Shopee shop not found or you don't have access");
   }
 
+  const importSkus = [...new Set([...orders.values()].flatMap((rows) => rows.map((row) => row.sku).filter(Boolean)))];
+  const variants = importSkus.length > 0
+    ? await prisma.shopeeProductVariant.findMany({
+        where: { shopId: shop.id, modelSku: { in: importSkus } },
+        select: { id: true, modelId: true, modelSku: true },
+      })
+    : [];
+  const variantBySku = new Map<string, { id: string; modelId: number }>();
+  const ambiguousVariantSkus = new Set<string>();
+  for (const variant of variants) {
+    if (!variant.modelSku) continue;
+    if (ambiguousVariantSkus.has(variant.modelSku)) continue;
+    if (variantBySku.has(variant.modelSku)) {
+      variantBySku.delete(variant.modelSku);
+      ambiguousVariantSkus.add(variant.modelSku);
+      warnings.push(`Multiple Shopee variants match SKU ${variant.modelSku}; Excel rows will not be linked automatically.`);
+      continue;
+    }
+    variantBySku.set(variant.modelSku, { id: variant.id, modelId: variant.modelId });
+  }
+
   // Create sync log
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
@@ -325,7 +335,8 @@ export async function importExcelOrders(
 
         // Determine order status
         const rawStatus = (firstRow.orderStatus || "").toUpperCase();
-        const orderStatus = ORDER_STATUS_MAP[rawStatus] || rawStatus.toLowerCase() || "pending";
+        // Keep the status identical to the API sync so analytics can consistently exclude CANCELLED orders.
+        const orderStatus = rawStatus || "UNPAID";
         const paymentStatus = PAYMENT_STATUS_MAP[rawStatus] || "unpaid";
 
         // Calculate total amount from first row (same for all items in the order)
@@ -348,7 +359,19 @@ export async function importExcelOrders(
         // Check if order already exists
         const existing = await prisma.shopeeOrder.findFirst({
           where: { shopId: shop.id, shopeeOrderId: orderId },
+          include: { items: { select: { sku: true, variantId: true, shopeeModelId: true } } },
         });
+
+        const existingLinkBySku = new Map<string, { id: string; modelId: number }>();
+        for (const item of existing?.items || []) {
+          if (!item.sku || existingLinkBySku.has(item.sku)) {
+            if (item.sku) existingLinkBySku.delete(item.sku);
+            continue;
+          }
+          if (item.variantId && item.shopeeModelId !== null) {
+            existingLinkBySku.set(item.sku, { id: item.variantId, modelId: item.shopeeModelId });
+          }
+        }
 
         const orderData = {
           shopId: shop.id,
@@ -385,28 +408,13 @@ export async function importExcelOrders(
           buyerPaymentMethod: "",
         };
 
-        let orderRecord;
+        await prisma.$transaction(async (tx) => {
+          const orderRecord = existing
+            ? await tx.shopeeOrder.update({ where: { id: existing.id }, data: orderData })
+            : await tx.shopeeOrder.create({ data: { ...orderData, createdBy: actorId } });
+          await tx.shopeeOrderItem.deleteMany({ where: { orderId: orderRecord.id } });
 
-        if (existing) {
-          orderRecord = await prisma.shopeeOrder.update({
-            where: { id: existing.id },
-            data: orderData,
-          });
-          updated++;
-        } else {
-          orderRecord = await prisma.shopeeOrder.create({
-            data: { ...orderData, createdBy: actorId },
-          });
-          created++;
-        }
-
-        // Delete existing items and recreate from Excel
-        await prisma.shopeeOrderItem.deleteMany({
-          where: { orderId: orderRecord.id },
-        });
-
-        // Create order items from each Excel row
-        for (const row of rows) {
+          for (const row of rows) {
           const qty = parseInt(row.quantity) || 1;
           const price = parseNum(row.dealPrice);
           const subtotal = parseNum(row.productSubtotal) || qty * price;
@@ -417,10 +425,12 @@ export async function importExcelOrders(
             productName += ` - ${row.variationName}`;
           }
 
-          await prisma.shopeeOrderItem.create({
+          const linkedVariant = variantBySku.get(row.sku) || existingLinkBySku.get(row.sku || "");
+          await tx.shopeeOrderItem.create({
             data: {
               orderId: orderRecord.id,
-              shopeeModelId: 0,
+              variantId: linkedVariant?.id || null,
+              shopeeModelId: linkedVariant?.modelId ?? null,
               productName,
               sku: row.sku || "",
               quantity: qty,
@@ -428,9 +438,12 @@ export async function importExcelOrders(
               subtotal,
             },
           });
-          itemsCreated++;
-        }
+          }
+        });
 
+        if (existing) updated++;
+        else created++;
+        itemsCreated += rows.length;
         orderCount++;
         imported += rows.length;
       } catch (itemError) {

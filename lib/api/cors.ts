@@ -9,7 +9,27 @@ import type { NextRequest } from "next/server";
 /**
  * Production URL
  */
-const PRODUCTION_URL = "https://console.shelfaware.my";
+function toOrigin(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+const configuredOrigin =
+  toOrigin(process.env.NEXT_PUBLIC_APP_URL) ||
+  toOrigin(process.env.AUTH_URL) ||
+  toOrigin(process.env.NEXTAUTH_URL);
+const PRODUCTION_URL = configuredOrigin || "https://console-web.shelfaware.my";
+const PRODUCTION_ORIGINS = new Set([
+  PRODUCTION_URL,
+  toOrigin(process.env.NEXT_PUBLIC_APP_URL),
+  toOrigin(process.env.AUTH_URL),
+  toOrigin(process.env.NEXTAUTH_URL),
+  "https://console.shelfaware.my",
+].filter((origin): origin is string => !!origin));
 
 /**
  * Check if an origin is allowed for CORS
@@ -21,7 +41,7 @@ export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
 
   // Allow production URL
-  if (origin === PRODUCTION_URL) {
+  if (PRODUCTION_ORIGINS.has(origin)) {
     return true;
   }
 

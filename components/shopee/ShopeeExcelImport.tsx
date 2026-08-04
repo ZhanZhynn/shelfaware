@@ -87,8 +87,8 @@ export default function ShopeeExcelImport() {
 
   const handleFileSelect = useCallback((file: File) => {
     const ext = file.name.split(".").pop()?.toLowerCase();
-    if (ext !== "xlsx" && ext !== "xls") {
-      alert("Please upload an Excel file (.xlsx or .xls)");
+    if (ext !== "xlsx") {
+      alert("Please upload a Shopee Excel export (.xlsx)");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -207,7 +207,7 @@ export default function ShopeeExcelImport() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,.xls"
+                  accept=".xlsx"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) handleFileSelect(file);

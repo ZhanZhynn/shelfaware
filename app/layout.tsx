@@ -14,6 +14,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SuppressApiErrorOverlay } from "@/components/shared/SuppressApiErrorOverlay";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -147,6 +149,8 @@ export default function RootLayout({
                 </TooltipProvider>
               </ThemeProvider>
               <Toaster />
+              <Analytics />
+              <SpeedInsights />
             </AuthProvider>
           </QueryProvider>
         </ErrorBoundary>

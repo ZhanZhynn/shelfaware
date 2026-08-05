@@ -17,7 +17,7 @@ const STATUS_COLORS: Record<string, string> = {
   approved: "bg-emerald-500/15 text-emerald-700",
   rejected: "bg-red-500/15 text-red-700",
   ordered: "bg-blue-500/15 text-blue-700",
-  shipped: "bg-violet-500/15 text-violet-700",
+  shipping: "bg-amber-500/15 text-amber-700",
   received: "bg-violet-500/15 text-violet-700",
   cancelled: "bg-gray-500/15 text-gray-500",
 };
@@ -28,7 +28,7 @@ const STATUS_LABELS: Record<string, string> = {
   approved: "Approved",
   rejected: "Rejected",
   ordered: "Ordered",
-  shipped: "Shipped",
+  shipping: "Shipping",
   received: "Received",
   cancelled: "Cancelled",
 };

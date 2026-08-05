@@ -8,7 +8,7 @@ export const activeAssignedCasesWhere = (
   workspaceId,
   assignedToId,
   OR: [{ archivedAt: null }, { archivedAt: { isSet: false } }],
-  stage: { notIn: ["ordered", "shipped", "received", "rejected", "cannot_source", "cancelled"] },
+  stage: { notIn: ["ordered", "shipping", "received", "rejected", "cannot_source", "cancelled"] },
 });
 
 export const activeAssignedCasesForUserWhere = (
@@ -17,6 +17,6 @@ export const activeAssignedCasesForUserWhere = (
   assignedToId,
   OR: [{ archivedAt: null }, { archivedAt: { isSet: false } }],
   stage: {
-    notIn: ["ordered", "shipped", "received", "rejected", "cannot_source", "cancelled"],
+    notIn: ["ordered", "shipping", "received", "rejected", "cannot_source", "cancelled"],
   },
 });

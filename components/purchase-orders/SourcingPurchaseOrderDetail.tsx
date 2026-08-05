@@ -19,7 +19,7 @@ const STATUS_COLORS: Record<string, string> = {
   approved: "bg-emerald-500/15 text-emerald-700",
   rejected: "bg-red-500/15 text-red-700",
   ordered: "bg-blue-500/15 text-blue-700",
-  shipped: "bg-violet-500/15 text-violet-700",
+  shipping: "bg-amber-500/15 text-amber-700",
   received: "bg-emerald-500/15 text-emerald-700",
   cancelled: "bg-gray-500/15 text-gray-500",
 };
@@ -30,7 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   approved: "Approved",
   rejected: "Rejected",
   ordered: "Ordered",
-  shipped: "Shipped",
+  shipping: "Shipping",
   received: "Received",
   cancelled: "Cancelled",
 };
@@ -98,8 +98,8 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
   };
 
   const canShip = order.status === "ordered";
-  const canEditShipping = order.status === "shipped";
-  const canEditNotes = ["ordered", "shipped"].includes(order.status);
+  const canEditShipping = order.status === "shipping";
+  const canEditNotes = ["ordered", "shipping"].includes(order.status);
   const showShippingForm = (canShip || canEditShipping) && editing;
   const isPending = shipMutation.isPending || updateShippingMutation.isPending || updateNotesMutation.isPending;
 

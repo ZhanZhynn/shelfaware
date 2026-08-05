@@ -1178,7 +1178,7 @@ model PurchaseOrder {
   supplierId            String              @db.ObjectId
   userId                String              @db.ObjectId
   workspaceId           String?             @db.ObjectId
-  status                String              @default("draft") // draft, pending_approval, approved, rejected, ordered, shipped, received, cancelled
+  status                String              @default("draft") // draft, pending_approval, approved, rejected, ordered, shipping, received, cancelled
   totalAmount           Float               @default(0)
   currency              String              @default("MYR")
   convertedTotalMyr     Float?

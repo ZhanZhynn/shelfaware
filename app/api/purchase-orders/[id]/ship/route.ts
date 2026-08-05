@@ -8,6 +8,10 @@ import { logger } from "@/lib/logger";
 import { completeSourcingSla } from "@/lib/sourcing/sla";
 import { invalidateAllServerCaches } from "@/lib/cache";
 import { getAdminDataScope } from "@/lib/admin/data-scope";
+import {
+  deliverSourcingNotification,
+  sourcingAdmins,
+} from "@/lib/sourcing/notifications";
 
 const json = (value: unknown) =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -43,7 +47,7 @@ export async function POST(
     const order = await prisma.purchaseOrder.update({
       where: { id },
       data: {
-        status: "shipped",
+        status: "shipping",
         shippedAt: new Date(),
         trackingNumber: body.trackingNumber?.trim() || null,
         trackingCarrier: body.trackingCarrier?.trim() || null,
@@ -70,7 +74,7 @@ export async function POST(
           await completeSourcingSla(tx, sourcingOrder.caseId, "shipment", now);
           await tx.sourcingCase.update({
             where: { id: sourcingOrder.caseId },
-            data: { stage: "shipped", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now },
+            data: { stage: "shipping", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now },
           });
         });
         await prisma.sourcingEvent.create({
@@ -87,6 +91,20 @@ export async function POST(
             }),
           },
         });
+        try {
+          await deliverSourcingNotification({
+            workspaceId: sourcingOrder.workspaceId,
+            caseId: sourcingOrder.caseId,
+            recipientIds: await sourcingAdmins(sourcingOrder.workspaceId),
+            excludeUserId: session.id,
+            kind: "decision",
+            title: "Shipment confirmed",
+            message: `${order.poNumber} has been shipped${order.trackingNumber ? ` (tracking: ${order.trackingNumber})` : ""}.`,
+            dedupeKey: `shipped:${sourcingOrder.caseId}:${order.id}`,
+          });
+        } catch (notificationError) {
+          logger.error("[Ship] Failed to notify workspace admins", notificationError);
+        }
       }
     } catch (eventError) {
       logger.error("[Ship] Failed to create sourcing event", eventError);
@@ -136,8 +154,8 @@ export async function PUT(
     if (!existing) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 });
     }
-    if (existing.status !== "shipped") {
-      return NextResponse.json({ error: "Tracking info can only be updated on shipped purchase orders" }, { status: 409 });
+    if (existing.status !== "shipping") {
+      return NextResponse.json({ error: "Tracking info can only be updated on shipping purchase orders" }, { status: 409 });
     }
 
     const order = await prisma.purchaseOrder.update({
@@ -226,8 +244,8 @@ export async function PATCH(
     if (!existing) {
       return NextResponse.json({ error: "Purchase order not found" }, { status: 404 });
     }
-    if (!["ordered", "shipped"].includes(existing.status)) {
-      return NextResponse.json({ error: "Notes can only be updated on ordered or shipped purchase orders" }, { status: 409 });
+    if (!["ordered", "shipping"].includes(existing.status)) {
+      return NextResponse.json({ error: "Notes can only be updated on ordered or shipping purchase orders" }, { status: 409 });
     }
 
     const order = await prisma.purchaseOrder.update({

@@ -789,7 +789,7 @@ export async function runSourcingCommand(
         return updated;
       }
       if (command.action === "cancel") {
-        if (["cancelled", "archived", "ordered", "shipped", "received", "rejected", "cannot_source"].includes(item.stage))
+        if (["cancelled", "archived", "ordered", "shipping", "received", "rejected", "cannot_source"].includes(item.stage))
           throw new SourcingAccessError(
             "This case cannot be cancelled at its current stage",
             409,
@@ -818,10 +818,10 @@ export async function runSourcingCommand(
           );
         if (
           command.action === "archive" &&
-          ["ordered", "shipped", "received"].includes(item.stage)
+          ["ordered", "shipping", "received"].includes(item.stage)
         )
           throw new SourcingAccessError(
-            "Ordered, shipped, or received cases cannot be archived",
+            "Ordered, shipping, or received cases cannot be archived",
             409,
           );
         const updated = await bump(
@@ -1055,6 +1055,19 @@ export async function runSourcingCommand(
         title: "Sourcing quote submitted",
         message: `${actor.name} submitted a quote for ${current.title}.`,
         dedupeKey: `submit_quote:${caseId}:${result.version}`,
+      });
+      return;
+    }
+    if (command.action === "confirm_order" && current.assignedToId) {
+      await deliverSourcingNotification({
+        workspaceId: current.workspaceId,
+        caseId,
+        recipientIds: [current.assignedToId],
+        excludeUserId: actor.id,
+        kind: "decision",
+        title: "Order placed - arrange shipment",
+        message: `${actor.name} confirmed the order for ${current.title}. Arrange shipment and add tracking.`,
+        dedupeKey: `confirm_order:${caseId}:${result.version}`,
       });
       return;
     }

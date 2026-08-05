@@ -56,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       canEditQuote: canEditQuote(access.role, access.globalAdmin, item.assignedToId, user.id, item.stage),
       canDecide: canAdmin,
        canOrder: canAdmin && item.stage === "approved",
-        canArchive: canAdmin && !["ordered", "shipped", "received"].includes(item.stage),
+        canArchive: canAdmin && !["ordered", "shipping", "received"].includes(item.stage),
        canUpdateNextAction: canAdmin || item.assignedToId === user.id,
     } });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Sourcing request failed" }, { status: error instanceof SourcingAccessError ? error.status : 500 }); }

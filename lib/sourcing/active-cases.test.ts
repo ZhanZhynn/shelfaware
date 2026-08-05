@@ -10,7 +10,7 @@ describe("activeAssignedCasesWhere", () => {
       workspaceId: "workspace",
       assignedToId: "sourcer",
       OR: [{ archivedAt: null }, { archivedAt: { isSet: false } }],
-      stage: { notIn: ["ordered", "shipped", "received", "rejected", "cannot_source", "cancelled"] },
+      stage: { notIn: ["ordered", "shipping", "received", "rejected", "cannot_source", "cancelled"] },
     });
   });
 
@@ -18,7 +18,7 @@ describe("activeAssignedCasesWhere", () => {
     expect(activeAssignedCasesForUserWhere("sourcer")).toEqual({
       assignedToId: "sourcer",
       OR: [{ archivedAt: null }, { archivedAt: { isSet: false } }],
-      stage: { notIn: ["ordered", "shipped", "received", "rejected", "cannot_source", "cancelled"] },
+      stage: { notIn: ["ordered", "shipping", "received", "rejected", "cannot_source", "cancelled"] },
     });
   });
 });

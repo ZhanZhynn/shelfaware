@@ -4,7 +4,7 @@ export type PurchaseOrderStatus =
   | "approved"
   | "rejected"
   | "ordered"
-  | "shipped"
+  | "shipping"
   | "received"
   | "cancelled";
 

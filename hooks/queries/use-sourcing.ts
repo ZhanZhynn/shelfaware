@@ -28,6 +28,9 @@ export function useSourcingCases(workspaceId: string) {
     queryKey: queryKeys.sourcing.cases(workspaceId),
     queryFn: async () => (await apiClient.sourcing.cases(workspaceId)).data,
     enabled: !!workspaceId,
+    // Different users advance the same case; refresh their shared work queue promptly.
+    staleTime: 0,
+    refetchInterval: 5_000,
   });
 }
 export function useSourcingCase(id: string) {
@@ -35,6 +38,8 @@ export function useSourcingCase(id: string) {
     queryKey: queryKeys.sourcing.case(id),
     queryFn: async () => (await apiClient.sourcing.case(id)).data,
     enabled: !!id,
+    staleTime: 0,
+    refetchInterval: 5_000,
   });
 }
 export function useSourcingAttachments(id: string) {

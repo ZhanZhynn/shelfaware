@@ -11,12 +11,18 @@ describe("sourcing presentation", () => {
     expect(getSourcingGroup("sourcing", "sourcer")).toBe("needs_action");
     expect(getSourcingGroup("quoted", "admin")).toBe("needs_action");
     expect(getSourcingGroup("quoted", "sourcer")).toBe("waiting");
-    expect(getSourcingGroup("ordered", "admin")).toBe("waiting");
+    expect(getSourcingGroup("changes_requested", "admin")).toBe(
+      "changes_requested",
+    );
+    expect(getSourcingGroup("changes_requested", "sourcer")).toBe(
+      "needs_action",
+    );
+    expect(getSourcingGroup("ordered", "admin")).toBe("shipped");
     expect(getSourcingGroup("ordered", "sourcer")).toBe("needs_action");
   });
 
   it("preserves the shipment and receipt handoff", () => {
-    expect(getSourcingGroup("shipping", "admin")).toBe("waiting");
+    expect(getSourcingGroup("shipping", "admin")).toBe("shipped");
     expect(getSourcingGroup("shipping", "sourcer")).toBe("shipped");
     expect(getSourcingGroup("received", "admin")).toBe("completed");
     expect(getSourcingGroup("received", "sourcer")).toBe("completed");
@@ -28,6 +34,9 @@ describe("sourcing presentation", () => {
     );
     expect(getSourcingStatusMessage("ordered", "sourcer")).toBe(
       "Your action: arrange shipment",
+    );
+    expect(getSourcingStatusMessage("quoted", "sourcer")).toContain(
+      "add or withdraw offers",
     );
   });
 

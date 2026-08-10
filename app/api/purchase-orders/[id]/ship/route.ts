@@ -44,40 +44,37 @@ export async function POST(
       return NextResponse.json({ error: "Only ordered purchase orders can be marked as shipped" }, { status: 409 });
     }
 
-    const order = await prisma.purchaseOrder.update({
-      where: { id },
-      data: {
-        status: "shipping",
-        shippedAt: new Date(),
-        trackingNumber: body.trackingNumber?.trim() || null,
-        trackingCarrier: body.trackingCarrier?.trim() || null,
-        trackingUrl: body.trackingUrl?.trim() || null,
-        estimatedDelivery: body.estimatedDelivery ? new Date(body.estimatedDelivery) : null,
-        shippingNotes: body.shippingNotes?.trim() || null,
-        notes: body.notes?.trim() || existing.notes,
-        updatedBy: session.id,
-      },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        items: true,
-      },
+    const sourcingOrder = await prisma.sourcingOrder.findUnique({
+      where: { purchaseOrderId: id },
+      select: { caseId: true, workspaceId: true },
     });
-
-    try {
-      const sourcingOrder = await prisma.sourcingOrder.findUnique({
-        where: { purchaseOrderId: id },
-        select: { caseId: true, workspaceId: true },
+    const order = await prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.purchaseOrder.update({
+        where: { id },
+        data: {
+          status: "shipping",
+          shippedAt: new Date(),
+          trackingNumber: body.trackingNumber?.trim() || null,
+          trackingCarrier: body.trackingCarrier?.trim() || null,
+          trackingUrl: body.trackingUrl?.trim() || null,
+          estimatedDelivery: body.estimatedDelivery ? new Date(body.estimatedDelivery) : null,
+          shippingNotes: body.shippingNotes?.trim() || null,
+          notes: body.notes?.trim() || existing.notes,
+          updatedBy: session.id,
+        },
+        include: {
+          supplier: { select: { id: true, name: true } },
+          items: true,
+        },
       });
       if (sourcingOrder) {
-        await prisma.$transaction(async (tx) => {
-          const now = new Date();
-          await completeSourcingSla(tx, sourcingOrder.caseId, "shipment", now);
-          await tx.sourcingCase.update({
-            where: { id: sourcingOrder.caseId },
-            data: { stage: "shipping", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now },
-          });
+        const now = new Date();
+        await completeSourcingSla(tx, sourcingOrder.caseId, "shipment", now);
+        await tx.sourcingCase.update({
+          where: { id: sourcingOrder.caseId },
+          data: { stage: "shipping", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now },
         });
-        await prisma.sourcingEvent.create({
+        await tx.sourcingEvent.create({
           data: {
             caseId: sourcingOrder.caseId,
             workspaceId: sourcingOrder.workspaceId,
@@ -85,29 +82,31 @@ export async function POST(
             type: "shipped",
             payload: json({
               purchaseOrderId: id,
-              poNumber: order.poNumber,
-              trackingCarrier: order.trackingCarrier,
-              trackingNumber: order.trackingNumber,
+              poNumber: updatedOrder.poNumber,
+              trackingCarrier: updatedOrder.trackingCarrier,
+              trackingNumber: updatedOrder.trackingNumber,
             }),
           },
         });
-        try {
-          await deliverSourcingNotification({
-            workspaceId: sourcingOrder.workspaceId,
-            caseId: sourcingOrder.caseId,
-            recipientIds: await sourcingAdmins(sourcingOrder.workspaceId),
-            excludeUserId: session.id,
-            kind: "decision",
-            title: "Shipment confirmed",
-            message: `${order.poNumber} has been shipped${order.trackingNumber ? ` (tracking: ${order.trackingNumber})` : ""}.`,
-            dedupeKey: `shipped:${sourcingOrder.caseId}:${order.id}`,
-          });
-        } catch (notificationError) {
-          logger.error("[Ship] Failed to notify workspace admins", notificationError);
-        }
       }
-    } catch (eventError) {
-      logger.error("[Ship] Failed to create sourcing event", eventError);
+      return updatedOrder;
+    });
+
+    if (sourcingOrder) {
+      try {
+        await deliverSourcingNotification({
+          workspaceId: sourcingOrder.workspaceId,
+          caseId: sourcingOrder.caseId,
+          recipientIds: await sourcingAdmins(sourcingOrder.workspaceId),
+          excludeUserId: session.id,
+          kind: "decision",
+          title: "Shipment confirmed",
+          message: `${order.poNumber} has been shipped${order.trackingNumber ? ` (tracking: ${order.trackingNumber})` : ""}.`,
+          dedupeKey: `shipped:${sourcingOrder.caseId}:${order.id}`,
+        });
+      } catch (notificationError) {
+        logger.error("[Ship] Failed to notify workspace admins", notificationError);
+      }
     }
 
     void invalidateAllServerCaches();

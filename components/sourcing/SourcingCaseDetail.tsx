@@ -73,6 +73,23 @@ const emptyQuote = {
   priceBreaks: [],
 };
 const offerKey = (quote: any) => quote.quoteGroupId || quote.id;
+const managerStageLabel = (stage: string) => {
+  const labels: Record<string, string> = {
+    draft: "Request not sent",
+    sourcing: "Being sourced",
+    changes_requested: "Offer changes in progress",
+    quoted: "Offers ready",
+    approved: "Ready to order",
+    ordered: "Order created",
+    shipping: "On the way",
+    received: "Received",
+    rejected: "Not approved",
+    cannot_source: "Could not source",
+    cancelled: "Cancelled",
+    archived: "Archived",
+  };
+  return labels[stage] || label(stage);
+};
 function SourcingStageTimeline({
   stage,
   viewer,
@@ -176,7 +193,13 @@ export default function SourcingCaseDetail({
 }) {
   const [mounted, setMounted] = useState(false);
   const [dialog, setDialog] = useState<
-    "confirm_submit_all" | "confirm_delete" | "decision" | "ship" | null
+    | "approve_order"
+    | "confirm_submit_all"
+    | "confirm_delete"
+    | "decision"
+    | "ship"
+    | "withdraw_offer"
+    | null
   >(null);
   const [decisionAction, setDecisionAction] = useState<
     "request_changes" | "reject" | null
@@ -187,6 +210,10 @@ export default function SourcingCaseDetail({
     name: string;
   } | null>(null);
   const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
+  const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null);
+  const [showWithdrawnHistory, setShowWithdrawnHistory] = useState(false);
+  const [orderQuantity, setOrderQuantity] = useState("");
+  const [isAddingOffer, setIsAddingOffer] = useState(false);
   const [quoteView, setQuoteView] = useState("compare");
   const [assigneeId, setAssigneeId] = useState("");
   const [commentBody, setCommentBody] = useState("");
@@ -297,14 +324,24 @@ export default function SourcingCaseDetail({
         quote,
         ...(activeQuoteId ? { quoteId: activeQuoteId } : {}),
       });
-      if (saved && action === "submit_quote" && !activeQuoteId)
+      if (saved) {
         form.reset(emptyQuote);
+        setActiveQuoteId(null);
+        setIsAddingOffer(false);
+      }
     })();
+  const startNewOffer = () => {
+    setActiveQuoteId(null);
+    setExpandedQuoteId(null);
+    form.reset(emptyQuote);
+    setIsAddingOffer(true);
+    setQuoteView("compare");
+  };
   const field = (
     name: keyof SourcingQuoteInput,
     title: string,
     type = "text",
-    options?: { hint?: string; required?: boolean },
+    options?: { hint?: string; required?: boolean; step?: string },
   ) => (
     <label className="grid gap-1 text-sm font-medium">
       <span className="flex items-center gap-1">
@@ -328,6 +365,7 @@ export default function SourcingCaseDetail({
       <Input
         type={type}
         required={options?.required}
+        step={options?.step}
         {...form.register(name as any)}
       />
     </label>
@@ -342,6 +380,7 @@ export default function SourcingCaseDetail({
   );
   const chooseQuote = (quote: any) => {
     setActiveQuoteId(quote.id);
+    setExpandedQuoteId(null);
     setQuoteView("compare");
   };
   const attachments = attachmentData || item.attachments || [];
@@ -361,15 +400,60 @@ export default function SourcingCaseDetail({
   );
   const canEditQuotes =
     item.capabilities.canEditQuote &&
-    (editableStages.includes(item.stage) ||
-      (item.stage === "quoted" &&
-        offers.some((quote: any) => quote.status === "draft")));
+    (editableStages.includes(item.stage) || item.stage === "quoted");
   const canEditActiveQuote =
     canEditQuotes && (!activeQuote || activeQuote.status === "draft");
   const isAdminView = basePath.startsWith("/admin");
+  const changeRequestByQuoteId = new Map<
+    string,
+    { reason: string; supplierName?: string }
+  >();
+  for (const entry of item.events || []) {
+    if (entry.type !== "changes_requested") continue;
+    const payload = entry.payload as {
+      quoteId?: unknown;
+      reason?: unknown;
+      supplierName?: unknown;
+    };
+    if (
+      typeof payload?.quoteId === "string" &&
+      typeof payload.reason === "string" &&
+      !changeRequestByQuoteId.has(payload.quoteId)
+    ) {
+      changeRequestByQuoteId.set(payload.quoteId, {
+        reason: payload.reason,
+        supplierName:
+          typeof payload.supplierName === "string"
+            ? payload.supplierName
+            : undefined,
+      });
+    }
+  }
+  const activeChangeRequest = activeQuote
+    ? activeQuote.status === "draft"
+      ? changeRequestByQuoteId.get(activeQuote.id)
+      : undefined
+    : undefined;
+  const activeOffers = offers.filter((quote: any) =>
+    ["draft", "submitted"].includes(quote.status),
+  );
+  const historicalOffers = offers.filter((quote: any) =>
+    ["withdrawn", "not_selected", "discarded"].includes(quote.status),
+  );
+  const comparableOffers = isAdminView
+    ? offers.filter(
+        (quote: any) =>
+          quote.status === "submitted" ||
+          item.selectedQuoteId === quote.id ||
+          (quote.status === "draft" && changeRequestByQuoteId.has(quote.id)),
+      )
+    : activeOffers;
   const purchaseOrderId = item.orders?.find(
     (order: any) => order.purchaseOrder,
   )?.purchaseOrder?.id;
+  const purchaseOrders = (item.orders || []).filter(
+    (order: any) => order.purchaseOrder,
+  );
   const mentionCandidates =
     mentionSearch === null
       ? []
@@ -434,9 +518,45 @@ export default function SourcingCaseDetail({
           variant={getSourcingStageBadgeVariant(item.stage)}
           className="capitalize"
         >
-          {label(item.stage)}
+          {isAdminView ? managerStageLabel(item.stage) : label(item.stage)}
         </Badge>
       </div>
+      {isAdminView && item.stage !== "draft" && (
+        <Card className={item.stage === "quoted" || item.stage === "approved" ? "border-sky-300 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20" : ""}>
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">
+                {item.stage === "quoted" || item.stage === "approved" ? "Your next step" : "Current progress"}
+              </p>
+              <p className="mt-1 text-lg font-semibold">
+                {item.stage === "quoted"
+                  ? "Choose a supplier"
+                  : item.stage === "approved"
+                    ? "Create the purchase order"
+                    : managerStageLabel(item.stage)}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {getSourcingStatusMessage(item.stage, "admin", item.assignee?.name || item.assignee?.email)}
+              </p>
+            </div>
+            {item.stage === "quoted" && (
+              <Button className="min-h-11" asChild>
+                <a href="#supplier-offers">Review supplier offers</a>
+              </Button>
+            )}
+            {item.stage === "approved" && item.capabilities.canOrder && (
+              <Button
+                type="button"
+                className="min-h-11 bg-emerald-600 text-white hover:bg-emerald-700"
+                isLoading={command.isPending}
+                onClick={() => run("confirm_order")}
+              >
+                Create purchase order
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
       {!(item.stage === "draft" && item.capabilities.canAssign) && (
         <Card>
           <CardHeader>
@@ -757,26 +877,6 @@ export default function SourcingCaseDetail({
           </CardContent>
         </Card>
       )}
-      {item.capabilities.canOrder && item.stage === "approved" && (
-        <Card className="border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div>
-              <p className="font-medium">Approved - ready to order</p>
-              <p className="text-sm text-muted-foreground">
-                Create a purchase order from the approved supplier offer.
-              </p>
-            </div>
-            <Button
-              type="button"
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-              isLoading={command.isPending}
-              onClick={() => run("confirm_order")}
-            >
-              Confirm order
-            </Button>
-          </CardContent>
-        </Card>
-      )}
       {item.stage === "ordered" && !isAdminView && (
         <Card className="border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20">
           <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -807,24 +907,32 @@ export default function SourcingCaseDetail({
         assigneeName={item.assignee?.name || item.assignee?.email}
       />
       {item.stage !== "draft" && (
-        <Tabs defaultValue="quotes" className="space-y-4">
-          <TabsList className="grid h-auto w-full grid-cols-2">
+        <Tabs
+          key={`${item.id}-${item.stage}`}
+          id="supplier-offers"
+          defaultValue={
+            purchaseOrders.length > 0 &&
+            ["ordered", "shipping", "received"].includes(item.stage)
+              ? "purchase-orders"
+              : "quotes"
+          }
+          className="scroll-mt-4 space-y-4"
+        >
+          <TabsList className={`grid h-auto w-full ${purchaseOrders.length ? "grid-cols-2" : "grid-cols-1"}`}>
             <TabsTrigger value="quotes" className="gap-2 py-2">
-              Quotes / offers
+              Supplier offers
               <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
-                {offers.length}
+                {comparableOffers.length}
               </span>
             </TabsTrigger>
-            <TabsTrigger value="purchase-orders" className="gap-2 py-2">
-              Purchase orders
-              <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
-                {
-                  (item.orders || []).filter(
-                    (order: any) => order.purchaseOrder,
-                  ).length
-                }
-              </span>
-            </TabsTrigger>
+            {purchaseOrders.length > 0 && (
+              <TabsTrigger value="purchase-orders" className="gap-2 py-2">
+                Purchase orders
+                <span className="rounded-full bg-muted px-1.5 text-xs text-muted-foreground">
+                  {purchaseOrders.length}
+                </span>
+              </TabsTrigger>
+            )}
           </TabsList>
           <TabsContent value="quotes" className="space-y-6">
             <Tabs
@@ -834,138 +942,18 @@ export default function SourcingCaseDetail({
             >
               {basePath.startsWith("/admin") && (
                 <TabsList className="grid h-auto w-full grid-cols-2">
-                  <TabsTrigger value="compare">View offers</TabsTrigger>
-                  <TabsTrigger value="what-if">What-if calculation</TabsTrigger>
+                  <TabsTrigger value="compare">Compare offers</TabsTrigger>
+                  <TabsTrigger value="what-if">Cost calculator</TabsTrigger>
                 </TabsList>
               )}
-              <TabsContent value="compare" className="space-y-4">
-                {offers.length > 0 ? (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Supplier offer comparison</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid gap-3 md:grid-cols-2">
-                      {offers.map((quote: any) => {
-                        const status =
-                          item.selectedQuoteId === quote.id
-                            ? "approved"
-                            : quote.status;
-                        return (
-                          <div
-                            key={offerKey(quote)}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => chooseQuote(quote)}
-                            onKeyDown={(e) =>
-                              e.key === "Enter" && chooseQuote(quote)
-                            }
-                            className={`cursor-pointer rounded-lg border p-4 text-left text-sm ${activeQuoteId === quote.id ? "border-sky-500 ring-1 ring-sky-500" : "hover:bg-muted/50"}`}
-                          >
-                            <div className="flex justify-between gap-2">
-                              <b>{quote.supplierName}</b>
-                              <span className="flex items-center gap-2">
-                                <Badge
-                                  variant={
-                                    status === "approved"
-                                      ? "success"
-                                      : status === "submitted"
-                                        ? "info"
-                                        : "secondary"
-                                  }
-                                  className="capitalize"
-                                >
-                                  {label(status)}
-                                </Badge>
-                                {quote.status === "draft" &&
-                                  item.capabilities.canEditQuote && (
-                                    <button
-                                      type="button"
-                                      className="relative z-10 text-muted-foreground hover:text-destructive"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setDeleteTarget({
-                                          id: quote.id,
-                                          name: quote.supplierName,
-                                        });
-                                        setDialog("confirm_delete");
-                                      }}
-                                      aria-label={`Delete ${quote.supplierName} draft`}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  )}
-                              </span>
-                            </div>
-                            <p className="mt-2">
-                              {quote.unitPriceRmb == null
-                                ? "No price"
-                                : formatMoney(quote.unitPriceRmb, "CNY")}{" "}
-                              / unit
-                            </p>
-                            {typeof quote.landedCostSnapshot?.landed ===
-                              "number" && (
-                              <p>
-                                Landed:{" "}
-                                {formatMoney(
-                                  quote.landedCostSnapshot.landed,
-                                  "MYR",
-                                )}{" "}
-                                / piece
-                              </p>
-                            )}
-                            <p>
-                              MOQ: {quote.moq ?? "-"} | Lead time:{" "}
-                              {quote.leadTimeDays ?? "-"} days
-                            </p>
-                            <p>
-                              Payment: {quote.paymentTerms || "-"} | Risk:{" "}
-                              {quote.riskLevel || "-"}
-                            </p>
-                            {Array.isArray(quote.certifications) &&
-                              quote.certifications.length > 0 && (
-                                <p>
-                                  Compliance: {quote.certifications.join(", ")}
-                                </p>
-                              )}
-                            {Array.isArray(quote.priceBreaks) &&
-                              quote.priceBreaks.length > 0 && (
-                                <p>
-                                  Price breaks:{" "}
-                                  {quote.priceBreaks
-                                    .map(
-                                      (breakpoint: any) =>
-                                        `${breakpoint.minQuantity}+: ${formatMoney(breakpoint.unitPriceRmb, "CNY")}`,
-                                    )
-                                    .join(" | ")}
-                                </p>
-                              )}
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Revision {quote.revision}
-                              {item.selectedQuoteId === quote.id
-                                ? " | Approved selection"
-                                : ""}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card>
-                    <CardContent className="p-6 text-sm text-muted-foreground">
-                      No quotes or offers yet.
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
               <TabsContent value="what-if" className="space-y-4">
-                {offers.length > 0 && (
+                {comparableOffers.length > 0 && (
                   <Card>
                     <CardHeader>
                       <CardTitle>Supplier offer comparison</CardTitle>
                     </CardHeader>
                     <CardContent className="grid gap-3 md:grid-cols-2">
-                      {offers.map((quote: any) => {
+                      {comparableOffers.map((quote: any) => {
                         const status =
                           item.selectedQuoteId === quote.id
                             ? "approved"
@@ -1049,7 +1037,7 @@ export default function SourcingCaseDetail({
                 {!activeQuote && (
                   <Card>
                     <CardContent className="p-6 text-sm text-muted-foreground">
-                      {offers.length > 0
+                      {comparableOffers.length > 0
                         ? "Select an offer to model pricing scenarios."
                         : "No quotes or offers yet."}
                     </CardContent>
@@ -1057,17 +1045,339 @@ export default function SourcingCaseDetail({
                 )}
               </TabsContent>
               <TabsContent value="compare" className="space-y-4">
+                {comparableOffers.length > 0 ? (
+                  <Card>
+                    <CardHeader>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <CardTitle>
+                          {isAdminView ? "Choose a supplier" : "Supplier offers"}
+                        </CardTitle>
+                        {!isAdminView && canEditQuotes && (
+                          <Button
+                            type="button"
+                            className="min-h-11"
+                            onClick={startNewOffer}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add another supplier
+                          </Button>
+                        )}
+                      </div>
+                      {isAdminView && (
+                        <p className="text-sm text-muted-foreground">
+                          Compare the final cost, minimum order, and delivery time. Choose one offer to continue.
+                        </p>
+                      )}
+                    </CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-2">
+                      {comparableOffers.map((quote: any) => {
+                        const isActive = activeQuoteId === quote.id;
+                        const isExpanded = expandedQuoteId === quote.id;
+                        const finalUnitCost = quote.landedCostSnapshot?.landed;
+                        const quantity = item.requestedQuantity ?? quote.moq ?? 1;
+                        const quoteAttachments = attachments.filter(
+                          (attachment: any) => attachment.quoteId === quote.id,
+                        );
+                        const certifications = Array.isArray(quote.certifications)
+                          ? quote.certifications
+                          : [];
+                        const priceBreaks = Array.isArray(quote.priceBreaks)
+                          ? quote.priceBreaks
+                          : [];
+                        const hasAdditionalDetails = Boolean(
+                          quote.paymentTerms ||
+                            quote.riskLevel ||
+                            quote.notes ||
+                            quote.recommendation ||
+                            quote.complianceNotes ||
+                            certifications.length ||
+                            priceBreaks.length ||
+                            quote.cartonLengthCm ||
+                            quote.cartonWidthCm ||
+                            quote.cartonHeightCm ||
+                            quote.cartonWeightKg ||
+                            quoteAttachments.length,
+                        );
+                        const status = item.selectedQuoteId === quote.id
+                          ? "approved"
+                          : quote.status;
+                        const changeRequest =
+                          quote.status === "draft"
+                            ? changeRequestByQuoteId.get(quote.id)
+                            : undefined;
+                        const displayStatus = changeRequest
+                          ? "changes_requested"
+                          : status;
+                        const canWithdrawOffer =
+                          !isAdminView &&
+                          item.stage === "quoted" &&
+                          canEditQuotes &&
+                          quote.status === "submitted";
+                        const showOfferActions =
+                          (isAdminView && quote.status === "submitted") ||
+                          quote.status === "draft" ||
+                          canWithdrawOffer;
+                        return (
+                          <article
+                            key={offerKey(quote)}
+                            className={`rounded-xl border p-5 ${isActive ? "border-sky-500 ring-2 ring-sky-500/20" : ""}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <h3 className="text-lg font-semibold">{quote.supplierName}</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  Supplier price: {quote.unitPriceRmb == null ? "Not provided" : `${formatMoney(quote.unitPriceRmb, "CNY")} per unit`}
+                                </p>
+                              </div>
+                              <Badge
+                                variant={displayStatus === "approved" ? "success" : displayStatus === "submitted" ? "info" : displayStatus === "changes_requested" ? "warning" : "secondary"}
+                                className="capitalize"
+                              >
+                                {displayStatus === "submitted"
+                                  ? "Ready to review"
+                                  : displayStatus === "changes_requested"
+                                    ? "Changes requested"
+                                    : label(displayStatus)}
+                              </Badge>
+                            </div>
+                            {changeRequest && (
+                              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/20">
+                                <p className="font-medium text-amber-900 dark:text-amber-200">
+                                  {isAdminView
+                                    ? "Waiting for the sourcer to revise this offer"
+                                    : "Manager requested changes"}
+                                </p>
+                                <p className="mt-1 text-amber-800 dark:text-amber-300">
+                                  {changeRequest.reason}
+                                </p>
+                              </div>
+                            )}
+                            {isAdminView ? (
+                              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                                <div className="rounded-lg bg-muted/50 p-3">
+                                  <dt className="text-muted-foreground">Final cost per unit</dt>
+                                  <dd className="mt-1 text-lg font-semibold">
+                                    {typeof finalUnitCost === "number" ? formatMoney(finalUnitCost, "MYR") : "Not available"}
+                                  </dd>
+                                </div>
+                                <div className="rounded-lg bg-muted/50 p-3">
+                                  <dt className="text-muted-foreground">Estimated total</dt>
+                                  <dd className="mt-1 text-lg font-semibold">
+                                    {typeof finalUnitCost === "number" ? formatMoney(finalUnitCost * quantity, "MYR") : "Not available"}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt className="text-muted-foreground">Minimum order</dt>
+                                  <dd className="font-medium">{quote.moq ? `${quote.moq} units` : "Not specified"}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-muted-foreground">Estimated delivery</dt>
+                                  <dd className="font-medium">{quote.leadTimeDays == null ? "Not specified" : `About ${quote.leadTimeDays} days`}</dd>
+                                </div>
+                              </dl>
+                            ) : (
+                              <div className="mt-4 space-y-3 text-sm">
+                                <div className="rounded-lg bg-muted/50 p-3">
+                                  <p className="text-muted-foreground">Supplier quote</p>
+                                  <p className="mt-1 text-lg font-semibold">
+                                    {quote.unitPriceRmb == null ? "Not provided" : `${formatMoney(quote.unitPriceRmb, "CNY")} per unit`}
+                                  </p>
+                                </div>
+                                {(quote.moq || quote.leadTimeDays != null) && (
+                                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
+                                    {quote.moq && <span>Minimum order: {quote.moq} units</span>}
+                                    {quote.leadTimeDays != null && <span>Delivery: about {quote.leadTimeDays} days</span>}
+                                  </div>
+                                )}
+                                {typeof finalUnitCost === "number" && (
+                                  <p className="text-xs text-muted-foreground">
+                                    System estimate: approximately {formatMoney(finalUnitCost, "MYR")} landed per unit
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            {hasAdditionalDetails && (isAdminView || quote.status === "submitted") && (
+                              <button
+                                type="button"
+                                className="mt-4 text-sm font-medium text-sky-700 hover:underline dark:text-sky-300"
+                                aria-expanded={isExpanded}
+                                aria-controls={`offer-details-${quote.id}`}
+                                onClick={() =>
+                                  setExpandedQuoteId((current) =>
+                                    current === quote.id ? null : quote.id,
+                                  )
+                                }
+                              >
+                                {isExpanded ? "Hide details" : "View details"}
+                              </button>
+                            )}
+                            {isExpanded && (
+                              <div
+                                id={`offer-details-${quote.id}`}
+                                className="mt-4 grid gap-3 border-t pt-4 text-sm sm:grid-cols-2"
+                              >
+                                {quote.paymentTerms && <p><b>Payment terms:</b> {quote.paymentTerms}</p>}
+                                {quote.riskLevel && <p><b>Risk:</b> {quote.riskLevel}</p>}
+                                {quote.notes && <p className="sm:col-span-2"><b>Supplier notes:</b> {quote.notes}</p>}
+                                {quote.recommendation && <p className="sm:col-span-2"><b>Recommendation:</b> {quote.recommendation}</p>}
+                                {quote.complianceNotes && <p className="sm:col-span-2"><b>Compliance:</b> {quote.complianceNotes}</p>}
+                                {certifications.length > 0 && <p className="sm:col-span-2"><b>Certifications:</b> {certifications.join(", ")}</p>}
+                                {priceBreaks.length > 0 && (
+                                  <p className="sm:col-span-2"><b>Price breaks:</b> {priceBreaks.map((breakpoint: any) => `${breakpoint.minQuantity}+: ${formatMoney(breakpoint.unitPriceRmb, "CNY")}`).join(" | ")}</p>
+                                )}
+                                {(quote.cartonLengthCm || quote.cartonWidthCm || quote.cartonHeightCm || quote.cartonWeightKg) && (
+                                  <p className="sm:col-span-2"><b>Carton details:</b> {[quote.cartonLengthCm, quote.cartonWidthCm, quote.cartonHeightCm].filter((value) => value != null).join(" × ")}{(quote.cartonLengthCm || quote.cartonWidthCm || quote.cartonHeightCm) && " cm"}{quote.cartonWeightKg && ` · ${quote.cartonWeightKg} kg`}</p>
+                                )}
+                                {quoteAttachments.length > 0 && (
+                                  <div className="sm:col-span-2">
+                                    <p className="font-semibold">Files</p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {quoteAttachments.map((attachment: any) => (
+                                        <Button key={attachment.id} type="button" size="sm" variant="outline" asChild>
+                                          <a href={attachment.url} target="_blank" rel="noopener noreferrer">
+                                            <FileText className="h-4 w-4" />
+                                            {attachment.fileName}
+                                          </a>
+                                        </Button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {showOfferActions && (
+                              <div className="mt-4 flex items-center justify-between gap-2">
+                              {isAdminView ? (
+                                <Button
+                                  type="button"
+                                  variant={isActive ? "default" : "outline"}
+                                  className={`min-h-11 flex-1 ${isActive ? "bg-sky-600 text-white hover:bg-sky-700" : ""}`}
+                                  onClick={() => chooseQuote(quote)}
+                                >
+                                  {isActive ? "Selected for order" : "Choose this supplier"}
+                                </Button>
+                              ) : quote.status === "draft" ? (
+                                <Button type="button" variant="outline" className="min-h-11 flex-1" onClick={() => {
+                                  setActiveQuoteId(quote.id);
+                                  setIsAddingOffer(true);
+                                }}>
+                                  {changeRequest ? "Update offer" : "Edit offer"}
+                                </Button>
+                              ) : null}
+                              {canWithdrawOffer && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="min-h-11 text-destructive hover:text-destructive"
+                                  onClick={() => {
+                                    setDeleteTarget({ id: quote.id, name: quote.supplierName });
+                                    setDialog("withdraw_offer");
+                                  }}
+                                >
+                                  Withdraw
+                                </Button>
+                              )}
+                              {quote.status === "draft" && item.capabilities.canEditQuote && (
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={() => {
+                                    setDeleteTarget({ id: quote.id, name: quote.supplierName });
+                                    setDialog("confirm_delete");
+                                  }}
+                                  aria-label={`Delete ${quote.supplierName} draft`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </CardContent>
+                    {historicalOffers.length > 0 && (
+                      <div className="border-t px-6 py-4">
+                        <button
+                          type="button"
+                          className="text-sm font-medium text-muted-foreground hover:text-foreground hover:underline"
+                          aria-expanded={showWithdrawnHistory}
+                          aria-controls="withdrawn-offer-history"
+                          onClick={() => setShowWithdrawnHistory((open) => !open)}
+                        >
+                          {historicalOffers.length} other {historicalOffers.length === 1 ? "offer" : "offers"}
+                          {showWithdrawnHistory ? " · Hide history" : " · View history"}
+                        </button>
+                        {showWithdrawnHistory && (
+                          <div id="withdrawn-offer-history" className="mt-3 space-y-2">
+                            {historicalOffers.map((quote: any) => (
+                              <div key={offerKey(quote)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                                <span className="font-medium text-foreground">{quote.supplierName}</span>
+                                <span>{quote.unitPriceRmb == null ? "Price not provided" : `${formatMoney(quote.unitPriceRmb, "CNY")} per unit`}</span>
+                                <Badge variant="secondary">{label(quote.status)}</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="space-y-4 p-6 text-center">
+                      <div>
+                        <p className="font-medium">No supplier offers yet</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Add the first supplier quote so the manager can review it.
+                        </p>
+                      </div>
+                      {!isAdminView && canEditQuotes && (
+                        <Button type="button" className="min-h-11" onClick={startNewOffer}>
+                          <Plus className="h-4 w-4" />
+                          Add first supplier offer
+                        </Button>
+                      )}
+                      {historicalOffers.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            className="font-medium text-sky-700 hover:underline dark:text-sky-300"
+                            aria-expanded={showWithdrawnHistory}
+                            aria-controls="withdrawn-offer-history"
+                            onClick={() => setShowWithdrawnHistory((open) => !open)}
+                          >
+                            {historicalOffers.length} other {historicalOffers.length === 1 ? "offer" : "offers"}
+                            {showWithdrawnHistory ? " · Hide history" : " · View history"}
+                          </button>
+                          {showWithdrawnHistory && (
+                            <div id="withdrawn-offer-history" className="space-y-2">
+                              {historicalOffers.map((quote: any) => (
+                                <div key={offerKey(quote)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+                                  <span className="font-medium text-foreground">{quote.supplierName}</span>
+                                  <span>{quote.unitPriceRmb == null ? "Price not provided" : `${formatMoney(quote.unitPriceRmb, "CNY")} per unit`}</span>
+                                  <Badge variant="secondary">{label(quote.status)}</Badge>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
                 {selectedSubmitted &&
                   item.capabilities.canDecide &&
-                  item.stage === "quoted" && (
+                  ["quoted", "changes_requested"].includes(item.stage) && (
                     <Card className="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
                       <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
                         <div>
                           <p className="font-medium">
-                            Review {selectedSubmitted.supplierName}&apos;s offer
+                            Ready to order from {selectedSubmitted.supplierName}
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            Approve it, send it back for changes, or reject it.
+                            Approving creates the purchase order and notifies the sourcer to arrange shipment.
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -1075,11 +1385,19 @@ export default function SourcingCaseDetail({
                             type="button"
                             className="bg-emerald-600 text-white hover:bg-emerald-700"
                             isLoading={command.isPending}
-                            onClick={() =>
-                              run("approve", { quoteId: selectedSubmitted.id })
-                            }
+                            onClick={() => {
+                              setOrderQuantity(
+                                String(
+                                  Math.max(
+                                    item.requestedQuantity ?? 1,
+                                    selectedSubmitted.moq ?? 1,
+                                  ),
+                                ),
+                              );
+                              setDialog("approve_order");
+                            }}
                           >
-                            Approve offer
+                            Approve and create order
                           </Button>
                           <Button
                             type="button"
@@ -1109,25 +1427,29 @@ export default function SourcingCaseDetail({
                       </CardContent>
                     </Card>
                   )}
-                {(activeQuote || canEditActiveQuote) && (
+                {!isAdminView &&
+                  canEditActiveQuote &&
+                  (isAddingOffer || activeQuote?.status === "draft") && (
                   <Card>
                     <CardHeader>
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <CardTitle>
                           {activeQuote
-                            ? `${canEditActiveQuote ? "Edit" : "View"} ${activeQuote.supplierName} offer`
-                            : "New supplier offer"}
+                            ? activeChangeRequest
+                              ? `Update ${activeQuote.supplierName} offer`
+                              : `Continue ${activeQuote.supplierName} draft`
+                            : "Add supplier offer"}
                         </CardTitle>
-                        {canEditQuotes && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setActiveQuoteId(null)}
-                          >
-                            <Plus className="h-4 w-4" />
-                            New offer
-                          </Button>
-                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setActiveQuoteId(null);
+                            setIsAddingOffer(false);
+                          }}
+                        >
+                          Cancel
+                        </Button>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -1139,15 +1461,15 @@ export default function SourcingCaseDetail({
                           saveQuote("submit_quote");
                         }}
                       >
-                        {!canEditActiveQuote && (
-                          <p className="rounded-md border border-blue-200 bg-blue-50/50 p-3 text-sm text-blue-700 sm:col-span-2 dark:border-blue-900 dark:bg-blue-950/20 dark:text-blue-300">
-                            This{" "}
-                            {item.selectedQuoteId === activeQuote.id
-                              ? "approved"
-                              : "submitted"}{" "}
-                            offer is locked. Create a new offer to submit a
-                            revision.
-                          </p>
+                        {activeChangeRequest && (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 text-sm sm:col-span-2 dark:border-amber-900 dark:bg-amber-950/20">
+                            <p className="font-medium text-amber-900 dark:text-amber-200">
+                              Manager requested changes
+                            </p>
+                            <p className="mt-1 text-amber-800 dark:text-amber-300">
+                              {activeChangeRequest.reason}
+                            </p>
+                          </div>
                         )}
                         <fieldset
                           disabled={!canEditActiveQuote}
@@ -1199,6 +1521,7 @@ export default function SourcingCaseDetail({
                             {
                               required: true,
                               hint: "Price for one bag, pack, carton, or other unit quoted by the supplier.",
+                              step: "0.01",
                             },
                           )}
                           {field("moq", "MOQ (optional)", "number")}
@@ -1224,11 +1547,12 @@ export default function SourcingCaseDetail({
                                   hint: "Leave as 1 unless the supplier sells packs or bundles.",
                                 },
                               )}
-                              {field(
-                                "overrideCostMyr",
-                                "RM override / selling unit",
-                                "number",
-                              )}
+                               {field(
+                                 "overrideCostMyr",
+                                 "RM override / selling unit",
+                                 "number",
+                                 { step: "0.01" },
+                               )}
                               {field(
                                 "cartonLengthCm",
                                 "Carton length (cm)",
@@ -1375,7 +1699,7 @@ export default function SourcingCaseDetail({
                             >
                               Save draft
                             </Button>
-                            <Button type="submit" isLoading={command.isPending}>
+                            <Button type="submit" className="bg-sky-600 text-white hover:bg-sky-700" isLoading={command.isPending}>
                               Submit offer
                             </Button>
                             {offers.filter((q: any) => q.status === "draft")
@@ -1395,22 +1719,18 @@ export default function SourcingCaseDetail({
                     </CardContent>
                   </Card>
                 )}
-                {!activeQuote && offers.length > 0 && (
-                  <Card>
-                    <CardContent className="p-6 text-sm text-muted-foreground">
-                      Select an offer to view its details.
-                    </CardContent>
-                  </Card>
-                )}
               </TabsContent>
             </Tabs>
           </TabsContent>
-          <TabsContent value="purchase-orders">
-            <SourcingPurchaseOrderPanel
-              orders={item.orders || []}
-              basePath={basePath}
-            />
-          </TabsContent>
+          {purchaseOrders.length > 0 && (
+            <TabsContent value="purchase-orders">
+              <SourcingPurchaseOrderPanel
+                orders={item.orders || []}
+                basePath={basePath}
+                readOnly={isAdminView}
+              />
+            </TabsContent>
+          )}
         </Tabs>
       )}
       {item.stage !== "draft" && (
@@ -1528,6 +1848,88 @@ export default function SourcingCaseDetail({
           </CardContent>
         </Card>
       )}
+      <Dialog
+        open={dialog === "approve_order"}
+        onOpenChange={(open) => !open && setDialog(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve and create this order?</DialogTitle>
+          </DialogHeader>
+          {selectedSubmitted && (
+            <div className="space-y-3 rounded-lg border bg-muted/30 p-4 text-sm">
+              <p className="text-lg font-semibold">{selectedSubmitted.supplierName}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="grid gap-1">
+                  <span className="text-muted-foreground">Order quantity</span>
+                  <Input
+                    aria-label="Order quantity"
+                    type="number"
+                    min={selectedSubmitted.moq ?? 1}
+                    step="1"
+                    value={orderQuantity}
+                    onChange={(event) => setOrderQuantity(event.target.value)}
+                  />
+                  {selectedSubmitted.moq && (
+                    <span className="text-xs text-muted-foreground">
+                      Supplier minimum: {selectedSubmitted.moq} units
+                    </span>
+                  )}
+                </label>
+                <p>
+                  <span className="block text-muted-foreground">Estimated delivery</span>
+                  <b>{selectedSubmitted.leadTimeDays == null ? "Not specified" : `About ${selectedSubmitted.leadTimeDays} days`}</b>
+                </p>
+                <p>
+                  <span className="block text-muted-foreground">Supplier price</span>
+                  <b>
+                    {selectedSubmitted.unitPriceRmb == null
+                      ? "Not available"
+                      : `${formatMoney(selectedSubmitted.unitPriceRmb, "CNY")} per unit`}
+                  </b>
+                </p>
+                <p>
+                  <span className="block text-muted-foreground">Estimated final total</span>
+                  <b>
+                    {typeof selectedSubmitted.landedCostSnapshot?.landed === "number"
+                      ? formatMoney(
+                          selectedSubmitted.landedCostSnapshot.landed *
+                            (Number(orderQuantity) || 0),
+                          "MYR",
+                        )
+                      : "Not available"}
+                  </b>
+                </p>
+              </div>
+            </div>
+          )}
+          <p className="text-sm text-muted-foreground">
+            This creates the purchase order immediately and asks the sourcer to arrange shipment.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)} disabled={command.isPending}>
+              Go back
+            </Button>
+            <Button
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
+              disabled={
+                !Number.isInteger(Number(orderQuantity)) ||
+                Number(orderQuantity) < (selectedSubmitted?.moq ?? 1)
+              }
+              isLoading={command.isPending}
+              onClick={() => {
+                if (!selectedSubmitted) return;
+                run("approve_and_create_order", {
+                  quoteId: selectedSubmitted.id,
+                  orderQuantity: Number(orderQuantity),
+                });
+              }}
+            >
+              Approve and create order
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={dialog === "ship"}
         onOpenChange={(open) => !open && setDialog(null)}
@@ -1678,6 +2080,33 @@ export default function SourcingCaseDetail({
               }}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={dialog === "withdraw_offer"}
+        onOpenChange={(open) => !open && setDialog(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Withdraw this supplier offer?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {deleteTarget?.name || "This supplier"} will no longer appear in the manager&apos;s active comparison. The offer remains in history for the team.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)} disabled={command.isPending}>
+              Keep offer
+            </Button>
+            <Button
+              variant="destructive"
+              isLoading={command.isPending}
+              onClick={() => {
+                if (deleteTarget) run("withdraw_quote", { quoteId: deleteTarget.id });
+              }}
+            >
+              Withdraw offer
             </Button>
           </DialogFooter>
         </DialogContent>

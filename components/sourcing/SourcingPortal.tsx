@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Ban, Plus, Search, Trash2 } from "lucide-react";
+import { Ban, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -31,6 +31,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useIsRestoring } from "@tanstack/react-query";
 import {
   useDeleteSourcingCase,
@@ -69,6 +75,14 @@ const GROUP_META: Record<
     inactiveFilter:
       "border-orange-300 bg-transparent text-orange-600 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400 dark:hover:bg-orange-950",
   },
+  changes_requested: {
+    label: "Changes requested",
+    badge: "warning",
+    accent: "border-l-amber-500",
+    activeFilter: "border-amber-500 bg-amber-500 text-white",
+    inactiveFilter:
+      "border-amber-300 bg-transparent text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-950",
+  },
   waiting: {
     label: "Waiting",
     badge: "info",
@@ -87,11 +101,11 @@ const GROUP_META: Record<
   },
   shipped: {
     label: "Shipped",
-    badge: "success",
-    accent: "border-l-emerald-500",
-    activeFilter: "border-emerald-500 bg-emerald-500 text-white",
+    badge: "info",
+    accent: "border-l-blue-500",
+    activeFilter: "border-blue-500 bg-blue-500 text-white",
     inactiveFilter:
-      "border-emerald-300 bg-transparent text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950",
+      "border-blue-300 bg-transparent text-blue-600 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950",
   },
   completed: {
     label: "Completed",
@@ -109,6 +123,22 @@ const GROUP_META: Record<
     inactiveFilter:
       "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-950",
   },
+};
+
+const ADMIN_GROUP_LABELS: Partial<Record<SourcingPresentationGroup, string>> = {
+  needs_action: "Needs your attention",
+  changes_requested: "Changes requested",
+  waiting: "Being sourced",
+  shipped: "Order in progress",
+  completed: "Completed",
+  closed: "Closed",
+};
+
+const adminActionLabel = (stage: string) => {
+  if (stage === "draft") return "Finish request";
+  if (stage === "quoted") return "Review offers";
+  if (stage === "approved") return "Review order";
+  return "View progress";
 };
 
 export default function SourcingPortal({
@@ -149,7 +179,7 @@ export default function SourcingPortal({
   const isAdminView = basePath.startsWith("/admin");
   const viewer: SourcingViewer = isAdminView ? "admin" : "sourcer";
   const filterGroups: SourcingPresentationGroup[] = isAdminView
-    ? ["needs_action", "waiting", "completed", "closed"]
+    ? ["needs_action", "changes_requested", "waiting", "shipped", "completed", "closed"]
     : ["needs_action", "waiting", "to_ship", "shipped", "completed"];
   const groupOf = (stage: string) => getSourcingGroup(stage, viewer);
 
@@ -194,8 +224,7 @@ export default function SourcingPortal({
         <div>
           <h1 className="text-2xl font-bold">Sourcing</h1>
           <p className="text-muted-foreground">
-            Source products, compare supplier quotes, and hand off approved
-            orders.
+            Request products, review supplier offers, and follow each order.
           </p>
         </div>
         <div className="flex gap-2">
@@ -213,7 +242,7 @@ export default function SourcingPortal({
                     : `${basePath}/new`
                 }
               >
-                <Plus /> New case
+                <Plus /> Request a product
               </Link>
             </Button>
           )}
@@ -249,19 +278,6 @@ export default function SourcingPortal({
                 placeholder="Search cases"
               />
             </div>
-            {canAssign && (
-              <div className="flex gap-1">
-                <SourcingSlaSettings
-                  key={activeWorkspace}
-                  workspaceId={activeWorkspace}
-                  members={[]}
-                />
-                <SourcingCostSettings
-                  key={`cost-${activeWorkspace}`}
-                  workspaceId={activeWorkspace}
-                />
-              </div>
-            )}
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -284,7 +300,11 @@ export default function SourcingPortal({
                         : "border-transparent bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}
                 >
-                  {key === "all" ? "All" : meta!.label}
+                  {key === "all"
+                    ? "All requests"
+                    : isAdminView
+                      ? ADMIN_GROUP_LABELS[key] || meta!.label
+                      : meta!.label}
                   <span
                     className={`rounded-full px-1.5 text-xs ${isActive ? "bg-background/50" : "bg-muted-foreground/15"}`}
                   >
@@ -340,7 +360,6 @@ export default function SourcingPortal({
                   isAdminView &&
                   ["draft", "cancelled"].includes(item.stage) &&
                   !item.orders?.length;
-                const canOrder = isAdminView && item.stage === "approved";
                 const purchaseOrderId = item.orders?.[0]?.purchaseOrderId;
                 const canShip = !isAdminView && item.stage === "ordered" && !!purchaseOrderId;
                 const statusMessage = getSourcingStatusMessage(
@@ -351,13 +370,9 @@ export default function SourcingPortal({
                 return (
                   <div
                     key={item.id}
-                    className={`relative rounded-lg border border-l-4 ${meta.accent} bg-card p-4 transition-colors hover:bg-muted/50`}
+                    className={`rounded-lg border border-l-4 ${meta.accent} bg-card p-4`}
                   >
-                    <Link
-                      href={`${basePath}/${item.id}`}
-                      className={`block ${canOrder || canShip || canCancel || canDelete ? "pr-28 sm:pr-36" : ""}`}
-                    >
-                      <div className="flex items-start gap-3">
+                    <div className="flex items-start gap-3">
                         {item.thumbnail && (
                           <>
                             {/* The file endpoint requires the browser session cookie. */}
@@ -372,7 +387,12 @@ export default function SourcingPortal({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-semibold truncate">
-                              {item.title}
+                              <Link
+                                href={`${basePath}/${item.id}`}
+                                className="hover:text-sky-600 hover:underline"
+                              >
+                                {item.title}
+                              </Link>
                             </h3>
                             <Badge variant={getSourcingStageBadgeVariant(item.stage)} className="shrink-0">
                               {stageLabel(item.stage)}
@@ -391,8 +411,8 @@ export default function SourcingPortal({
                               : new Date(item.createdAt).toLocaleDateString()}
                           </p>
                         </div>
-                      </div>
-                      {(statusMessage || item.nextAction || isDue) && (
+                    </div>
+                    {(statusMessage || item.nextAction || isDue) && (
                         <p
                           className={`mt-2 text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}
                         >
@@ -412,25 +432,14 @@ export default function SourcingPortal({
                             </span>
                           )}
                         </p>
-                      )}
-                    </Link>
-                    {(canOrder || canShip || canCancel || canDelete) && (
-                      <div className="absolute right-3 top-3 flex gap-1">
-                        {canOrder && (
-                          <Button
-                            size="sm"
-                            className="bg-emerald-600 text-white hover:bg-emerald-700"
-                            onClick={() =>
-                              command.mutate({
-                                id: item.id,
-                                version: item.version,
-                                action: "confirm_order",
-                              })
-                            }
-                          >
-                            Confirm order
-                          </Button>
-                        )}
+                    )}
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                      <Button size="sm" asChild>
+                        <Link href={`${basePath}/${item.id}`}>
+                          {isAdminView ? adminActionLabel(item.stage) : "Open request"}
+                        </Link>
+                      </Button>
+                      <div className="flex items-center gap-1">
                         {canShip && (
                           <Button
                             size="sm"
@@ -444,37 +453,63 @@ export default function SourcingPortal({
                             Ship
                           </Button>
                         )}
-                        {canCancel && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              setPendingAction({ type: "cancel", item })
-                            }
-                          >
-                            <Ban className="h-3.5 w-3.5" />
-                            Cancel
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() =>
-                              setPendingAction({ type: "delete", item })
-                            }
-                            aria-label={`Delete ${item.title}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                        {(canCancel || canDelete) && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button size="sm" variant="ghost">
+                                <MoreHorizontal className="h-4 w-4" />
+                                More
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {canCancel && (
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    setPendingAction({ type: "cancel", item })
+                                  }
+                                >
+                                  <Ban className="h-4 w-4" />
+                                  Cancel request
+                                </DropdownMenuItem>
+                              )}
+                              {canDelete && (
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onSelect={() =>
+                                    setPendingAction({ type: "delete", item })
+                                  }
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete request
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 );
               })}
             </div>
+          )}
+          {canAssign && (
+            <details className="rounded-lg border bg-card px-4 py-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                Workspace settings
+              </summary>
+              <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+                <SourcingSlaSettings
+                  key={activeWorkspace}
+                  workspaceId={activeWorkspace}
+                  members={[]}
+                />
+                <SourcingCostSettings
+                  key={`cost-${activeWorkspace}`}
+                  workspaceId={activeWorkspace}
+                />
+              </div>
+            </details>
           )}
         </>
       )}

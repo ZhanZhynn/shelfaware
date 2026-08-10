@@ -12,7 +12,8 @@ export async function GET(request: NextRequest) {
     await requireWorkspaceRole(user, workspaceId, ["admin", "sourcer"]);
     const now = new Date();
     const records = await prisma.sourcingSlaRecord.findMany({ where: { workspaceId, ...(user.role === "sourcer" ? { ownerId: user.id } : {}) }, select: { rule: true, ownerId: true, startedAt: true, dueAt: true, completedAt: true, onTime: true } });
-    const completed = records.filter((record) => record.completedAt);
+    // A withdrawn offer closes its superseded approval window with no on-time result.
+    const completed = records.filter((record) => record.completedAt && record.onTime !== null);
     const openBreaches = records.filter((record) => !record.completedAt && record.dueAt < now);
     const breaches = completed.filter((record) => record.onTime === false).length + openBreaches.length;
     const onTime = completed.filter((record) => record.onTime).length;

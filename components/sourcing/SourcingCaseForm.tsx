@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { ImagePlus, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +49,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
   const workspaceId = form.watch("workspaceId");
   const canAssign = !!workspaces.find((workspace: any) => workspace.id === workspaceId)?.canAssign;
   const { data: members = [] } = useSourcingMembers(workspaceId, canAssign);
+  const sourcers = members.filter((member: any) => member.role === "sourcer");
   const create = useCreateSourcingCase();
   const uploadPhoto = useUploadSourcingAttachment();
   const createTemplate = useCreateSourcingTemplate();
@@ -56,6 +58,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
   const [photos, setPhotos] = useState<File[]>([]);
   const title = form.watch("title") || "";
   const assignedToId = form.watch("assignedToId");
+  const isAdminView = basePath.startsWith("/admin");
   const { data: duplicates = [] } = useSourcingDuplicates(workspaceId, title);
 
   useEffect(() => {
@@ -87,19 +90,19 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
       <div>
-        <p className="text-sm font-medium text-sky-600">Sourcing request</p>
-        <h1 className="mt-1 text-2xl font-bold">What do you need us to source?</h1>
-        <p className="mt-1 text-muted-foreground">Start with a name and a photo. Add only the details you know.</p>
+        <p className="text-sm font-medium text-sky-600">New request</p>
+        <h1 className="mt-1 text-2xl font-bold">Request a product</h1>
+        <p className="mt-1 text-muted-foreground">Tell the sourcing team what you need. You can add more details later.</p>
       </div>
       <form className="space-y-5" onSubmit={form.handleSubmit((values) => submit(values, !!values.assignedToId))}>
         <Card>
           <CardHeader>
-            <CardTitle>Request basics</CardTitle>
+            <CardTitle>Product details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px]">
               <label className="grid gap-1.5 text-sm font-medium">
-                <span>What should we source? <span className="text-destructive">*</span></span>
+                <span>What product do you need? <span className="text-destructive">*</span></span>
                 <Input placeholder="e.g. Linen storage basket" {...form.register("title")} autoFocus />
                 {form.formState.errors.title && <span className="text-xs text-destructive">{form.formState.errors.title.message}</span>}
               </label>
@@ -135,7 +138,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
               )}
             </div>
             <label className="grid gap-1.5 text-sm font-medium">
-              Tell us what matters most
+              What is important? <span className="font-normal text-muted-foreground">Optional</span>
               <Textarea rows={3} placeholder="Example: Must be foldable, natural colour, similar to the photo. Need it before Hari Raya." {...form.register("specifications")} />
             </label>
           </CardContent>
@@ -145,23 +148,32 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
           <Card className="border-amber-200 bg-amber-50/30 dark:border-amber-900 dark:bg-amber-950/20">
             <CardContent className="p-4 text-sm">
               <p className="font-medium">Similar requests already exist</p>
-              {duplicates.map((item: any) => <p key={item.id} className="mt-1 text-muted-foreground">{item.title} · {item.stage.replaceAll("_", " ")}</p>)}
+              <p className="mt-1 text-muted-foreground">Open an existing request or continue creating this one.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {duplicates.map((item: any) => (
+                  <Button key={item.id} type="button" size="sm" variant="outline" asChild>
+                    <Link href={`${basePath}/${item.id}`}>{item.title}</Link>
+                  </Button>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}
 
         <details className="group rounded-xl border bg-card">
           <summary className="cursor-pointer list-none px-6 py-5 font-semibold">
-            Add more details <span className="ml-1 text-sm font-normal text-muted-foreground">Optional, but useful for a better quote</span>
+            Add more details <span className="ml-1 text-sm font-normal text-muted-foreground">Optional</span>
           </summary>
           <CardContent className="grid gap-4 border-t pt-5 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-sm font-medium">
-              Workspace
-              <Select value={workspaceId} onValueChange={(value) => form.setValue("workspaceId", value)}>
-                <SelectTrigger><SelectValue placeholder="Select workspace" /></SelectTrigger>
-                <SelectContent>{workspaces.map((workspace: any) => <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </label>
+            {workspaces.length > 1 && (
+              <label className="grid gap-1.5 text-sm font-medium">
+                Workspace
+                <Select value={workspaceId} onValueChange={(value) => form.setValue("workspaceId", value)}>
+                  <SelectTrigger><SelectValue placeholder="Select workspace" /></SelectTrigger>
+                  <SelectContent>{workspaces.map((workspace: any) => <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </label>
+            )}
             {field("targetUnitPriceMyr", "Target unit cost (RM)", "Optional", "number")}
             {field("size", "Size or dimensions", "e.g. 30 x 20 cm")}
             {field("material", "Material", "e.g. linen, bamboo, PP plastic")}
@@ -183,42 +195,51 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
                 </Select>
               </label>
             )}
+            {isAdminView && (
+              <div className="grid gap-2 border-t pt-4 sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Reusable template name" />
+                <Button type="button" variant="outline" disabled={!workspaceId || !templateName.trim()} isLoading={createTemplate.isPending} onClick={async () => {
+                  const values = form.getValues();
+                  await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr } });
+                  setTemplateName("");
+                }}>Save as reusable template</Button>
+              </div>
+            )}
           </CardContent>
         </details>
 
         <Card>
           <CardHeader>
-            <CardTitle>Send request</CardTitle>
+            <CardTitle>Choose a sourcer</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             {canAssign ? (
               <label className="grid gap-1.5 text-sm font-medium">
-                Assign to
-                <Select value={assignedToId || "unassigned"} onValueChange={(value) => form.setValue("assignedToId", value === "unassigned" ? null : value)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                Who should source this? <span className="text-destructive">*</span>
+                <Select value={assignedToId || undefined} onValueChange={(value) => form.setValue("assignedToId", value)}>
+                  <SelectTrigger><SelectValue placeholder="Choose a sourcer" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="unassigned">Assign later</SelectItem>
-                    {members.filter((member: any) => member.role === "sourcer").map((member: any) => <SelectItem key={member.id} value={member.id}>{member.name || member.email}</SelectItem>)}
+                    {sourcers.map((member: any) => <SelectItem key={member.id} value={member.id}>{member.name || member.email}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {sourcers.length === 0 ? (
+                  <span className="text-xs font-normal text-destructive">
+                    No approved sourcers are available.{" "}
+                    {isAdminView && <Link className="underline" href={`${basePath}/members`}>Manage sourcers</Link>}
+                  </span>
+                ) : !assignedToId ? (
+                  <span className="text-xs font-normal text-muted-foreground">The sourcer will be notified immediately.</span>
+                ) : null}
               </label>
             ) : <p className="self-end pb-2 text-sm text-muted-foreground">This request will be sent to the sourcing team.</p>}
           </CardContent>
         </Card>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-          <div className="flex gap-2">
-            <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Save as template" className="w-44" />
-            <Button type="button" variant="outline" disabled={!workspaceId || !templateName.trim()} isLoading={createTemplate.isPending} onClick={async () => {
-              const values = form.getValues();
-              await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr } });
-              setTemplateName("");
-            }}>Save template</Button>
-          </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" isLoading={isSubmitting} onClick={form.handleSubmit((values) => submit(values, false))}>Save draft</Button>
-            <Button type="submit" isLoading={isSubmitting}>{assignedToId ? "Create & assign" : "Create request"}</Button>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
+          <Button type="button" variant="outline" isLoading={isSubmitting} onClick={form.handleSubmit((values) => submit(values, false))}>Save for later</Button>
+          <Button type="submit" className="min-h-11 px-6" disabled={canAssign && (!assignedToId || sourcers.length === 0)} isLoading={isSubmitting}>
+            {canAssign ? "Send to sourcer" : "Create request"}
+          </Button>
         </div>
       </form>
     </main>

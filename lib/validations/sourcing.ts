@@ -92,11 +92,13 @@ export const sourcingCommandSchema = z
       "submit_quote",
       "submit_all_drafts",
       "delete_quote",
+      "withdraw_quote",
       "request_changes",
       "approve",
       "reject",
       "cannot_source",
       "confirm_order",
+      "approve_and_create_order",
       "cancel",
       "archive",
       "revive",
@@ -107,6 +109,7 @@ export const sourcingCommandSchema = z
     quoteId: z.string().min(1).optional(),
     fxRateOverride: z.coerce.number().positive().optional(),
     fxOverrideReason: z.string().trim().min(1).max(500).optional(),
+    orderQuantity: z.coerce.number().int().positive().optional(),
     quote: sourcingQuoteSchema.optional(),
     reason: z.string().trim().min(1).max(2000).optional(),
   })
@@ -114,7 +117,7 @@ export const sourcingCommandSchema = z
     if (["create_quote", "save_quote", "submit_quote"].includes(value.action) && !value.quote) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quote"], message: "A valid quote is required" });
     }
-    if (["delete_quote", "request_changes", "approve", "reject"].includes(value.action) && !value.quoteId) {
+    if (["delete_quote", "withdraw_quote", "request_changes", "approve", "approve_and_create_order", "reject"].includes(value.action) && !value.quoteId) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["quoteId"], message: "A quote must be selected" });
     }
     if (

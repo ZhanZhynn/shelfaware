@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type SourcingCase, type SourcingQuote } from "@prisma/client";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { deliverSourcingNotification, sourcingAdmins } from "./notifications";
@@ -19,6 +19,7 @@ import {
   completeSourcingSla,
   dueAtForSourcingSla,
   normalizeSourcingSlaConfig,
+  type SourcingSlaConfig,
 } from "./sla";
 import {
   calculateSourcingLandedCost,
@@ -48,11 +49,13 @@ type Command = {
     | "submit_quote"
     | "submit_all_drafts"
     | "delete_quote"
+    | "withdraw_quote"
     | "request_changes"
     | "approve"
     | "reject"
     | "cannot_source"
     | "confirm_order"
+    | "approve_and_create_order"
     | "cancel"
     | "archive"
     | "revive"
@@ -62,6 +65,7 @@ type Command = {
   quoteId?: string;
   fxRateOverride?: number;
   fxOverrideReason?: string;
+  orderQuantity?: number;
   quote?: SourcingQuoteInput;
   reason?: string;
 };
@@ -86,6 +90,185 @@ const event = (
       payload: payload ? json(payload) : undefined,
     },
   });
+
+type OrderCase = Pick<SourcingCase, "assignedToId" | "workspaceId">;
+type OrderQuote = Pick<
+  SourcingQuote,
+  | "currency"
+  | "fxProvider"
+  | "fxRate"
+  | "fxRateDate"
+  | "id"
+  | "items"
+  | "landedCostSnapshot"
+  | "moq"
+  | "supplierId"
+  | "supplierName"
+  | "unitPriceMyr"
+>;
+
+async function createOrderFromApprovedQuote(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  item: OrderCase,
+  caseId: string,
+  quote: OrderQuote,
+  slaConfig: SourcingSlaConfig,
+  orderQuantity?: number,
+) {
+  const lines = quote.items as unknown as QuoteItem[];
+  if (orderQuantity && lines.length !== 1)
+    throw new SourcingAccessError(
+      "Order quantity can only be changed for a single-item sourcing request",
+      409,
+    );
+  if (orderQuantity && quote.moq && orderQuantity < quote.moq)
+    throw new SourcingAccessError(
+      `Order quantity must be at least the supplier minimum of ${quote.moq}`,
+      400,
+    );
+  let supplier = quote.supplierId
+    ? await tx.supplier.findFirst({
+        where: { id: quote.supplierId, workspaceId: item.workspaceId },
+      })
+    : await tx.supplier.findFirst({
+        where: { name: quote.supplierName, workspaceId: item.workspaceId },
+      });
+  if (!supplier) {
+    supplier = await tx.supplier.create({
+      data: {
+        name: quote.supplierName,
+        workspaceId: item.workspaceId,
+        userId: actor.id,
+        createdBy: actor.id,
+        status: true,
+      },
+    });
+  }
+  const products = [] as {
+    id: string;
+    name: string;
+    sku: string;
+    quantity: number;
+    unitCost: number;
+  }[];
+  for (const line of lines) {
+    let product = line.productId
+      ? await tx.product.findFirst({
+          where: { id: line.productId, workspaceId: item.workspaceId },
+        })
+      : await tx.product.findFirst({
+          where: { sku: line.sku, workspaceId: item.workspaceId },
+        });
+    if (!product) {
+      let category = line.categoryId
+        ? await tx.category.findFirst({
+            where: {
+              id: line.categoryId,
+              workspaceId: item.workspaceId,
+              status: true,
+            },
+          })
+        : await tx.category.findFirst({
+            where: { workspaceId: item.workspaceId, status: true },
+            orderBy: { createdAt: "asc" },
+          });
+      if (!category) {
+        category = await tx.category.create({
+          data: {
+            name: "Sourced",
+            workspaceId: item.workspaceId,
+            userId: actor.id,
+            createdBy: actor.id,
+            status: true,
+          },
+        });
+      }
+      product = await tx.product.create({
+        data: {
+          name: line.name,
+          sku: line.sku,
+          skuScopeId: item.workspaceId,
+          price: 0,
+          quantity: BigInt(0),
+          status: "active",
+          categoryId: category.id,
+          supplierId: supplier.id,
+          userId: actor.id,
+          createdBy: actor.id,
+          workspaceId: item.workspaceId,
+        },
+      });
+    }
+    products.push({
+      id: product.id,
+      name: line.name,
+      sku: line.sku,
+      quantity: orderQuantity ?? line.quantity,
+      unitCost: line.unitCost,
+    });
+  }
+  const poNumber = `PO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const po = await tx.purchaseOrder.create({
+    data: {
+      poNumber,
+      supplierId: supplier.id,
+      userId: actor.id,
+      workspaceId: item.workspaceId,
+      status: "ordered",
+      currency: quote.currency,
+      convertedTotalMyr:
+        quote.unitPriceMyr == null
+          ? null
+          : products.reduce(
+              (total, line) => total + line.quantity * quote.unitPriceMyr!,
+              0,
+            ),
+      fxRate: quote.fxRate,
+      fxRateDate: quote.fxRateDate,
+      fxProvider: quote.fxProvider,
+      totalAmount: products.reduce(
+        (total, line) => total + line.quantity * line.unitCost,
+        0,
+      ),
+      createdBy: actor.id,
+      orderedAt: new Date(),
+      items: {
+        create: products.map((line) => ({
+          productId: line.id,
+          productName: line.name,
+          sku: line.sku,
+          quantity: line.quantity,
+          unitCost: line.unitCost,
+          subtotal: line.quantity * line.unitCost,
+        })),
+      },
+    },
+  });
+  await tx.sourcingOrder.create({
+    data: {
+      workspaceId: item.workspaceId,
+      caseId,
+      quoteId: quote.id,
+      purchaseOrderId: po.id,
+      landedCostSnapshot: quote.landedCostSnapshot ?? undefined,
+      createdById: actor.id,
+    },
+  });
+  const now = new Date();
+  const shipmentDueAt = dueAtForSourcingSla("shipment", now, slaConfig);
+  await tx.sourcingSlaRecord.create({
+    data: {
+      workspaceId: item.workspaceId,
+      caseId,
+      rule: "shipment",
+      ownerId: item.assignedToId,
+      startedAt: now,
+      dueAt: shipmentDueAt,
+    },
+  });
+  return { purchaseOrderId: po.id, shipmentDueAt };
+}
 
 function assertVersion(version: number, expected: number) {
   if (version !== expected)
@@ -283,7 +466,8 @@ export async function runSourcingCommand(
   // Fetch outside the workflow transaction: a provider/cache read must not hold
   // a MongoDB transaction open, and the snapshot is persisted on approval.
   const approvalReferenceRate =
-    command.action === "approve" && !command.fxRateOverride
+    ["approve", "approve_and_create_order"].includes(command.action) &&
+    !command.fxRateOverride
       ? await getOrRefreshExchangeRate("CNY", "MYR")
       : null;
   const requireAssigned = () => {
@@ -365,7 +549,7 @@ export async function runSourcingCommand(
       ["create_quote", "save_quote", "submit_quote"].includes(command.action)
     ) {
       requireAssigned();
-      const stageEditable = editableStages.includes(item.stage) || (command.action === "submit_quote" && item.stage === "quoted");
+      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
       if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
@@ -483,30 +667,38 @@ export async function runSourcingCommand(
                 createdById: actor.id,
               },
             });
+      const opensApprovalWindow =
+        command.action === "submit_quote" &&
+        !["quoted", "changes_requested"].includes(item.stage);
+      const now = new Date();
       const updated = await bump({
-        ...(command.action === "submit_quote"
-          ? (() => {
-              const now = new Date();
-              return {
-                stage: "quoted",
-                slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
-                slaRule: "approval",
-              };
-            })()
-          : { stage: item.stage }),
+        ...(opensApprovalWindow
+          ? {
+              stage: "quoted",
+              slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
+              slaRule: "approval",
+            }
+          : {
+              stage:
+                command.action === "submit_quote" &&
+                item.stage === "changes_requested"
+                  ? "quoted"
+                  : item.stage,
+            }),
       });
       if (command.action === "submit_quote") {
-        const now = new Date();
-        await completeSourcingSla(tx, caseId, "quote_submission", now);
-        await tx.sourcingSlaRecord.create({
-          data: {
-            workspaceId: item.workspaceId,
-            caseId,
-            rule: "approval",
-            startedAt: now,
-            dueAt: dueAtForSourcingSla("approval", now, slaConfig),
-          },
-        });
+        if (opensApprovalWindow) {
+          await completeSourcingSla(tx, caseId, "quote_submission", now);
+          await tx.sourcingSlaRecord.create({
+            data: {
+              workspaceId: item.workspaceId,
+              caseId,
+              rule: "approval",
+              startedAt: now,
+              dueAt: dueAtForSourcingSla("approval", now, slaConfig),
+            },
+          });
+        }
       }
       await event(tx, caseId, item.workspaceId, actor.id, command.action, {
         quoteId: quote.id,
@@ -563,21 +755,30 @@ export async function runSourcingCommand(
           },
         });
       }
-      const updated = await bump({
-        stage: "quoted",
-        slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
-        slaRule: "approval",
-      });
-      await completeSourcingSla(tx, caseId, "quote_submission", now);
-      await tx.sourcingSlaRecord.create({
-        data: {
-          workspaceId: item.workspaceId,
-          caseId,
-          rule: "approval",
-          startedAt: now,
-          dueAt: dueAtForSourcingSla("approval", now, slaConfig),
-        },
-      });
+      const opensApprovalWindow = !["quoted", "changes_requested"].includes(
+        item.stage,
+      );
+      const updated = await bump(
+        opensApprovalWindow
+          ? {
+              stage: "quoted",
+              slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
+              slaRule: "approval",
+            }
+          : { stage: item.stage === "changes_requested" ? "quoted" : item.stage },
+      );
+      if (opensApprovalWindow) {
+        await completeSourcingSla(tx, caseId, "quote_submission", now);
+        await tx.sourcingSlaRecord.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            rule: "approval",
+            startedAt: now,
+            dueAt: dueAtForSourcingSla("approval", now, slaConfig),
+          },
+        });
+      }
       await event(tx, caseId, item.workspaceId, actor.id, "submit_all_drafts", {
         quoteIds: drafts.map((d) => d.id),
         count: drafts.length,
@@ -610,10 +811,68 @@ export async function runSourcingCommand(
       const updated = await bump({ version: { increment: 1 } });
       return updated;
     }
+    if (command.action === "withdraw_quote") {
+      requireAssigned();
+      if (item.stage !== "quoted")
+        throw new SourcingAccessError(
+          "Offers can only be withdrawn while awaiting a decision",
+          409,
+        );
+      if (!command.quoteId)
+        throw new SourcingAccessError("An offer must be selected", 400);
+      const target = await tx.sourcingQuote.findFirst({
+        where: { id: command.quoteId, caseId, status: "submitted" },
+      });
+      if (!target)
+        throw new SourcingAccessError(
+          "Only unapproved submitted offers can be withdrawn",
+          409,
+        );
+      await tx.sourcingQuote.update({
+        where: { id: target.id },
+        data: { status: "withdrawn" },
+      });
+      const remainingOffers = await tx.sourcingQuote.count({
+        where: { caseId, status: "submitted" },
+      });
+      const now = new Date();
+      let workflowData: Prisma.SourcingCaseUpdateInput = {};
+      if (remainingOffers === 0) {
+        const quoteDueAt = dueAtForSourcingSla("quote_submission", now, slaConfig);
+        // End the inactive approval window without treating it as an approval decision.
+        await tx.sourcingSlaRecord.updateMany({
+          where: { caseId, rule: "approval", completedAt: null },
+          data: { completedAt: now, onTime: null },
+        });
+        await tx.sourcingSlaRecord.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            rule: "quote_submission",
+            ownerId: item.assignedToId,
+            startedAt: now,
+            dueAt: quoteDueAt,
+          },
+        });
+        workflowData = {
+          stage: "sourcing",
+          slaDueAt: quoteDueAt,
+          slaRule: "quote_submission",
+        };
+      }
+      const updated = await bump(workflowData);
+      await event(tx, caseId, item.workspaceId, actor.id, "offer_withdrawn", {
+        quoteId: target.id,
+        supplierName: target.supplierName,
+        remainingOffers,
+      });
+      return updated;
+    }
     if (
       [
         "request_changes",
         "approve",
+        "approve_and_create_order",
         "reject",
         "cannot_source",
         "cancel",
@@ -640,7 +899,7 @@ export async function runSourcingCommand(
         orderBy: { revision: "desc" },
       });
       if (
-        ["request_changes", "approve", "reject", "cannot_source"].includes(
+        ["request_changes", "approve", "approve_and_create_order", "reject", "cannot_source"].includes(
           command.action,
         ) &&
         !latestSubmitted &&
@@ -695,7 +954,7 @@ export async function runSourcingCommand(
             riskLevel: latestSubmitted!.riskLevel,
             recommendation: latestSubmitted!.recommendation,
             priceBreaks: latestSubmitted!.priceBreaks ?? undefined,
-            notes: command.reason.trim(),
+            notes: latestSubmitted!.notes,
             createdById: actor.id,
           },
         });
@@ -713,12 +972,19 @@ export async function runSourcingCommand(
           item.workspaceId,
           actor.id,
           "changes_requested",
-          { quoteId: copied.id, reason: command.reason },
+          {
+            quoteId: copied.id,
+            sourceQuoteId: latestSubmitted!.id,
+            quoteGroupId: quoteGroupKey(latestSubmitted!),
+            supplierName: latestSubmitted!.supplierName,
+            reason: command.reason.trim(),
+          },
         );
         return updated;
       }
       if (
         command.action === "approve" ||
+        command.action === "approve_and_create_order" ||
         command.action === "reject" ||
         command.action === "cannot_source"
       ) {
@@ -733,7 +999,11 @@ export async function runSourcingCommand(
         )
           throw new SourcingAccessError("A reason is required", 400);
         let approvalData: Prisma.SourcingCaseUpdateInput = {};
-        if (command.action === "approve") {
+        let approvedQuote: SourcingQuote | null = null;
+        if (
+          command.action === "approve" ||
+          command.action === "approve_and_create_order"
+        ) {
           const selected = latestSubmitted!;
           const referenceRate = approvalReferenceRate;
           const rate = command.fxRateOverride ?? referenceRate?.rate;
@@ -751,7 +1021,7 @@ export async function runSourcingCommand(
             selected.unitPriceRmb == null
               ? null
               : convertMoney(selected.unitPriceRmb, rate);
-          await tx.sourcingQuote.update({
+          approvedQuote = await tx.sourcingQuote.update({
             where: { id: selected.id },
             data: {
               unitPriceMyr,
@@ -769,11 +1039,50 @@ export async function runSourcingCommand(
           });
           approvalData = { selectedQuoteId: selected.id };
         }
+        const now = new Date();
+        if (["approve", "approve_and_create_order", "reject"].includes(command.action))
+          await completeSourcingSla(tx, caseId, "approval", now);
+        if (command.action === "approve_and_create_order") {
+          const { purchaseOrderId, shipmentDueAt } =
+            await createOrderFromApprovedQuote(
+              tx,
+              actor,
+              item,
+              caseId,
+              approvedQuote!,
+              slaConfig,
+              command.orderQuantity,
+            );
+          await tx.sourcingQuote.updateMany({
+            where: {
+              caseId,
+              status: "submitted",
+              id: { not: approvedQuote!.id },
+            },
+            data: { status: "not_selected" },
+          });
+          await tx.sourcingQuote.updateMany({
+            where: { caseId, status: "draft" },
+            data: { status: "discarded" },
+          });
+          const updated = await bump({
+            stage: "ordered",
+            slaDueAt: shipmentDueAt,
+            slaRule: "shipment",
+            ...approvalData,
+          });
+          await event(tx, caseId, item.workspaceId, actor.id, "approve", {
+            quoteId: latestSubmitted!.id,
+            fxRateOverride: command.fxRateOverride,
+          });
+          await event(tx, caseId, item.workspaceId, actor.id, "order_confirmed", {
+            purchaseOrderId,
+            quoteId: latestSubmitted!.id,
+          });
+          return updated;
+        }
         const stage =
           command.action === "approve" ? "approved" : command.action;
-        const now = new Date();
-        if (["approve", "reject"].includes(command.action))
-          await completeSourcingSla(tx, caseId, "approval", now);
         const updated = await bump({
           stage,
           slaDueAt: null,
@@ -878,154 +1187,21 @@ export async function runSourcingCommand(
           })
         : null;
       if (!quote) throw new SourcingAccessError("No approved quote found", 409);
-      const lines = quote.items as unknown as QuoteItem[];
-      let supplier = quote.supplierId
-        ? await tx.supplier.findFirst({
-            where: { id: quote.supplierId, workspaceId: item.workspaceId },
-          })
-        : await tx.supplier.findFirst({
-            where: { name: quote.supplierName, workspaceId: item.workspaceId },
-          });
-      if (!supplier) {
-        supplier = await tx.supplier.create({
-          data: {
-            name: quote.supplierName,
-            workspaceId: item.workspaceId,
-            userId: actor.id,
-            createdBy: actor.id,
-            status: true,
-          },
-        });
-      }
-      const products = [] as {
-        id: string;
-        name: string;
-        sku: string;
-        quantity: number;
-        unitCost: number;
-      }[];
-      for (const line of lines) {
-        let product = line.productId
-          ? await tx.product.findFirst({
-              where: { id: line.productId, workspaceId: item.workspaceId },
-            })
-          : await tx.product.findFirst({
-              where: { sku: line.sku, workspaceId: item.workspaceId },
-            });
-        if (!product) {
-          let category = line.categoryId
-            ? await tx.category.findFirst({
-                where: {
-                  id: line.categoryId,
-                  workspaceId: item.workspaceId,
-                  status: true,
-                },
-              })
-            : await tx.category.findFirst({
-                where: { workspaceId: item.workspaceId, status: true },
-                orderBy: { createdAt: "asc" },
-              });
-          if (!category) {
-            category = await tx.category.create({
-              data: {
-                name: "Sourced",
-                workspaceId: item.workspaceId,
-                userId: actor.id,
-                createdBy: actor.id,
-                status: true,
-              },
-            });
-          }
-          product = await tx.product.create({
-            data: {
-              name: line.name,
-              sku: line.sku,
-              skuScopeId: item.workspaceId,
-              price: 0,
-              quantity: BigInt(0),
-              status: "active",
-              categoryId: category.id,
-              supplierId: supplier.id,
-              userId: actor.id,
-              createdBy: actor.id,
-              workspaceId: item.workspaceId,
-            },
-          });
-        }
-        products.push({
-          id: product.id,
-          name: line.name,
-          sku: line.sku,
-          quantity: line.quantity,
-          unitCost: line.unitCost,
-        });
-      }
-      const poNumber = `PO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const po = await tx.purchaseOrder.create({
-        data: {
-          poNumber,
-          supplierId: supplier.id,
-          userId: actor.id,
-          workspaceId: item.workspaceId,
-          status: "ordered",
-          currency: quote.currency,
-          convertedTotalMyr:
-            quote.unitPriceMyr == null
-              ? null
-              : products.reduce(
-                  (total, line) => total + line.quantity * quote.unitPriceMyr!,
-                  0,
-                ),
-          fxRate: quote.fxRate,
-          fxRateDate: quote.fxRateDate,
-          fxProvider: quote.fxProvider,
-          totalAmount: products.reduce(
-            (total, line) => total + line.quantity * line.unitCost,
-            0,
-          ),
-          createdBy: actor.id,
-          orderedAt: new Date(),
-          items: {
-            create: products.map((line) => ({
-              productId: line.id,
-              productName: line.name,
-              sku: line.sku,
-              quantity: line.quantity,
-              unitCost: line.unitCost,
-              subtotal: line.quantity * line.unitCost,
-            })),
-          },
-        },
-      });
-      await tx.sourcingOrder.create({
-        data: {
-          workspaceId: item.workspaceId,
-          caseId,
-          quoteId: quote.id,
-          purchaseOrderId: po.id,
-          landedCostSnapshot: quote.landedCostSnapshot ?? undefined,
-          createdById: actor.id,
-        },
-      });
-      const now = new Date();
-      const shipmentDueAt = dueAtForSourcingSla("shipment", now, slaConfig);
-      await tx.sourcingSlaRecord.create({
-        data: {
-          workspaceId: item.workspaceId,
-          caseId,
-          rule: "shipment",
-          ownerId: item.assignedToId,
-          startedAt: now,
-          dueAt: shipmentDueAt,
-        },
-      });
+      const { purchaseOrderId, shipmentDueAt } = await createOrderFromApprovedQuote(
+        tx,
+        actor,
+        item,
+        caseId,
+        quote,
+        slaConfig,
+      );
       const updated = await bump({
         stage: "ordered",
         slaDueAt: shipmentDueAt,
         slaRule: "shipment",
       });
       await event(tx, caseId, item.workspaceId, actor.id, "order_confirmed", {
-        purchaseOrderId: po.id,
+        purchaseOrderId,
       });
       return updated;
     }
@@ -1058,7 +1234,23 @@ export async function runSourcingCommand(
       });
       return;
     }
-    if (command.action === "confirm_order" && current.assignedToId) {
+    if (command.action === "withdraw_quote") {
+      await deliverSourcingNotification({
+        workspaceId: current.workspaceId,
+        caseId,
+        recipientIds: await sourcingAdmins(current.workspaceId),
+        excludeUserId: actor.id,
+        kind: "quote",
+        title: "Supplier offer withdrawn",
+        message: `${actor.name} withdrew a supplier offer for ${current.title}.`,
+        dedupeKey: `withdraw_quote:${caseId}:${result.version}`,
+      });
+      return;
+    }
+    if (
+      ["confirm_order", "approve_and_create_order"].includes(command.action) &&
+      current.assignedToId
+    ) {
       await deliverSourcingNotification({
         workspaceId: current.workspaceId,
         caseId,
@@ -1067,7 +1259,7 @@ export async function runSourcingCommand(
         kind: "decision",
         title: "Order placed - arrange shipment",
         message: `${actor.name} confirmed the order for ${current.title}. Arrange shipment and add tracking.`,
-        dedupeKey: `confirm_order:${caseId}:${result.version}`,
+        dedupeKey: `${command.action}:${caseId}:${result.version}`,
       });
       return;
     }
@@ -1078,7 +1270,7 @@ export async function runSourcingCommand(
       current.assignedToId
     ) {
       const messages: Record<string, string> = {
-        request_changes: `${actor.name} requested changes to the quote for ${current.title}.`,
+        request_changes: `${actor.name} requested changes to a supplier offer for ${current.title}: ${command.reason}.`,
         approve: `${actor.name} approved the quote for ${current.title}.`,
         reject: `${actor.name} rejected the quote for ${current.title}.`,
         cannot_source: `${actor.name} marked ${current.title} as cannot source.`,

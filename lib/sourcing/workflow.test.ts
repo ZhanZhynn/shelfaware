@@ -16,7 +16,7 @@ describe("sourcing workflow semantics", () => {
     expect(canEditQuote("sourcer", false, "other", "me", "sourcing")).toBe(
       false,
     );
-    expect(canEditQuote("sourcer", false, "me", "me", "quoted")).toBe(false);
+    expect(canEditQuote("sourcer", false, "me", "me", "quoted")).toBe(true);
     expect(canEditQuote("admin", false, "me", "me", "changes_requested")).toBe(
       false,
     );
@@ -126,6 +126,56 @@ describe("sourcing workflow semantics", () => {
       sourcingCommandSchema.safeParse({ action: "approve", version: 1 })
         .success,
     ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({ action: "withdraw_quote", version: 1 })
+        .success,
+    ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "withdraw_quote",
+        version: 1,
+        quoteId: "quote-1",
+      }).success,
+    ).toBe(true);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "approve_and_create_order",
+        version: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "approve_and_create_order",
+        version: 1,
+        quoteId: "quote-1",
+        orderQuantity: "25",
+      }).success,
+    ).toBe(true);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "approve_and_create_order",
+        version: 1,
+        quoteId: "quote-1",
+        orderQuantity: 1.5,
+      }).success,
+    ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "approve_and_create_order",
+        version: 1,
+        quoteId: "quote-1",
+        fxRateOverride: 0.61,
+      }).success,
+    ).toBe(false);
+    expect(
+      sourcingCommandSchema.safeParse({
+        action: "approve_and_create_order",
+        version: 1,
+        quoteId: "quote-1",
+        fxRateOverride: 0.61,
+        fxOverrideReason: "Supplier invoice rate",
+      }).success,
+    ).toBe(true);
     expect(
       sourcingCommandSchema.safeParse({ action: "create_quote", version: 1 })
         .success,

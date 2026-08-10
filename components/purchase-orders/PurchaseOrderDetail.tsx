@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { usePurchaseOrder, useApprovePurchaseOrder, useDeletePurchaseOrder } from "@/hooks/queries/use-purchase-orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,13 +33,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function PurchaseOrderDetail({ id }: { id: string }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
   const { data: order, isLoading, error } = usePurchaseOrder(id);
   const approveMutation = useApprovePurchaseOrder();
   const deleteMutation = useDeletePurchaseOrder();
 
-  if (!mounted || isLoading) {
+  if (isLoading) {
     return <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6"><div className="h-64 animate-pulse rounded-xl bg-muted" /></main>;
   }
 
@@ -103,6 +100,22 @@ export default function PurchaseOrderDetail({ id }: { id: string }) {
             </Button>
             <Button variant="destructive" onClick={() => approveMutation.mutate({ id: order.id, action: "reject" })} disabled={approveMutation.isPending}>
               <XCircle className="h-4 w-4" />Reject
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {order.status === "shipping" && (
+        <Card className="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="font-medium">Ready for warehouse receiving</p>
+              <p className="text-sm text-muted-foreground">The purchase order and remaining quantities will be filled in automatically.</p>
+            </div>
+            <Button asChild>
+              <Link href={`/receiving?poId=${order.id}`}>
+                <Package className="h-4 w-4" />Receive goods
+              </Link>
             </Button>
           </CardContent>
         </Card>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useShipPurchaseOrder, useUpdateShippingInfo, useUpdatePONotes } from "@/hooks/queries/use-purchase-orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,7 +66,7 @@ interface OrderLink {
   purchaseOrder?: PO;
 }
 
-export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourcing" }: { orders: OrderLink[]; basePath?: string }) {
+export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourcing", readOnly = false }: { orders: OrderLink[]; basePath?: string; readOnly?: boolean }) {
   const [selectedId, setSelectedId] = useState("");
   const [editingNotes, setEditingNotes] = useState(false);
   const [notes, setNotes] = useState("");
@@ -83,25 +83,33 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
 
   const pos = orders.map((o) => o.purchaseOrder).filter(Boolean) as PO[];
 
-  useEffect(() => {
-    if (pos.length === 1 && !selectedId) setSelectedId(pos[0]!.id);
-    if (pos.length > 0 && !pos.find((p) => p.id === selectedId)) setSelectedId(pos[0]!.id);
-  }, [pos, selectedId]);
+  const activeSelectedId = selectedId && pos.some((po) => po.id === selectedId)
+    ? selectedId
+    : pos[0]?.id || "";
+  const selected = pos.find((p) => p.id === activeSelectedId);
 
-  const selected = pos.find((p) => p.id === selectedId);
+  const choosePurchaseOrder = (id: string) => {
+    setSelectedId(id);
+    setEditingNotes(false);
+    setEditingTracking(false);
+  };
 
-  useEffect(() => {
-    if (selected) {
-      setNotes(selected.notes || "");
-      setTrackingCarrier(selected.trackingCarrier || "");
-      setTrackingNumber(selected.trackingNumber || "");
-      setTrackingUrl(selected.trackingUrl || "");
-      setEstimatedDelivery(selected.estimatedDelivery ? new Date(selected.estimatedDelivery).toISOString().slice(0, 10) : "");
-      setShippingNotes(selected.shippingNotes || "");
-      setEditingNotes(false);
-      setEditingTracking(false);
-    }
-  }, [selected]);
+  const beginEditingNotes = () => {
+    if (!selected) return;
+    setNotes(selected.notes || "");
+    setEditingNotes(true);
+  };
+
+  const beginEditingTracking = () => {
+    if (!selected) return;
+    setTrackingCarrier(selected.trackingCarrier || "");
+    setTrackingNumber(selected.trackingNumber || "");
+    setTrackingUrl(selected.trackingUrl || "");
+    setEstimatedDelivery(selected.estimatedDelivery ? new Date(selected.estimatedDelivery).toISOString().slice(0, 10) : "");
+    setShippingNotes(selected.shippingNotes || "");
+    setNotes(selected.notes || "");
+    setEditingTracking(true);
+  };
 
   if (pos.length === 0) {
     return (
@@ -150,9 +158,9 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
     setEditingNotes(false);
   };
 
-  const canShip = selected?.status === "ordered";
-  const canEditTracking = selected?.status === "shipping";
-  const canEditNotes = selected && ["ordered", "shipping"].includes(selected.status);
+  const canShip = !readOnly && selected?.status === "ordered";
+  const canEditTracking = !readOnly && selected?.status === "shipping";
+  const canEditNotes = !readOnly && selected && ["ordered", "shipping"].includes(selected.status);
   const showTrackingForm = (canShip || canEditTracking) && editingTracking;
 
   return (
@@ -160,7 +168,7 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
       <CardHeader className="flex flex-row items-center justify-between gap-4">
         <CardTitle>Purchase order</CardTitle>
         {pos.length > 1 && (
-          <Select value={selectedId} onValueChange={setSelectedId}>
+          <Select value={activeSelectedId} onValueChange={choosePurchaseOrder}>
             <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select PO" /></SelectTrigger>
             <SelectContent>
               {pos.map((po) => (
@@ -185,6 +193,19 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
               {selected.orderedAt && <p><b>Ordered:</b> {formatDate(selected.orderedAt)}</p>}
               {selected.shippedAt && <p><b>Shipped:</b> {formatDate(selected.shippedAt)}</p>}
              </div>
+
+             {readOnly && ["ordered", "shipping", "received"].includes(selected.status) && (
+               <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-4 text-sm dark:border-sky-900 dark:bg-sky-950/20">
+                 <p className="font-medium">
+                   {selected.status === "ordered"
+                     ? "The sourcer is arranging shipment."
+                     : selected.status === "shipping"
+                       ? "The order is on the way and awaiting warehouse receipt."
+                       : "The warehouse has received this order."}
+                 </p>
+                 <p className="mt-1 text-muted-foreground">No action is needed from you.</p>
+               </div>
+             )}
 
              {selected.myrEstimate != null && selected.currency === "CNY" && (
                <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950/20">
@@ -215,7 +236,7 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
               <div className="rounded-lg border p-3 text-sm">
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-medium flex items-center gap-2"><FileText className="h-4 w-4" />Notes</p>
-                  <Button variant="ghost" size="sm" onClick={() => setEditingNotes(true)}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={beginEditingNotes}>Edit</Button>
                 </div>
                 <p className="text-muted-foreground">{selected.notes || "No notes."}</p>
               </div>
@@ -271,7 +292,7 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
             )}
 
             {(canShip || canEditTracking) && !editingTracking && !editingNotes && (
-              <Button size="sm" variant="outline" onClick={() => setEditingTracking(true)}>
+              <Button size="sm" variant="outline" onClick={beginEditingTracking}>
                 <Truck className="h-4 w-4 mr-2" />{canShip ? "Mark as Shipped" : "Update Tracking"}
               </Button>
             )}

@@ -2,6 +2,7 @@ export type SourcingViewer = "admin" | "sourcer";
 
 export type SourcingPresentationGroup =
   | "needs_action"
+  | "changes_requested"
   | "waiting"
   | "to_ship"
   | "shipped"
@@ -20,11 +21,11 @@ type TimelineStep = { id: string; label: string };
 const ADMIN_STAGE_TO_GROUP: Record<string, SourcingPresentationGroup> = {
   draft: "needs_action",
   sourcing: "waiting",
-  changes_requested: "waiting",
+  changes_requested: "changes_requested",
   quoted: "needs_action",
   approved: "needs_action",
-  ordered: "waiting",
-  shipping: "waiting",
+  ordered: "shipped",
+  shipping: "shipped",
   received: "completed",
   rejected: "closed",
   cannot_source: "closed",
@@ -121,7 +122,7 @@ export function getSourcingStatusMessage(
       draft: "Your action: complete the request",
       sourcing: "Your action: source and submit offers",
       changes_requested: "Your action: revise and resubmit",
-      quoted: "Waiting for admin approval",
+      quoted: "Offers sent to the manager. You can add or withdraw offers until one is approved.",
       approved: "Waiting for admin to place the order",
       ordered: "Your action: arrange shipment",
       shipping: "Shipped, awaiting receipt",
@@ -140,12 +141,12 @@ export function getSourcingStageBadgeVariant(
 ): SourcingBadgeVariant {
   const variants: Record<string, SourcingBadgeVariant> = {
     draft: "secondary",
-    sourcing: "warning",
+    sourcing: "info",
     changes_requested: "warning",
-    quoted: "info",
-    approved: "success",
+    quoted: "warning",
+    approved: "warning",
     ordered: "info",
-    shipping: "warning",
+    shipping: "info",
     received: "success",
     rejected: "destructive",
     cannot_source: "destructive",

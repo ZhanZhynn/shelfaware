@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,7 @@ interface PendingItem {
 }
 
 export default function ScanToReceivePanel() {
+  const searchParams = useSearchParams();
   const { data: warehouses } = useWarehouses();
   const { data: purchaseOrders } = usePurchaseOrders();
   const receiveMutation = useReceiveItems();
@@ -55,7 +57,7 @@ export default function ScanToReceivePanel() {
   const [actualCosts, setActualCosts] = useState({ actualFreightMyr: "", actualDutyMyr: "", actualTaxMyr: "", actualOtherCostMyr: "" });
 
   const selectedWarehouse = warehouses?.find((warehouse) => warehouse.id === warehouseId);
-  const receivablePurchaseOrders = purchaseOrders?.filter((po) => ["approved", "ordered"].includes(po.status));
+  const receivablePurchaseOrders = purchaseOrders?.filter((po) => ["approved", "ordered", "shipping"].includes(po.status));
   const selectedPo = receivablePurchaseOrders?.find((po) => po.id === poId);
   const activePoId = selectedPo ? poId : "";
   // An order can become ineligible while this panel is open; do not retain its PO rows or link it on receipt.
@@ -124,6 +126,43 @@ export default function ScanToReceivePanel() {
       setPendingItems((prev) => [...prev.filter((p) => p.source !== "po"), ...poItems]);
     }
   };
+
+  useEffect(() => {
+    const requestedPoId = searchParams.get("poId");
+    if (!requestedPoId || poId || !purchaseOrders) return;
+    const requestedPo = purchaseOrders.find(
+      (po) => po.id === requestedPoId && ["approved", "ordered", "shipping"].includes(po.status),
+    );
+    if (!requestedPo) return;
+    queueMicrotask(() => {
+      setPoId(requestedPo.id);
+      setPendingItems((current) => [
+        ...current.filter((item) => item.source !== "po"),
+        ...requestedPo.items
+          .filter((item) => item.quantityReceived < item.quantity)
+          .map((item) => ({
+            productId: item.productId,
+            sku: item.sku,
+            name: item.productName,
+            quantity: item.quantity - item.quantityReceived,
+            poItemId: item.id,
+            source: "po" as const,
+          })),
+      ]);
+    });
+  }, [poId, purchaseOrders, searchParams]);
+
+  useEffect(() => {
+    const requestedWarehouseId = searchParams.get("warehouseId");
+    if (warehouseId || !warehouses?.length) return;
+    const initialWarehouseId =
+      requestedWarehouseId && warehouses.some((warehouse) => warehouse.id === requestedWarehouseId)
+        ? requestedWarehouseId
+        : warehouses.length === 1
+          ? warehouses[0]!.id
+          : "";
+    if (initialWarehouseId) queueMicrotask(() => setWarehouseId(initialWarehouseId));
+  }, [searchParams, warehouseId, warehouses]);
 
   const handleReceive = () => {
     if (!warehouseId || activePendingItems.length === 0) return;
@@ -207,7 +246,21 @@ export default function ScanToReceivePanel() {
         </div>
       )}
 
-      {activePoId && <Card><CardHeader><CardTitle className="text-sm">Actual landed costs (MYR)</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-4">{([['actualFreightMyr', 'Freight'], ['actualDutyMyr', 'Duty'], ['actualTaxMyr', 'Tax'], ['actualOtherCostMyr', 'Other']] as const).map(([field, label]) => <label key={field} className="grid gap-1 text-xs">{label}<Input type="number" min="0" step="0.01" value={actualCosts[field]} onChange={(event) => setActualCosts((costs) => ({ ...costs, [field]: event.target.value }))} placeholder="0.00" /></label>)}</CardContent></Card>}
+      {activePoId && (
+        <details className="rounded-lg border bg-card">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+            Add actual shipping and tax costs <span className="font-normal text-muted-foreground">Optional</span>
+          </summary>
+          <div className="grid gap-3 border-t p-4 sm:grid-cols-4">
+            {([['actualFreightMyr', 'Freight'], ['actualDutyMyr', 'Duty'], ['actualTaxMyr', 'Tax'], ['actualOtherCostMyr', 'Other']] as const).map(([field, label]) => (
+              <label key={field} className="grid gap-1 text-xs">
+                {label} (MYR)
+                <Input type="number" min="0" step="0.01" value={actualCosts[field]} onChange={(event) => setActualCosts((costs) => ({ ...costs, [field]: event.target.value }))} placeholder="0.00" />
+              </label>
+            ))}
+          </div>
+        </details>
+      )}
 
       <div className="flex gap-2">
         <Input
@@ -250,6 +303,7 @@ export default function ScanToReceivePanel() {
               No items pending. Scan a product QR code or enter a SKU to begin.
             </p>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -291,6 +345,7 @@ export default function ScanToReceivePanel() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

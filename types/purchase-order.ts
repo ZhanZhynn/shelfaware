@@ -54,6 +54,10 @@ export interface PurchaseOrder {
   updatedAt?: string;
   createdBy: string;
   updatedBy?: string;
+  sourcingOrder?: {
+    caseId: string;
+    sourcingCase: { id: string; title: string; stage: string };
+  } | null;
 }
 
 export interface PurchaseOrderLandedCostAdjustment {

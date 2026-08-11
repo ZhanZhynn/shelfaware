@@ -110,7 +110,7 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
-      <Link href="/sourcing" className="inline-flex items-center gap-1 text-sm text-sky-600 hover:underline">
+      <Link href={order.sourcingOrder?.sourcingCase ? `/sourcing/${order.sourcingOrder.caseId}` : "/sourcing"} className="inline-flex items-center gap-1 text-sm text-sky-600 hover:underline">
         <ArrowLeft className="h-4 w-4" />Back to sourcing
       </Link>
 

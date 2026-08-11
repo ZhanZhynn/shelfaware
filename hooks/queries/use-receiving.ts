@@ -26,6 +26,7 @@ export function useReceiveItems() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.receiving.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.products.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.stockAllocation.all });
       toast({

@@ -287,6 +287,10 @@ export const queryKeys = {
     report: (params?: string) =>
       [...queryKeys.abcAnalysis.all, "report", params ?? ""] as const,
   },
+  productPerformance: {
+    all: ["productPerformance"] as const,
+    report: (params?: string) => [...queryKeys.productPerformance.all, "report", params ?? ""] as const,
+  },
 
   // P&L Report queries
   pnl: {

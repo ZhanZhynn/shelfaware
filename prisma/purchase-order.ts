@@ -69,6 +69,12 @@ export async function getPurchaseOrderById(id: string) {
     include: {
       supplier: { select: { id: true, name: true } },
       items: true,
+      sourcingOrder: {
+        select: {
+          caseId: true,
+          sourcingCase: { select: { id: true, title: true, stage: true } },
+        },
+      },
     },
   });
 

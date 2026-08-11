@@ -80,7 +80,7 @@ export const adminNavigationSections: AdminNavigationSection[] = [
       // { href: "/admin/client-portal", label: "Client Portal", icon: Store, countKey: "clients" },
       { href: "/admin/user-management", label: "User Management", icon: Users, countKey: "users" },
       { href: "/admin/activity-history", label: "Activity History", icon: History },
-      { href: "/admin/inventory/abc-analysis", label: "ABC Analysis", icon: BarChart3 },
+      { href: "/admin/inventory/product-performance", label: "Product Performance", icon: BarChart3 },
     ],
   },
   {

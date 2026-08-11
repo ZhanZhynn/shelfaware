@@ -366,6 +366,10 @@ export const cacheKeys = {
       `abc-analysis:${scope}:${params || "default"}`,
     pattern: "abc-analysis:*",
   },
+  productPerformance: {
+    report: (scope: string, params: string) => `product-performance:${scope}:${params}`,
+    pattern: "product-performance:*",
+  },
 
   /**
    * P&L Report cache keys
@@ -526,6 +530,7 @@ export async function invalidateAllServerCaches(): Promise<void> {
     invalidateCache("forecasting:*"),
     invalidateCache("system-config:*"),
     invalidateCache(cacheKeys.abcAnalysis.pattern),
+    invalidateCache(cacheKeys.productPerformance.pattern),
     invalidateCache(cacheKeys.pnl.pattern),
     invalidateCache(cacheKeys.purchaseOrders.pattern),
     invalidateCache(cacheKeys.executiveKpi.pattern),

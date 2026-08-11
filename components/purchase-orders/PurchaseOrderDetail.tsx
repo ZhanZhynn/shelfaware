@@ -6,9 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, CheckCircle, XCircle, Trash2, Package, Truck } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, Trash2, Truck } from "lucide-react";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/types/purchase-order";
 import { formatMoney } from "@/lib/money";
+import { QuickReceivePurchaseOrder } from "@/components/receiving/QuickReceivePurchaseOrder";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-500/15 text-gray-700",
@@ -76,6 +77,16 @@ export default function PurchaseOrderDetail({ id }: { id: string }) {
         </CardContent>
       </Card>
 
+      {order.sourcingOrder?.sourcingCase && (
+        <Card>
+          <CardHeader><CardTitle>Sourcing case</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <Link href={`/admin/sourcing/${order.sourcingOrder.caseId}`} className="font-medium text-sky-600 hover:underline">{order.sourcingOrder.sourcingCase.title}</Link>
+            <span className="text-muted-foreground">{order.sourcingOrder.sourcingCase.stage}</span>
+          </CardContent>
+        </Card>
+      )}
+
       {(order.trackingNumber || order.trackingCarrier || order.shippedAt) && (
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="h-5 w-5" />Shipping Info</CardTitle></CardHeader>
@@ -105,21 +116,7 @@ export default function PurchaseOrderDetail({ id }: { id: string }) {
         </Card>
       )}
 
-      {order.status === "shipping" && (
-        <Card className="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div>
-              <p className="font-medium">Ready for warehouse receiving</p>
-              <p className="text-sm text-muted-foreground">The purchase order and remaining quantities will be filled in automatically.</p>
-            </div>
-            <Button asChild>
-              <Link href={`/receiving?poId=${order.id}`}>
-                <Package className="h-4 w-4" />Receive goods
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <QuickReceivePurchaseOrder key={order.id} order={order} />
 
       {["draft", "pending_approval"].includes(order.status) && (
         <Card>

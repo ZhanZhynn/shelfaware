@@ -112,6 +112,7 @@ export const API_ENDPOINTS = {
   // Inventory (ABC Analysis)
   inventory: {
     abcAnalysis: "/inventory/abc-analysis",
+    productPerformance: "/inventory/product-performance",
   },
 
   // Financials (P&L)

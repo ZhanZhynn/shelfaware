@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Truck, FileText, ExternalLink } from "lucide-react";
 import { formatMoney } from "@/lib/money";
+import { QuickReceivePurchaseOrder } from "@/components/receiving/QuickReceivePurchaseOrder";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-500/15 text-gray-700",
@@ -40,6 +41,8 @@ function formatDate(value?: string) {
 
 interface PO {
   id: string;
+  userId: string;
+  workspaceId?: string | null;
   poNumber: string;
   status: string;
   totalAmount: number;
@@ -59,7 +62,7 @@ interface PO {
   orderedAt?: string;
   createdAt: string;
   supplier?: { id: string; name: string };
-  items: { id: string; productName: string; sku?: string; quantity: number; unitCost: number; subtotal: number }[];
+  items: { id: string; productId: string; productName: string; sku?: string; quantity: number; quantityReceived: number; unitCost: number; subtotal: number }[];
 }
 
 interface OrderLink {
@@ -194,18 +197,16 @@ export default function SourcingPurchaseOrderPanel({ orders, basePath = "/sourci
               {selected.shippedAt && <p><b>Shipped:</b> {formatDate(selected.shippedAt)}</p>}
              </div>
 
-             {readOnly && ["ordered", "shipping", "received"].includes(selected.status) && (
-               <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-4 text-sm dark:border-sky-900 dark:bg-sky-950/20">
-                 <p className="font-medium">
-                   {selected.status === "ordered"
-                     ? "The sourcer is arranging shipment."
-                     : selected.status === "shipping"
-                       ? "The order is on the way and awaiting warehouse receipt."
-                       : "The warehouse has received this order."}
-                 </p>
-                 <p className="mt-1 text-muted-foreground">No action is needed from you.</p>
-               </div>
-             )}
+              {readOnly && selected.status === "received" && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-4 text-sm dark:border-sky-900 dark:bg-sky-950/20">
+                  <p className="font-medium">The warehouse has received this order.</p>
+                  <p className="mt-1 text-muted-foreground">No action is needed from you.</p>
+                </div>
+              )}
+
+              {readOnly && ["ordered", "shipping"].includes(selected.status) && (
+                <QuickReceivePurchaseOrder key={selected.id} order={selected} />
+              )}
 
              {selected.myrEstimate != null && selected.currency === "CNY" && (
                <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 text-sm dark:border-emerald-900 dark:bg-emerald-950/20">

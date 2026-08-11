@@ -981,6 +981,14 @@ class ApiClient {
     },
   };
 
+  productPerformance = {
+    get: async (params: { dateFrom: string; dateTo: string }) => {
+      const query = new URLSearchParams(params).toString();
+      const response = await this.client.get(`${API_ENDPOINTS.inventory.productPerformance}?${query}`);
+      return { data: response.data, status: response.status, statusText: response.statusText };
+    },
+  };
+
   /**
    * P&L Report API methods
    */

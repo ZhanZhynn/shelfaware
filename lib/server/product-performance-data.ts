@@ -1,20 +1,24 @@
 import prisma from "@/prisma/client";
 import type { AdminDataScope } from "@/lib/admin/data-scope";
+import type { Prisma } from "@prisma/client";
 import { mergeProductListWhere } from "@/lib/products/product-query";
 import { decideProduct, DEFAULT_SAFETY_DAYS } from "@/lib/product-performance/decisions";
 import type { ProductPerformanceData, ProductPerformanceRow } from "@/types/product-performance";
 
-export async function getProductPerformance(userId: string, from: Date, to: Date, dataScope?: Pick<AdminDataScope, "ownerIds">): Promise<ProductPerformanceData> {
+export async function getProductPerformance(userId: string, from: Date, to: Date, dataScope?: Pick<AdminDataScope, "ownerIds" | "sharedAdmin">): Promise<ProductPerformanceData> {
   const ownerIds = dataScope?.ownerIds ?? [userId];
+  const productScope: Prisma.ProductWhereInput = dataScope?.sharedAdmin
+    ? { OR: [{ userId: { in: ownerIds }, workspaceId: null }, { workspaceId: { not: null } }] }
+    : { userId };
   const days = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000));
   const products = await prisma.product.findMany({
-    where: mergeProductListWhere({ userId: { in: ownerIds } }),
+    where: mergeProductListWhere(productScope),
     select: { id: true, name: true, sku: true, quantity: true, reservedQuantity: true, status: true, categoryId: true, supplierId: true, createdAt: true, channelMappings: { where: { channel: "shopee" }, select: { channelProductId: true } } },
   });
   const ids = products.map((product) => product.id);
   const mappedChannelIds = [...new Set(products.flatMap((product) => product.channelMappings.map((mapping) => mapping.channelProductId)))];
   const [items, reviews, categories, suppliers, mappingCounts] = await Promise.all([
-    prisma.orderItem.findMany({ where: { productId: { in: ids }, order: { userId: { in: ownerIds }, status: { not: "cancelled" }, createdAt: { gte: from, lte: to } } }, select: { productId: true, quantity: true, subtotal: true, order: { select: { createdAt: true } } } }),
+    prisma.orderItem.findMany({ where: { productId: { in: ids }, order: { status: { not: "cancelled" }, createdAt: { gte: from, lte: to } } }, select: { productId: true, quantity: true, subtotal: true, order: { select: { createdAt: true } } } }),
     prisma.productReview.groupBy({ by: ["productId"], where: { productId: { in: ids }, status: "approved" }, _count: { _all: true }, _avg: { rating: true } }),
     prisma.category.findMany({ where: { id: { in: [...new Set(products.map((product) => product.categoryId))] } }, select: { id: true, name: true } }),
     prisma.supplier.findMany({ where: { id: { in: [...new Set(products.map((product) => product.supplierId))] } }, select: { id: true, leadTimeDays: true } }),

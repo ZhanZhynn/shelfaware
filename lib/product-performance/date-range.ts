@@ -1,13 +1,9 @@
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 function parseDate(value: string | null): Date | null {
-  if (!value) return null;
-  if (DATE_ONLY.test(value)) {
-    const date = new Date(`${value}T00:00:00.000Z`);
-    return date.toISOString().slice(0, 10) === value ? date : null;
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (!value || !DATE_ONLY.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return date.toISOString().slice(0, 10) === value ? date : null;
 }
 
 export function parseRangeStart(value: string | null): Date | null {

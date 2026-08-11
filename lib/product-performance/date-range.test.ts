@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRangeEnd } from "./date-range";
+import { parseRangeEnd, parseRangeStart } from "./date-range";
 
 describe("product performance date range", () => {
   it("includes WMS sales throughout a selected date-only end day", () => {
@@ -10,5 +10,6 @@ describe("product performance date range", () => {
 
   it("rejects invalid calendar dates", () => {
     expect(parseRangeEnd("2026-02-30")).toBeNull();
+    expect(parseRangeStart("2026-08-11T00:00:00.000Z")).toBeNull();
   });
 });

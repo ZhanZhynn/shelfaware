@@ -47,4 +47,15 @@ describe("getProductPerformance", () => {
     }));
     expect(data.products[0]?.unitsSold).toBe(2);
   });
+
+  it("includes workspace products for the shared admin scope and sales from their creators", async () => {
+    await getProductPerformance("admin-1", new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-31T23:59:59.999Z"), { ownerIds: ["admin-1"], sharedAdmin: true });
+
+    expect(prismaMock.product.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ AND: expect.arrayContaining([expect.objectContaining({ OR: [{ userId: { in: ["admin-1"] }, workspaceId: null }, { workspaceId: { not: null } }] })]) }),
+    }));
+    expect(prismaMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ order: expect.not.objectContaining({ userId: expect.anything() }) }),
+    }));
+  });
 });

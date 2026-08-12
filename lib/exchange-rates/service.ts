@@ -109,3 +109,18 @@ export async function getOrRefreshExchangeRate(
     return saved;
   }
 }
+
+export async function ensureExchangeRateForDate(
+  baseCurrency: string,
+  quoteCurrency: string,
+  date: Date,
+): Promise<SelectedExchangeRate | null> {
+  const existing = await getExchangeRateForDate(baseCurrency, quoteCurrency, date);
+  if (existing) return existing;
+  try {
+    await refreshExchangeRate(baseCurrency, quoteCurrency);
+  } catch {
+    // Refresh failed; no rate available.
+  }
+  return getExchangeRateForDate(baseCurrency, quoteCurrency, date);
+}

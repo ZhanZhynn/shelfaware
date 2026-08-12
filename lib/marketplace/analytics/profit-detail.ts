@@ -827,5 +827,3 @@ export async function getProfitDetail(
 
   return result;
 }
-
-

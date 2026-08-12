@@ -18,6 +18,7 @@ import { runWithSyncLog } from "@/lib/sync/run-with-sync-log";
 import { withRetry } from "@/lib/api/retry";
 import { sanitizeMarketplaceRawPayload } from "@/lib/marketplace/json";
 import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
+import { areShopifyOrderLineItemsComplete, shopifyOrderLineSourceFacts } from "./order-line-facts";
 import type { ShopifyOrderTransactionNode, ShopifyProductNode, ShopifyOrderNode, ShopifyRefundNode } from "./types";
 
 // ─── Sync Lock (per-shop mutex) ───────────────────────────────────────────
@@ -285,6 +286,11 @@ export async function syncShopifyOrders(
         try {
           const existing = await prisma.shopifyOrder.findFirst({
             where: { shopId: shop.id, shopifyOrderId: order.id },
+            select: {
+              id: true,
+              isLineItemsComplete: true,
+              items: { select: { id: true }, take: 1 },
+            },
           });
 
           const orderData = {
@@ -320,59 +326,69 @@ export async function syncShopifyOrders(
             financialQuality: "legacy-unverified",
             sourceObservedAt: new Date(),
             rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
+            isLineItemsComplete: areShopifyOrderLineItemsComplete(order.lineItems),
           };
 
-          let dbOrder;
-          if (existing) {
-            dbOrder = await prisma.shopifyOrder.update({
-              where: { id: existing.id },
-              data: orderData,
-            });
-            updated++;
-          } else {
-            dbOrder = await prisma.shopifyOrder.create({
-              data: { ...orderData, createdAt: new Date() },
-            });
-            created++;
+          const lineItemsComplete = orderData.isLineItemsComplete;
+          // Legacy orders predate the completeness flag. Existing line facts are still
+          // authoritative enough to preserve rather than overwrite with a partial page.
+          if (!lineItemsComplete && existing && (existing.isLineItemsComplete || existing.items.length > 0)) {
+            const reason = order.lineItemsFetchError ?? "Shopify returned an incomplete line-item page";
+            errors.push(`Order ${order.id}: line items incomplete; preserved prior complete snapshot; retry required: ${reason}`);
+            logger.warn(`[Shopify Sync] Order ${order.id} line items incomplete; preserved prior complete snapshot`);
+            continue;
           }
 
-          // Delete and recreate line items (simpler than diffing)
-          await prisma.shopifyOrderItem.deleteMany({
-            where: { orderId: dbOrder.id },
-          });
+          await prisma.$transaction(async (tx) => {
+            const dbOrder = existing
+              ? await tx.shopifyOrder.update({ where: { id: existing.id }, data: orderData })
+              : await tx.shopifyOrder.create({ data: { ...orderData, createdAt: new Date() } });
 
-          for (const item of order.lineItems.nodes) {
-            // Find local variant by shopifyVariantId
-            let variantId: string | null = null;
-            if (item.variant?.id) {
-              const localVariant = await prisma.shopifyProductVariant.findFirst({
-                where: { shopifyVariantId: item.variant.id },
-                select: { id: true },
-              });
-              variantId = localVariant?.id ?? null;
+            // Only a complete source snapshot atomically replaces the prior item set.
+            // An incomplete order without a known complete snapshot keeps no partial line facts.
+            if (!lineItemsComplete) {
+              await tx.shopifyOrderItem.deleteMany({ where: { orderId: dbOrder.id } });
+              return;
             }
 
-            await prisma.shopifyOrderItem.create({
-              data: {
-                orderId: dbOrder.id,
-                shopId: shop.id,
-                variantId,
-                shopifyLineId: item.id,
-                name: item.name,
-                title: item.title,
-                quantity: item.quantity,
-                currentQuantity: item.currentQuantity,
-                unfulfilledQuantity: item.unfulfilledQuantity,
-                sku: item.sku,
-                price: parseMoney(item.originalUnitPriceSet.shopMoney.amount),
-                discountedPrice: parseMoney(item.discountedUnitPriceSet.shopMoney.amount),
-                currency: item.originalUnitPriceSet.shopMoney.currencyCode,
-                createdAt: new Date(),
-              },
-            });
+            await tx.shopifyOrderItem.deleteMany({ where: { orderId: dbOrder.id } });
+            for (const item of order.lineItems.nodes) {
+              const localVariant = item.variant?.id
+                ? await tx.shopifyProductVariant.findFirst({
+                    where: { shopifyVariantId: item.variant.id },
+                    select: { id: true },
+                  })
+                : null;
+              await tx.shopifyOrderItem.create({
+                data: {
+                  orderId: dbOrder.id,
+                  shopId: shop.id,
+                  variantId: localVariant?.id ?? null,
+                  shopifyLineId: item.id,
+                  ...shopifyOrderLineSourceFacts(item),
+                  name: item.name,
+                  title: item.title,
+                  quantity: item.quantity,
+                  currentQuantity: item.currentQuantity,
+                  unfulfilledQuantity: item.unfulfilledQuantity,
+                  sku: item.sku,
+                  price: parseMoney(item.originalUnitPriceSet.shopMoney.amount),
+                  discountedPrice: parseMoney(item.discountedUnitPriceSet.shopMoney.amount),
+                  currency: item.originalUnitPriceSet.shopMoney.currencyCode,
+                  createdAt: new Date(),
+                },
+              });
+            }
+          });
+
+          if (!lineItemsComplete) {
+            const reason = order.lineItemsFetchError ?? "Shopify returned an incomplete line-item page";
+            errors.push(`Order ${order.id}: line items incomplete; stored without line facts; retry required: ${reason}`);
           }
 
           synced++;
+          if (existing) updated++;
+          else created++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`Order ${order.id}: ${msg}`);

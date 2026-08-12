@@ -912,15 +912,21 @@ export async function syncShopeeOrders(
           const itemPromises = orderItems.map(
             (item: Record<string, unknown>) => {
               const shopeeItemId = Number(item.item_id || 0);
-              const modelId = Number(item.model_id || 0);
+              // Shopee documents model_id 0 as the sentinel for an item with
+              // no models. Store absence as null rather than a fake variant.
+              const sourceModelId = Number(item.model_id);
+              const modelId = Number.isFinite(sourceModelId) && sourceModelId > 0
+                ? sourceModelId
+                : null;
               const variantId =
-                shopeeItemId && modelId
+                shopeeItemId && modelId != null
                   ? variantLookup.get(`${shopeeItemId}:${modelId}`) ?? null
                   : null;
               return prisma.shopeeOrderItem.create({
                 data: {
                   orderId: orderRecord.id,
                   variantId,
+                  shopeeItemId: shopeeItemId || null,
                   shopeeModelId: modelId,
                   productName: String(item.item_name || ""),
                   sku: String(item.model_sku || item.item_sku || ""),

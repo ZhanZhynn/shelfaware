@@ -291,6 +291,14 @@ export const queryKeys = {
     all: ["productPerformance"] as const,
     report: (params?: string) => [...queryKeys.productPerformance.all, "report", params ?? ""] as const,
   },
+  skuMapping: {
+    all: ["skuMapping"] as const,
+    inbox: () => [...queryKeys.skuMapping.all, "inbox"] as const,
+  },
+  crossChannelPerformance: {
+    all: ["crossChannelPerformance"] as const,
+    report: (params: string) => [...queryKeys.crossChannelPerformance.all, "report", params] as const,
+  },
 
   // P&L Report queries
   pnl: {

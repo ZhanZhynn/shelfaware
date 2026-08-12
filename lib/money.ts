@@ -57,9 +57,11 @@ export function fromStripeMinorUnits(amount: number, currency: string): number {
   return amount / 10 ** exponent;
 }
 
-export function convertMoney(amount: number, rate: number): number {
+export function convertMoney(amount: number, rate: number, scale?: number): number {
   if (!Number.isFinite(amount) || !Number.isFinite(rate) || rate <= 0) {
     throw new Error("A positive exchange rate is required");
   }
-  return roundMoney(amount * rate);
+  const s = scale ?? 2;
+  const factor = 10 ** s;
+  return Math.round((amount * rate + Number.EPSILON) * factor) / factor;
 }

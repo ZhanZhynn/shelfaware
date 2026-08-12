@@ -1,5 +1,14 @@
 # Marketplace Sales Normalization Plan
 
+> **⚠ SUPERSEDED — 2026-08-12**
+>
+> This plan has been superseded by [`docs/plans/shared-catalog-sku-mapping.md`](plans/shared-catalog-sku-mapping.md).
+> The shared-catalog plan is the authoritative design for the shared-organization analytical catalog,
+> offer/SKU mapping, source-line projection, performance-fact projection, FX conversion, and
+> reconciliation work. The original content below is preserved for historical reference only.
+
+---
+
 ## Purpose
 
 ShelfAware operates as a **read-only marketplace analytics application**. It reads sales data from Shopee, Lazada, TikTok, and Shopify, normalizes them into canonical WMS base-product units and allocated GMV, then presents consolidated analytics.

@@ -71,7 +71,7 @@ describe("legacy Shopee CLV containment", () => {
 });
 
 describe("legacy Shopify product revenue", () => {
-  it("uses certified unit price times quantity and leaves uncertified defaulted values unavailable", async () => {
+  it("includes legacy orders without completeness state in order-level revenue and counts", async () => {
     mocks.shopifyShopFindMany.mockResolvedValue([{ id: "shop-1" }]);
     mocks.shopifyProductCount.mockResolvedValue(2);
     mocks.shopifyOrderCount.mockResolvedValue(2);
@@ -86,9 +86,19 @@ describe("legacy Shopify product revenue", () => {
 
     const result = await shopifyStats(["owner-1"], new URLSearchParams());
 
+    expect(result).toMatchObject({ totalOrders: 2, totalRevenue: 36 });
     expect(result.topProducts).toEqual(expect.arrayContaining([
       { name: "Known product", revenue: 36, quantity: 3 },
       { name: "Unknown product", revenue: null, quantity: null },
     ]));
+    expect(mocks.shopifyOrderCount).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.not.objectContaining({ isLineItemsComplete: true }),
+    }));
+    expect(mocks.shopifyOrderFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.not.objectContaining({ isLineItemsComplete: true }),
+    }));
+    expect(mocks.shopifyOrderItemFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { order: expect.not.objectContaining({ isLineItemsComplete: true }) },
+    }));
   });
 });

@@ -81,6 +81,7 @@ export const adminNavigationSections: AdminNavigationSection[] = [
       { href: "/admin/user-management", label: "User Management", icon: Users, countKey: "users" },
       { href: "/admin/activity-history", label: "Activity History", icon: History },
       { href: "/admin/inventory/product-performance", label: "Product Performance", icon: BarChart3 },
+      { href: "/admin/inventory/sku-mapping", label: "SKU Mapping", icon: FileCode },
     ],
   },
   {

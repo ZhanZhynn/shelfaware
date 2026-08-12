@@ -430,6 +430,7 @@ export async function importExcelOrders(
             data: {
               orderId: orderRecord.id,
               variantId: linkedVariant?.id || null,
+              shopeeItemId: null,
               shopeeModelId: linkedVariant?.modelId ?? null,
               productName,
               sku: row.sku || "",

@@ -4,12 +4,13 @@
  * Provides domain-specific query functions for products and orders.
  */
 
-import { shopifyGraphQL, PRODUCTS_QUERY, ORDERS_QUERY, FINANCE_ORDERS_QUERY } from "./server";
+import { shopifyGraphQL, PRODUCTS_QUERY, ORDERS_QUERY, ORDER_LINE_ITEMS_QUERY, FINANCE_ORDERS_QUERY } from "./server";
 import type {
   ShopifyProductNode,
   ShopifyProductsResponse,
   ShopifyOrderNode,
   ShopifyOrdersResponse,
+  ShopifyOrderLineItemsResponse,
   ShopifyFinanceOrderNode,
   ShopifyFinanceOrdersResponse,
 } from "./types";
@@ -88,12 +89,54 @@ export async function fetchAllOrders(
       { first: 50, after: cursor, query: queryString },
     );
 
-    allOrders.push(...data.orders.nodes);
+    for (const order of data.orders.nodes) {
+      allOrders.push(await fetchAllOrderLineItems(shopDomain, accessToken, order));
+    }
     hasNextPage = data.orders.pageInfo.hasNextPage;
     cursor = data.orders.pageInfo.endCursor;
   }
 
   return allOrders;
+}
+
+/** Fetch every nested line-item page before an order can replace local facts. */
+export async function fetchAllOrderLineItems(
+  shopDomain: string,
+  accessToken: string,
+  order: ShopifyOrderNode,
+): Promise<ShopifyOrderNode> {
+  const nodes = [...order.lineItems.nodes];
+  let { hasNextPage, endCursor } = order.lineItems.pageInfo;
+
+  try {
+    while (hasNextPage) {
+      if (!endCursor) {
+        throw new Error(`Shopify order ${order.id} indicated another line-item page without a cursor`);
+      }
+      const data = await shopifyGraphQL<ShopifyOrderLineItemsResponse>(
+        shopDomain,
+        accessToken,
+        ORDER_LINE_ITEMS_QUERY,
+        { id: order.id, after: endCursor },
+      );
+      if (!data.node) throw new Error(`Shopify order ${order.id} was not found while fetching line items`);
+      nodes.push(...data.node.lineItems.nodes);
+      ({ hasNextPage, endCursor } = data.node.lineItems.pageInfo);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...order,
+      // Keep the partial response only for diagnostics. The sync layer never persists it as facts.
+      lineItems: { nodes, pageInfo: { hasNextPage: true, endCursor } },
+      lineItemsFetchError: message,
+    };
+  }
+
+  return {
+    ...order,
+    lineItems: { nodes, pageInfo: { hasNextPage: false, endCursor } },
+  };
 }
 
 // ─── Finance Queries ───────────────────────────────────────────────────────

@@ -135,7 +135,12 @@ export interface ShopifyOrderNode {
     country: string | null;
     zip: string | null;
   } | null;
-  lineItems: { nodes: ShopifyLineItemNode[] };
+  lineItems: {
+    nodes: ShopifyLineItemNode[];
+    pageInfo: Pick<PageInfo, "hasNextPage" | "endCursor">;
+  };
+  // Set when nested pagination could not produce a canonical complete item snapshot.
+  lineItemsFetchError?: string;
 }
 
 export interface ShopifyLineItemNode {
@@ -146,9 +151,11 @@ export interface ShopifyLineItemNode {
   currentQuantity: number;
   unfulfilledQuantity: number;
   sku: string | null;
-  variant: { id: string; title: string; sku: string | null } | null;
+  product: { id: string } | null;
+  variant: { id: string; title: string; sku: string | null; product: { id: string } | null } | null;
   originalUnitPriceSet: MoneyBag;
   discountedUnitPriceSet: MoneyBag;
+  discountedTotalSet: MoneyBag;
 }
 
 export interface ShopifyOrdersResponse {
@@ -156,6 +163,12 @@ export interface ShopifyOrdersResponse {
     nodes: ShopifyOrderNode[];
     pageInfo: PageInfo;
   };
+}
+
+export interface ShopifyOrderLineItemsResponse {
+  node: {
+    lineItems: ShopifyOrderNode["lineItems"];
+  } | null;
 }
 
 // ─── Finance ──────────────────────────────────────────────────────────────

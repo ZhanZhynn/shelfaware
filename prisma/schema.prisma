@@ -151,12 +151,207 @@ model Product {
   orderItems       OrderItem[] // Orders containing this product (one-to-many relationship)
   channelMappings  ProductChannelMapping[] // Channel links (Shopee, etc.)
   stockMovements   StockMovement[] // Inbound/outbound movement ledger
+  salesSkuRecipeComponents SalesSkuRecipeComponent[]
   workspace        Workspace?              @relation(fields: [workspaceId], references: [id])
 
   @@unique([skuScopeId, sku])
   @@index([deletedAt])
   @@index([userId, sku])
   @@index([workspaceId])
+}
+
+// Shared cross-marketplace attribution catalog. These models deliberately have
+// no workspaceId: catalog ownership is global, while WMS Products stay physical.
+model ProductFamily {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  code        String     @unique
+  name        String
+  description String?
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now()) @db.Date
+  updatedAt   DateTime?  @db.Date
+  createdById String     @db.ObjectId
+  updatedById String?    @db.ObjectId
+  salesSkus   SalesSku[]
+  memberships SalesSkuFamilyMembership[]
+
+  @@unique([name])
+}
+
+model SalesSku {
+  id          String              @id @default(auto()) @map("_id") @db.ObjectId
+  code        String              @unique
+  name        String
+  familyId    String              @db.ObjectId
+  active      Boolean             @default(true)
+  createdAt   DateTime            @default(now()) @db.Date
+  updatedAt   DateTime?           @db.Date
+  createdById String              @db.ObjectId
+  updatedById String?             @db.ObjectId
+  family      ProductFamily       @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  familyMemberships SalesSkuFamilyMembership[]
+  mappings    MarketplaceSkuMapping[]
+  csvImportRows MarketplaceSkuMappingCsvImportRow[]
+  recipes     SalesSkuRecipe[]
+
+  @@index([familyId])
+}
+
+// CSV imports are durable review artifacts. Only rows copied into
+// MarketplaceSkuMapping by a committed batch affect attribution analytics.
+model MarketplaceSkuMappingCsvImportBatch {
+  id                     String   @id @default(auto()) @map("_id") @db.ObjectId
+  actorId                String   @db.ObjectId
+  filename               String
+  sourceHash             String
+  payloadFingerprint     String
+  idempotencyKey         String
+  commitIdempotencyKey   String?
+  commitPayloadFingerprint String?
+  status                 String   @default("draft") // draft | committed
+  validationSnapshot     Json
+  committedAt            DateTime? @db.Date
+  createdAt              DateTime @default(now()) @db.Date
+  updatedAt              DateTime @updatedAt @db.Date
+  rows                   MarketplaceSkuMappingCsvImportRow[]
+
+  @@unique([actorId, idempotencyKey])
+  @@index([actorId, createdAt])
+}
+
+model MarketplaceSkuMappingCsvImportRow {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  batchId            String   @db.ObjectId
+  rowNumber          Int
+  platform           String
+  shopId             String   @db.ObjectId
+  externalProductId  String
+  externalVariantId  String
+  offerKey           String?
+  salesSkuCode       String
+  salesSkuId         String?  @db.ObjectId
+  effectiveFrom      DateTime @db.Date
+  validationSnapshot Json
+  mappingResult      Json?
+  createdAt          DateTime @default(now()) @db.Date
+  batch              MarketplaceSkuMappingCsvImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  salesSku           SalesSku? @relation(fields: [salesSkuId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId])
+  @@index([platform, shopId, offerKey])
+}
+
+// New assignments are effective-dated. familyId remains as the legacy/current
+// pointer so existing catalog consumers remain compatible during migration.
+model SalesSkuFamilyMembership {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  salesSkuId      String        @db.ObjectId
+  productFamilyId String        @db.ObjectId
+  effectiveFrom   DateTime      @db.Date
+  effectiveTo     DateTime?     @db.Date
+  createdAt       DateTime      @default(now()) @db.Date
+  createdById     String        @db.ObjectId
+  salesSku        SalesSku      @relation(fields: [salesSkuId], references: [id], onDelete: Cascade)
+  productFamily   ProductFamily @relation(fields: [productFamilyId], references: [id], onDelete: Restrict)
+
+  @@unique([salesSkuId, effectiveFrom])
+  @@index([salesSkuId, effectiveFrom, effectiveTo])
+  @@index([productFamilyId, effectiveFrom, effectiveTo])
+}
+
+model SalesSkuRecipe {
+  id          String                    @id @default(auto()) @map("_id") @db.ObjectId
+  salesSkuId  String                    @db.ObjectId
+  name        String
+  status      String                    @default("confirmed") // draft | confirmed | retired
+  effectiveFrom DateTime                @db.Date
+  effectiveTo DateTime?                 @db.Date
+  createdAt   DateTime                  @default(now()) @db.Date
+  createdById String                    @db.ObjectId
+  salesSku    SalesSku                  @relation(fields: [salesSkuId], references: [id], onDelete: Cascade)
+  components  SalesSkuRecipeComponent[]
+
+  @@index([salesSkuId, effectiveFrom, effectiveTo])
+}
+
+model SalesSkuRecipeComponent {
+  id        String          @id @default(auto()) @map("_id") @db.ObjectId
+  recipeId  String          @db.ObjectId
+  productId String          @db.ObjectId
+  quantity  Int
+  recipe    SalesSkuRecipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([recipeId, productId])
+  @@index([productId])
+}
+
+model MarketplaceSkuMapping {
+  id                String                        @id @default(auto()) @map("_id") @db.ObjectId
+  platform          String
+  shopId            String                        @db.ObjectId // Internal platform-shop id, not an order line id.
+  offerKey          String // Stable external product/variant identity, e.g. shopee:123:456.
+  externalProductId String
+  externalVariantId String?
+  offerKind         String // variant | verified-product
+  salesSkuId        String                        @db.ObjectId
+  effectiveFrom     DateTime                      @db.Date
+  effectiveTo       DateTime?                     @db.Date
+  createdAt         DateTime                      @default(now()) @db.Date
+  createdById       String                        @db.ObjectId
+  supersedesId      String?                       @db.ObjectId
+  salesSku          SalesSku                      @relation(fields: [salesSkuId], references: [id], onDelete: Restrict)
+  events            MarketplaceSkuMappingEvent[]
+
+  @@unique([platform, shopId, offerKey, effectiveFrom])
+  @@index([platform, shopId, offerKey, effectiveFrom, effectiveTo])
+  @@index([salesSkuId, effectiveFrom, effectiveTo])
+}
+
+// One durable document per external offer serializes effective-dated mapping
+// changes. MongoDB transactions conflict when concurrent writers touch it.
+model MarketplaceSkuMappingOfferLock {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  platform  String
+  shopId    String   @db.ObjectId
+  offerKey  String
+  version   Int      @default(0)
+  updatedAt DateTime @default(now()) @db.Date
+
+  @@unique([platform, shopId, offerKey])
+}
+
+model MarketplaceSkuCandidate {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  platform          String
+  shopId            String   @db.ObjectId
+  offerKey          String
+  externalProductId String
+  externalVariantId String?
+  offerKind         String
+  normalizedSku     String
+  proposedSalesSkuId String? @db.ObjectId
+  confidence        String   @default("exact-normalized-sku")
+  status            String   @default("open") // open | dismissed | accepted
+  createdAt         DateTime @default(now()) @db.Date
+  reviewedAt        DateTime? @db.Date
+  reviewedById      String?  @db.ObjectId
+
+  @@unique([platform, shopId, offerKey])
+  @@index([status, platform])
+}
+
+model MarketplaceSkuMappingEvent {
+  id        String                @id @default(auto()) @map("_id") @db.ObjectId
+  mappingId String                @db.ObjectId
+  eventType String
+  actorId   String                @db.ObjectId
+  occurredAt DateTime             @default(now()) @db.Date
+  detail    Json?
+  mapping   MarketplaceSkuMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+
+  @@index([mappingId, occurredAt])
 }
 
 model ProductChannelMapping {
@@ -1017,6 +1212,7 @@ model ShopeeOrderItem {
   productId     String?               @db.ObjectId // Optional link to local Product (for cross-reference)
   variantId     String?               @db.ObjectId // FK to ShopeeProductVariant (denormalized link)
   shopeeModelId Int? // Shopee model ID (variant)
+  shopeeItemId  Int? // Stable parent item identity, retained for non-variant attribution
   productName   String // Product name snapshot
   sku           String? // SKU snapshot
   quantity      Int // Ordered quantity
@@ -1029,6 +1225,7 @@ model ShopeeOrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([variantId])
+  @@index([shopeeItemId])
 }
 
 model ShopeeSyncLog {
@@ -1706,12 +1903,14 @@ model ShopifyOrder {
   shop              ShopifyShop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
    items             ShopifyOrderItem[]
     financialQuality  String             @default("legacy-unverified")
-    financialRevision String             @default("legacy-v0")
+   financialRevision String             @default("legacy-v0")
    qualityMarkedAt   DateTime?
    sourceObservedAt  DateTime?
    rawFinancialPayload Json?
+    // Optional for MongoDB rollout. Missing legacy state is unsafe and excluded from attribution.
+    isLineItemsComplete Boolean?
 
-  @@index([shopId])
+   @@index([shopId])
   @@index([userId])
   @@index([orderStatus])
   @@index([shopifyCreatedAt])
@@ -1723,16 +1922,30 @@ model ShopifyOrderItem {
   orderId             String       @db.ObjectId
   shopId              String       @db.ObjectId
   variantId           String?      @db.ObjectId
-  shopifyLineId       String
-  name                String
-  title               String
-  quantity            Int
-  currentQuantity     Int
+   shopifyLineId       String
+   // Immutable upstream identities retained even when the local catalog variant is absent or deleted.
+   shopifyProductGid   String?
+   shopifyVariantGid   String?
+   name                String
+   title               String
+   quantity            Int
+   // Optional source facts keep pre-rollout Mongo documents readable; absent is unsafe.
+   orderedQuantity     Int?
+   currentQuantity     Int
   unfulfilledQuantity Int
   sku                 String?
   price               Float
-  discountedPrice     Float?
-  currency            String? // Original unit-price currency supplied by Shopify
+   discountedPrice     Float?
+   currency            String? // Original unit-price currency supplied by Shopify
+   originalUnitPriceAmount String?
+   originalUnitPriceScale  Int?
+   originalUnitPriceCurrency String?
+   discountedUnitPriceAmount String?
+   discountedUnitPriceScale  Int?
+   discountedUnitPriceCurrency String?
+   discountedLineAmount String?
+   discountedLineScale  Int?
+   discountedLineCurrency String?
   createdAt           DateTime     @default(now()) @db.Date
   order               ShopifyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
@@ -1743,6 +1956,173 @@ model ShopifyOrderItem {
 
 // Marketplace analytics state is deliberately channel-neutral: finance APIs and
 // history permissions differ by seller, region, and OAuth grant.
+// ─── Canonical Projection Foundation ──────────────────────────────────────
+
+// Shop-scoped stable external offer identity. Display snapshots (sellerSku,
+// names, image) are mutable and never used as identity.
+model MarketplaceOffer {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  platform          String
+  internalShopId    String    @db.ObjectId
+  externalProductId String
+  externalVariantId String?   // null with product sentinel for non-variants
+  identityKey       String    @unique
+  sellerSku         String?
+  productName       String?
+  variantName       String?
+  imageUrl          String?
+  firstSeenAt       DateTime  @default(now()) @db.Date
+  lastSeenAt        DateTime  @default(now()) @db.Date
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime? @db.Date
+
+  sourceLines  MarketplaceSourceSalesLine[]
+  offerFacts   MarketplaceOfferPerformanceFact[]
+
+  @@index([platform, internalShopId])
+  @@index([platform, internalShopId, sellerSku])
+}
+
+// Platform-neutral canonical source line. Each upstream order line is projected
+// once. Native money is stored in minor units with explicit scale and currency.
+model MarketplaceSourceSalesLine {
+  id                   String    @id @default(auto()) @map("_id") @db.ObjectId
+  platform             String
+  internalShopId       String    @db.ObjectId
+  externalOrderId      String
+  externalLineId       String
+  offerId              String?   @db.ObjectId
+  sellerSku            String?
+  productName          String?
+  orderDate            DateTime  @db.Date
+  marketplaceQuantity  Int?      // null when source unknown
+  grossItemSalesMinor  String?   // null when source unknown; BigInt as string
+  amountScale          Int       @default(2)
+  currency             String
+  orderStatus          String?
+  orderEligibility     String    @default("eligible") // eligible | ineligible | unknown
+  quantityQuality      String    @default("observed") // verified | observed | unknown
+  gmvQuality           String    @default("observed") // verified | observed | unknown
+  sourceRevision       String?
+  sourceObservedAt     DateTime  @default(now()) @db.Date
+  createdAt            DateTime  @default(now()) @db.Date
+  updatedAt            DateTime? @db.Date
+
+  offer                MarketplaceOffer? @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  offerFacts           MarketplaceOfferPerformanceFact[]
+  salesSkuFacts        SalesSkuPerformanceFact[]
+  wmsFacts             WmsProductSalesFact[]
+
+  @@unique([platform, internalShopId, externalOrderId, externalLineId])
+  @@index([platform, internalShopId, orderDate])
+  @@index([offerId])
+}
+
+// Offer-level projection keyed by source-line revision. Raw marketplace
+// quantity and native GMV, independent of any Sales SKU or recipe.
+model MarketplaceOfferPerformanceFact {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  sourceLineId        String    @db.ObjectId
+  offerId             String    @db.ObjectId
+  projectionKey       String    @unique
+  quantity            Int?      // null when source unknown
+  nativeGmvMinor      String?   // null when source unknown; BigInt as string
+  amountScale         Int       @default(2)
+  currency            String
+  saleDate            DateTime  @db.Date
+  calculationVersion  String    @default("v1")
+  projectedAt         DateTime  @default(now()) @db.Date
+  createdAt           DateTime  @default(now()) @db.Date
+  updatedAt           DateTime? @updatedAt
+
+  sourceLine          MarketplaceSourceSalesLine @relation(fields: [sourceLineId], references: [id], onDelete: Cascade)
+  offer               MarketplaceOffer           @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, saleDate])
+  @@index([sourceLineId])
+}
+
+// Confirmed-mapping projection keyed by source-line, mapping, calculation version.
+// Records Sales SKU identity, native amount, and marketplace units.
+model SalesSkuPerformanceFact {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  sourceLineId        String    @db.ObjectId
+  mappingId           String    @db.ObjectId
+  salesSkuId          String    @db.ObjectId
+  projectionKey       String    @unique
+  nativeAmountMinor   String    // BigInt as string
+  amountScale         Int       @default(2)
+  currency            String
+  marketplaceUnits    Int?      // null when source quantity unknown
+  saleDate            DateTime  @db.Date
+  calculationVersion  String    @default("v1")
+  projectedAt         DateTime  @default(now()) @db.Date
+  createdAt           DateTime  @default(now()) @db.Date
+  updatedAt           DateTime? @updatedAt
+
+  sourceLine          MarketplaceSourceSalesLine @relation(fields: [sourceLineId], references: [id], onDelete: Cascade)
+
+  @@index([salesSkuId, saleDate])
+  @@index([sourceLineId])
+  @@index([mappingId])
+}
+
+// Recipe-component projection keyed by source line, mapping, recipe version,
+// component, calculation version. Normalized physical units and allocated GMV.
+model WmsProductSalesFact {
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  sourceLineId          String    @db.ObjectId
+  mappingId             String    @db.ObjectId
+  recipeId              String    @db.ObjectId
+  wmsProductId          String    @db.ObjectId
+  projectionKey         String    @unique
+  normalizedUnits       Int       // marketplaceQuantity × unitsPerSalesSkuUnit
+  allocatedGmvMinor     String    // BigInt as string
+  allocationBasisPoints Int
+  amountScale           Int       @default(2)
+  currency              String
+  saleDate              DateTime  @db.Date
+  calculationVersion    String    @default("v1")
+  projectedAt           DateTime  @default(now()) @db.Date
+  createdAt             DateTime  @default(now()) @db.Date
+  updatedAt             DateTime? @updatedAt
+
+  sourceLine            MarketplaceSourceSalesLine @relation(fields: [sourceLineId], references: [id], onDelete: Cascade)
+
+  @@index([wmsProductId, saleDate])
+  @@index([sourceLineId])
+  @@index([mappingId])
+  @@index([recipeId])
+}
+
+// Admin-controlled backfill job with effective date, source bounds, checkpoints.
+model MappingBackfillRun {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  initiatedById       String    @db.ObjectId
+  platform            String
+  internalShopId      String?   @db.ObjectId // null = all shops
+  effectiveDate       DateTime  @db.Date
+  dateFrom            DateTime  @db.Date
+  dateTo              DateTime  @db.Date
+  calculationVersion  String    @default("v1")
+  idempotencyKey      String?
+  status              String    @default("pending") // pending | running | completed | completed_with_errors | failed | cancelled
+  checkpoint          Json?     // { lastSourceLineId, lastProcessedDate }
+  processedCount      Int       @default(0)
+  factCount           Int       @default(0)
+  errorCount          Int       @default(0)
+  errors              Json?     // Array of { sourceLineId, error }
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now()) @db.Date
+  updatedAt           DateTime? @db.Date
+
+  @@index([status])
+  @@index([platform, internalShopId])
+}
+
+// ─── Marketplace Analytics State ──────────────────────────────────────────
+
 model MarketplaceAnalyticsCapability {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   userId      String   @db.ObjectId

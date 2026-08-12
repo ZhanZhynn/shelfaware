@@ -460,15 +460,44 @@ export const ORDERS_QUERY = `
             currentQuantity
             unfulfilledQuantity
             sku
-            variant { id title sku }
+            product { id }
+            variant { id title sku product { id } }
             originalUnitPriceSet { shopMoney { amount currencyCode } }
             discountedUnitPriceSet { shopMoney { amount currencyCode } }
+            discountedTotalSet { shopMoney { amount currencyCode } }
           }
+          pageInfo { hasNextPage endCursor }
         }
       }
       pageInfo {
         hasNextPage
         endCursor
+      }
+    }
+  }
+`;
+
+export const ORDER_LINE_ITEMS_QUERY = `
+  query GetOrderLineItems($id: ID!, $after: String) {
+    node(id: $id) {
+      ... on Order {
+        lineItems(first: 100, after: $after) {
+          nodes {
+            id
+            name
+            title
+            quantity
+            currentQuantity
+            unfulfilledQuantity
+            sku
+            product { id }
+            variant { id title sku product { id } }
+            originalUnitPriceSet { shopMoney { amount currencyCode } }
+            discountedUnitPriceSet { shopMoney { amount currencyCode } }
+            discountedTotalSet { shopMoney { amount currencyCode } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
       }
     }
   }

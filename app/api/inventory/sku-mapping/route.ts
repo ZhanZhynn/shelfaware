@@ -98,7 +98,9 @@ export async function GET(request: NextRequest) {
     prisma.marketplaceSkuCandidate.findMany({
       where: { status: "open" },
       orderBy: { createdAt: "desc" },
-      take: 100,
+      // Candidate staging is the review worklist. Keep it complete for the
+      // current catalog import rather than silently hiding most open offers.
+      take: 2_000,
     }),
     prisma.shopeeProductVariant.findMany({
       select: {

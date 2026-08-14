@@ -223,11 +223,7 @@ export async function confirmMapping(
   };
   const offerKey = await resolveShopeeOffer(input);
   const effectiveFrom =
-    input.effectiveFrom ?? (await earliestEligibleSale(input));
-  if (!effectiveFrom)
-    throw new Error(
-      "No eligible Shopee sale was found for this offer. Choose an effective date explicitly.",
-    );
+    input.effectiveFrom ?? (await earliestEligibleSale(input)) ?? new Date();
   return withOfferLock(input, offerKey, async (tx) => {
     const salesSku = await tx.salesSku.findUnique({
       where: { id: input.salesSkuId },
@@ -250,7 +246,10 @@ export async function confirmMapping(
           platform: input.platform,
           shopId: input.shopId,
           offerKey,
-          proposedSalesSkuId: input.salesSkuId,
+          OR: [
+            { proposedSalesSkuId: input.salesSkuId },
+            { draftSalesSkuId: input.salesSkuId },
+          ],
           status: "open",
         },
         data: {

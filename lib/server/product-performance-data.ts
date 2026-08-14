@@ -17,8 +17,27 @@ export async function getProductPerformance(userId: string, from: Date, to: Date
   });
   const ids = products.map((product) => product.id);
   const mappedChannelIds = [...new Set(products.flatMap((product) => product.channelMappings.map((mapping) => mapping.channelProductId)))];
+
+  // Query orders first (indexed by createdAt), then fetch order items by orderId.
+  // This avoids Prisma's cross-collection join which forces a full collection scan on MongoDB.
+  const orders = await prisma.order.findMany({
+    where: {
+      status: { not: "cancelled" },
+      createdAt: { gte: from, lte: to },
+      ...(!dataScope?.sharedAdmin && { userId: { in: ownerIds } }),
+    },
+    select: { id: true, createdAt: true },
+  });
+  const orderIds = orders.map((order) => order.id);
+  const orderDateById = new Map(orders.map((order) => [order.id, order.createdAt]));
+
   const [items, reviews, categories, suppliers, mappingCounts, wmsFacts] = await Promise.all([
-    prisma.orderItem.findMany({ where: { productId: { in: ids }, order: { status: { not: "cancelled" }, createdAt: { gte: from, lte: to }, ...(!dataScope?.sharedAdmin && { userId: { in: ownerIds } }) } }, select: { productId: true, quantity: true, subtotal: true, order: { select: { createdAt: true } } } }),
+    orderIds.length > 0
+      ? prisma.orderItem.findMany({
+          where: { productId: { in: ids }, orderId: { in: orderIds } },
+          select: { productId: true, quantity: true, subtotal: true, orderId: true },
+        })
+      : Promise.resolve([]),
     prisma.productReview.groupBy({ by: ["productId"], where: { productId: { in: ids }, status: "approved" }, _count: { _all: true }, _avg: { rating: true } }),
     prisma.category.findMany({ where: { id: { in: [...new Set(products.map((product) => product.categoryId))] } }, select: { id: true, name: true } }),
     prisma.supplier.findMany({ where: { id: { in: [...new Set(products.map((product) => product.supplierId))] } }, select: { id: true, leadTimeDays: true } }),
@@ -57,11 +76,13 @@ export async function getProductPerformance(userId: string, from: Date, to: Date
   const productsById = new Map(products.map((product) => [product.id, product]));
   for (const item of items) {
     const product = productsById.get(item.productId);
+    const orderCreatedAt = orderDateById.get(item.orderId);
+    if (!orderCreatedAt) continue;
     const observedFrom = product ? Math.max(from.getTime(), product.createdAt.getTime()) : from.getTime();
-    if (item.order.createdAt.getTime() < observedFrom) continue;
+    if (orderCreatedAt.getTime() < observedFrom) continue;
     const current = sales.get(item.productId) ?? { units: 0, revenue: 0, early: 0, late: 0 };
     current.units += item.quantity; current.revenue += item.subtotal;
-    if (item.order.createdAt.getTime() < observedFrom + (to.getTime() - observedFrom) / 2) current.early += item.quantity; else current.late += item.quantity;
+    if (orderCreatedAt.getTime() < observedFrom + (to.getTime() - observedFrom) / 2) current.early += item.quantity; else current.late += item.quantity;
     sales.set(item.productId, current);
   }
   const reviewMap = new Map(reviews.map((review) => [review.productId, { count: review._count._all, averageRating: review._avg.rating ?? 0 }]));

@@ -96,8 +96,11 @@ model Order {
   updatedAt             DateTime?   @db.Date // Manually managed - null on create, set on update
   createdBy             String      @db.ObjectId // Same as userId, for clarity
   updatedBy             String?     @db.ObjectId // Last updated by user ID
-  items                 OrderItem[] // Order items (one-to-many relationship)
-  invoice               Invoice? // Invoice for this order (one-to-one relationship)
+items                 OrderItem[] // Order items (one-to-many relationship)
+  invoice               Invoice? // Invoice for an order (one-to-one relationship)
+
+  @@index([userId, status, createdAt])
+  @@index([createdAt])
 }
 
 model OrderItem {
@@ -112,6 +115,9 @@ model OrderItem {
   createdAt   DateTime @default(now()) @db.Date
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade) // Cascade delete when order is deleted
   product     Product  @relation(fields: [productId], references: [id]) // Reference to product
+
+  @@index([orderId])
+  @@index([productId, orderId])
 }
 
 model Permission {
@@ -182,6 +188,7 @@ model SalesSku {
   id          String              @id @default(auto()) @map("_id") @db.ObjectId
   code        String              @unique
   name        String
+  isKit       Boolean             @default(false) // Sitegiant is_kit source field.
   familyId    String              @db.ObjectId
   active      Boolean             @default(true)
   createdAt   DateTime            @default(now()) @db.Date
@@ -332,6 +339,9 @@ model MarketplaceSkuCandidate {
   offerKind         String
   normalizedSku     String
   proposedSalesSkuId String? @db.ObjectId
+  draftSalesSkuId   String? @db.ObjectId // Reviewer-selected iSKU awaiting final confirmation.
+  draftedAt         DateTime? @db.Date
+  draftedById       String? @db.ObjectId
   confidence        String   @default("exact-normalized-sku")
   status            String   @default("open") // open | dismissed | accepted
   createdAt         DateTime @default(now()) @db.Date
@@ -340,6 +350,7 @@ model MarketplaceSkuCandidate {
 
   @@unique([platform, shopId, offerKey])
   @@index([status, platform])
+  @@index([status, platform, draftSalesSkuId])
 }
 
 model MarketplaceSkuMappingEvent {

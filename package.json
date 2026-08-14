@@ -31,6 +31,8 @@
     "script:backfill-sourcing-po-currency": "tsx scripts/backfill-sourcing-po-currency.ts",
     "script:backfill-sourcing-quote-groups": "tsx scripts/backfill-sourcing-quote-groups.ts",
     "script:backfill-shipping-status": "tsx scripts/backfill-shipping-status.ts",
+    "script:import-sitegiant-catalog": "tsx scripts/import-sitegiant-catalog.ts",
+    "script:stage-shopee-sitegiant-candidates": "tsx scripts/stage-shopee-sitegiant-candidates.ts",
     "script:remove-sourcing-route": "tsx scripts/remove-sourcing-route.ts"
   },
   "dependencies": {

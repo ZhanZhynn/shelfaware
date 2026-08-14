@@ -296,7 +296,10 @@ describe("verified nonvariant Shopee attribution", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           id: "candidate",
-          proposedSalesSkuId: "sku",
+          OR: [
+            { proposedSalesSkuId: "sku" },
+            { draftSalesSkuId: "sku" },
+          ],
           status: "open",
         }),
       }),

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function SharedSkuMappingRedirect() {
+export default function InventoryLinkingReviewRedirect() {
   redirect("/admin/inventory/sku-mapping");
 }

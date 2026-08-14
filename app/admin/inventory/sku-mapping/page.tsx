@@ -1,5 +1,5 @@
-import { getSession } from "@/lib/auth-server";
-import { redirect } from "next/navigation";
-import { isSharedSkuMappingEnabled } from "@/lib/marketplace-attribution/feature-flags";
-import SkuMappingInbox from "@/components/sku-mapping/SkuMappingInbox";
-export default async function SkuMappingPage() { if (!isSharedSkuMappingEnabled()) redirect("/"); const session = await getSession(); if (!session) redirect("/login"); if (session.role === "sourcer") redirect("/"); return <SkuMappingInbox canMutate={session.role === "admin"} />; }
+import InventoryLinkingReview from "@/components/sku-mapping/InventoryLinkingReview";
+
+export default function InventoryLinkingPage() {
+  return <InventoryLinkingReview canMutate />;
+}

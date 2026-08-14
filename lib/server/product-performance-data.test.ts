@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     product: { findMany: vi.fn() },
+    order: { findMany: vi.fn() },
     orderItem: { findMany: vi.fn() },
     productReview: { groupBy: vi.fn() },
     category: { findMany: vi.fn() },
@@ -26,6 +27,7 @@ describe("getProductPerformance", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.product.findMany.mockResolvedValue([product]);
+    prismaMock.order.findMany.mockResolvedValue([]);
     prismaMock.orderItem.findMany.mockResolvedValue([]);
     prismaMock.productReview.groupBy.mockResolvedValue([]);
     prismaMock.category.findMany.mockResolvedValue([]);
@@ -43,11 +45,16 @@ describe("getProductPerformance", () => {
 
   it("queries WMS orders through the normalized selected end day", async () => {
     const end = new Date("2026-01-31T23:59:59.999Z");
-    prismaMock.orderItem.findMany.mockResolvedValue([{ productId: "product-1", quantity: 2, subtotal: 20, order: { createdAt: end } }]);
+    const orderDate = new Date("2026-01-30T00:00:00.000Z");
+    prismaMock.order.findMany.mockResolvedValue([{ id: "order-1", createdAt: orderDate }]);
+    prismaMock.orderItem.findMany.mockResolvedValue([{ productId: "product-1", quantity: 2, subtotal: 20, orderId: "order-1" }]);
     const data = await getProductPerformance("owner-1", new Date("2026-01-01T00:00:00.000Z"), end);
 
+    expect(prismaMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ createdAt: { gte: new Date("2026-01-01T00:00:00.000Z"), lte: end } }),
+    }));
     expect(prismaMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ order: expect.objectContaining({ createdAt: { gte: new Date("2026-01-01T00:00:00.000Z"), lte: end } }) }),
+      where: expect.objectContaining({ orderId: { in: ["order-1"] } }),
     }));
     expect(data.products[0]?.unitsSold).toBe(2);
   });
@@ -58,23 +65,25 @@ describe("getProductPerformance", () => {
     expect(prismaMock.product.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ AND: expect.arrayContaining([expect.objectContaining({ OR: [{ userId: { in: ["admin-1"] }, workspaceId: null }, { workspaceId: { not: null } }] })]) }),
     }));
-    expect(prismaMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ order: expect.not.objectContaining({ userId: expect.anything() }) }),
+    expect(prismaMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.not.objectContaining({ userId: expect.anything() }),
     }));
   });
 
   it("filters orders by userId in single-tenant mode (no dataScope)", async () => {
     await getProductPerformance("owner-1", new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-31T23:59:59.999Z"));
 
-    expect(prismaMock.orderItem.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ order: expect.objectContaining({ userId: { in: ["owner-1"] } }) }),
+    expect(prismaMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ userId: { in: ["owner-1"] } }),
     }));
   });
 
   it("reports both WMS sales and marketplace facts when both exist", async () => {
     const from = new Date("2026-01-01T00:00:00.000Z");
     const to = new Date("2026-01-31T23:59:59.999Z");
-    prismaMock.orderItem.findMany.mockResolvedValue([{ productId: "product-1", quantity: 5, subtotal: 50, order: { createdAt: new Date("2026-01-30T00:00:00.000Z") } }]);
+    const orderDate = new Date("2026-01-30T00:00:00.000Z");
+    prismaMock.order.findMany.mockResolvedValue([{ id: "order-1", createdAt: orderDate }]);
+    prismaMock.orderItem.findMany.mockResolvedValue([{ productId: "product-1", quantity: 5, subtotal: 50, orderId: "order-1" }]);
     prismaMock.wmsProductSalesFact.findMany.mockResolvedValue([
       { wmsProductId: "product-1", normalizedUnits: 3, allocatedGmvMinor: "3000", currency: "PHP", amountScale: 2, mappingId: "mapping-1", sourceLine: { offerId: "offer-1" } },
       { wmsProductId: "product-1", normalizedUnits: 2, allocatedGmvMinor: "2000", currency: "PHP", amountScale: 2, mappingId: "mapping-1", sourceLine: { offerId: "offer-1" } },
@@ -84,7 +93,7 @@ describe("getProductPerformance", () => {
       .mockResolvedValueOnce([{ salesSkuId: "sku-1", offerKey: "offer-1" }, { salesSkuId: "sku-1", offerKey: "offer-x" }]);
 
     const data = await getProductPerformance("owner-1", from, to);
-    const row = data.products[0];
+    const row = data.products[0]!;
 
     expect(row.unitsSold).toBe(5);
     expect(row.marketplaceNormalizedUnits).toBe(5);
@@ -96,10 +105,12 @@ describe("getProductPerformance", () => {
   it("returns marketplace fields as null when no facts exist", async () => {
     const from = new Date("2026-01-01T00:00:00.000Z");
     const to = new Date("2026-01-31T23:59:59.999Z");
-    prismaMock.orderItem.findMany.mockResolvedValue([{ productId: "product-1", quantity: 5, subtotal: 50, order: { createdAt: new Date("2026-01-30T00:00:00.000Z") } }]);
+    const orderDate = new Date("2026-01-30T00:00:00.000Z");
+    prismaMock.order.findMany.mockResolvedValue([{ id: "order-1", createdAt: orderDate }]);
+    prismaMock.orderItem.findMany.mockResolvedValue([{ productId: "product-1", quantity: 5, subtotal: 50, orderId: "order-1" }]);
 
     const data = await getProductPerformance("owner-1", from, to);
-    const row = data.products[0];
+    const row = data.products[0]!;
 
     expect(row.unitsSold).toBe(5);
     expect(row.marketplaceNormalizedUnits).toBeNull();
@@ -119,7 +130,7 @@ describe("getProductPerformance", () => {
       .mockResolvedValueOnce([{ salesSkuId: "sku-2", offerKey: "offer-2" }]);
 
     const data = await getProductPerformance("owner-1", from, to);
-    const row = data.products[0];
+    const row = data.products[0]!;
 
     expect(row.unitsSold).toBe(0);
     expect(row.marketplaceNormalizedUnits).toBe(10);
@@ -149,7 +160,7 @@ describe("getProductPerformance", () => {
       ]);
 
     const data = await getProductPerformance("owner-1", from, to);
-    const row = data.products[0];
+    const row = data.products[0]!;
 
     expect(row.marketplaceCoverage).toEqual({ mappedOffers: 2, totalOffers: 5, mappingPercent: 40 });
     expect(row.reasons).toContain("low-marketplace-mapping-coverage");
@@ -168,7 +179,7 @@ describe("getProductPerformance", () => {
       .mockResolvedValueOnce([{ salesSkuId: "sku-1", offerKey: "offer-1" }]);
 
     const data = await getProductPerformance("owner-1", from, to);
-    const row = data.products[0];
+    const row = data.products[0]!;
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("amountScale mismatch"));
     expect(row.marketplaceRevenue).toEqual({ PHP: { minor: 203000, scale: 2 } });

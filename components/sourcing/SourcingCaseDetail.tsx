@@ -62,6 +62,7 @@ import {
 import SourcingPurchaseOrderPanel from "./SourcingPurchaseOrderPanel";
 import { SourcingLandedCostCard } from "./SourcingLandedCostCard";
 import { SourcingRequestFields } from "./SourcingRequestFields";
+import VariantSourcingCaseDetail from "./VariantSourcingCaseDetail";
 
 const editableStages = ["draft", "sourcing", "changes_requested"];
 const label = (value: string) => value.replaceAll("_", " ");
@@ -184,7 +185,7 @@ function quoteValues(quote: any): SourcingQuoteInput {
   };
 }
 
-export default function SourcingCaseDetail({
+function LegacySourcingCaseDetail({
   caseId,
   basePath = "/sourcing",
 }: {
@@ -2113,4 +2114,10 @@ export default function SourcingCaseDetail({
       </Dialog>
     </main>
   );
+}
+
+export default function SourcingCaseDetail({ caseId, basePath = "/sourcing" }: { caseId: string; basePath?: string }) {
+  const { data: item } = useSourcingCase(caseId);
+  if (item?.variants?.length) return <VariantSourcingCaseDetail caseId={caseId} basePath={basePath} />;
+  return <LegacySourcingCaseDetail caseId={caseId} basePath={basePath} />;
 }

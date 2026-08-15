@@ -20,13 +20,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const user = await getSessionFromRequest(request);
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const item = await prisma.sourcingCase.findUnique({ where: { id: (await params).id }, include: { quotes: { orderBy: { revision: "desc" } }, orders: { include: { purchaseOrder: { include: { items: true, supplier: { select: { id: true, name: true } } } } } }, events: { orderBy: { createdAt: "desc" } }, comments: { include: { author: { select: { id: true, name: true, email: true, image: true } } }, orderBy: { createdAt: "asc" } }, attachments: { orderBy: { createdAt: "desc" } } } });
+    const item = await prisma.sourcingCase.findUnique({ where: { id: (await params).id }, include: { variants: { orderBy: { position: "asc" }, include: { selection: true } }, quotes: { orderBy: { revision: "desc" }, include: { lines: { orderBy: { createdAt: "asc" } } } }, orders: { include: { purchaseOrder: { include: { items: true, supplier: { select: { id: true, name: true } } } } } }, events: { orderBy: { createdAt: "desc" } }, comments: { include: { author: { select: { id: true, name: true, email: true, image: true } } }, orderBy: { createdAt: "asc" } }, attachments: { orderBy: { createdAt: "desc" } } } });
     if (!item) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
     const access = await requireWorkspaceRole(user, item.workspaceId, ["admin", "sourcer"]);
     requireAssignedSourcer(user, item.assignedToId);
     const canAdmin = access.globalAdmin || access.role === "admin";
     const assignee = item.assignedToId ? await prisma.user.findUnique({ where: { id: item.assignedToId }, select: { name: true, email: true } }) : null;
-    const currentCnyMyrRate = await getCurrentExchangeRate("CNY", "MYR");
+    const [currentCnyMyrRate, workspace] = await Promise.all([getCurrentExchangeRate("CNY", "MYR"), prisma.workspace.findUnique({ where: { id: item.workspaceId }, select: { sourcingCostConfig: true } })]);
     // Phase 8 groups new offers explicitly. Older cases had one quote stream,
     // so expose their unbackfilled revisions as one group until the script runs.
     const legacyGroupId = item.quotes.find((quote) => quote.quoteGroupId === quote.id)?.quoteGroupId
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         },
       };
     });
-    return NextResponse.json({ ...item, quotes, orders, assignee, attachments: item.attachments.map((attachment) => ({ ...attachment, canDelete: attachment.uploadedById === user.id })), capabilities: {
+    return NextResponse.json({ ...item, quotes, orders, assignee, costConfig: workspace?.sourcingCostConfig ?? null, attachments: item.attachments.map((attachment) => ({ ...attachment, canDelete: attachment.uploadedById === user.id })), capabilities: {
       canAssign: canAdmin,
       canEditQuote: canEditQuote(access.role, access.globalAdmin, item.assignedToId, user.id, item.stage),
       canDecide: canAdmin,

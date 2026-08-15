@@ -12,6 +12,7 @@ import { ZodError } from "zod";
 export const sourcingListInclude = {
   quotes: { orderBy: { revision: "desc" as const }, take: 1 },
   orders: true,
+  variants: { orderBy: { position: "asc" as const } },
   attachments: {
     where: {
       mimeType: { startsWith: "image/" },

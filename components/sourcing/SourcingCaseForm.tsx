@@ -32,6 +32,8 @@ import {
 } from "@/lib/validations/sourcing";
 
 const MAX_PHOTOS = 5;
+const splitValues = (value: string) => [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
+const variantKey = (size: string, material: string, colour: string) => [size, material, colour].join("\u0000");
 
 export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?: string }) {
   const router = useRouter();
@@ -44,6 +46,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
       workspaceId: params.get("workspaceId") || "",
       title: "",
       photoUrls: [],
+      variants: [],
     },
   });
   const workspaceId = form.watch("workspaceId");
@@ -56,6 +59,10 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
   const { data: templates = [] } = useSourcingTemplates(workspaceId);
   const [templateName, setTemplateName] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
+  const [sizes, setSizes] = useState("");
+  const [materials, setMaterials] = useState("");
+  const [colours, setColours] = useState("");
+  const [variantQuantities, setVariantQuantities] = useState<Record<string, number>>({});
   const title = form.watch("title") || "";
   const assignedToId = form.watch("assignedToId");
   const isAdminView = basePath.startsWith("/admin");
@@ -65,9 +72,22 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
     if (!workspaceId && workspaces[0]?.id) form.setValue("workspaceId", workspaces[0].id);
   }, [form, workspaceId, workspaces]);
 
+  const generatedVariants = (() => {
+    const sizeValues = splitValues(sizes); const materialValues = splitValues(materials); const colourValues = splitValues(colours);
+    if (!sizeValues.length && !materialValues.length && !colourValues.length) return [];
+    return (sizeValues.length ? sizeValues : [""]).flatMap((size) =>
+      (materialValues.length ? materialValues : [""]).flatMap((material) =>
+        (colourValues.length ? colourValues : [""]).map((colour) => ({
+          size: size || undefined, material: material || undefined, colour: colour || undefined,
+          requestedQuantity: variantQuantities[variantKey(size, material, colour)] || Number(form.getValues("requestedQuantity")) || 1,
+        })),
+      ),
+    );
+  })();
   const submit = async (values: SourcingCaseInput, assign: boolean) => {
     const result: any = await create.mutateAsync({
       ...values,
+      variants: generatedVariants,
       assignedToId: assign ? values.assignedToId : undefined,
     });
     for (const photo of photos) await uploadPhoto.mutateAsync({ id: result.id, file: photo });
@@ -86,6 +106,14 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
     </label>
   );
   const isSubmitting = create.isPending || uploadPhoto.isPending;
+  const submitForm = (assign: boolean) => {
+    if (!generatedVariants.length) {
+      form.setError("variants", { message: "Add at least one size, material, or colour." });
+      return;
+    }
+    form.setValue("variants", generatedVariants, { shouldValidate: true });
+    void form.handleSubmit((values) => submit(values, assign))();
+  };
 
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
@@ -94,7 +122,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
         <h1 className="mt-1 text-2xl font-bold">Request a product</h1>
         <p className="mt-1 text-muted-foreground">Tell the sourcing team what you need. You can add more details later.</p>
       </div>
-      <form className="space-y-5" onSubmit={form.handleSubmit((values) => submit(values, !!values.assignedToId))}>
+      <form className="space-y-5" onSubmit={(event) => { event.preventDefault(); submitForm(!!form.getValues("assignedToId")); }}>
         <Card>
           <CardHeader>
             <CardTitle>Product details</CardTitle>
@@ -107,7 +135,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
                 {form.formState.errors.title && <span className="text-xs text-destructive">{form.formState.errors.title.message}</span>}
               </label>
               <label className="grid gap-1.5 text-sm font-medium">
-                How many do you need?
+                Units per variant
                 <Input type="number" min="1" placeholder="Optional" {...form.register("requestedQuantity")} />
               </label>
             </div>
@@ -160,29 +188,40 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
           </Card>
         )}
 
-        <details className="group rounded-xl border bg-card">
+
+        <details open className="group rounded-xl border bg-card">
           <summary className="cursor-pointer list-none px-6 py-5 font-semibold">
             Add more details <span className="ml-1 text-sm font-normal text-muted-foreground">Optional</span>
           </summary>
           <CardContent className="grid gap-4 border-t pt-5 sm:grid-cols-2">
-            {workspaces.length > 1 && (
-              <label className="grid gap-1.5 text-sm font-medium">
-                Workspace
-                <Select value={workspaceId} onValueChange={(value) => form.setValue("workspaceId", value)}>
-                  <SelectTrigger><SelectValue placeholder="Select workspace" /></SelectTrigger>
-                  <SelectContent>{workspaces.map((workspace: any) => <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </label>
-            )}
-            {field("targetUnitPriceMyr", "Target unit cost (RM)", "Optional", "number")}
-            {field("size", "Size or dimensions", "e.g. 30 x 20 cm")}
-            {field("material", "Material", "e.g. linen, bamboo, PP plastic")}
-            {field("variant", "Colour, style, or variant", "Optional")}
+            {/* {workspaces.length > 1 && ( */}
+            {/*   <label className="grid gap-1.5 text-sm font-medium"> */}
+            {/*     Workspace */}
+            {/*     <Select value={workspaceId} onValueChange={(value) => form.setValue("workspaceId", value)}> */}
+            {/*       <SelectTrigger><SelectValue placeholder="Select workspace" /></SelectTrigger> */}
+            {/*       <SelectContent>{workspaces.map((workspace: any) => <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>)}</SelectContent> */}
+            {/*     </Select> */}
+            {/*   </label> */}
+            {/* )} */}
+            {/* {field("targetUnitPriceMyr", "Target unit cost (RM)", "Optional", "number")} */}
+            <div className="sm:col-span-2">
+              <p className="font-medium">Variants to source <span className="text-destructive">*</span></p>
+              <p className="mt-1 text-sm text-muted-foreground">Enter comma-separated values. Every size, material, and colour combination becomes a separate sourcing variant.</p>
+            </div>
+            <label className="grid gap-1.5 text-sm font-medium">Sizes<Input value={sizes} onChange={(event) => setSizes(event.target.value)} placeholder="e.g. S, M, L" /></label>
+            <label className="grid gap-1.5 text-sm font-medium">Materials<Input value={materials} onChange={(event) => setMaterials(event.target.value)} placeholder="e.g. linen, canvas" /></label>
+            <label className="grid gap-1.5 text-sm font-medium sm:col-span-2">Colours<Input value={colours} onChange={(event) => setColours(event.target.value)} placeholder="e.g. natural, black, navy" /></label>
+            <div className="rounded-lg border bg-muted/30 p-3 text-sm sm:col-span-2">
+              <p className="font-medium">{generatedVariants.length} variant{generatedVariants.length === 1 ? "" : "s"} will be sourced</p>
+              {generatedVariants.length > 0 ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{generatedVariants.map((variant) => {
+                const key = variantKey(variant.size || "", variant.material || "", variant.colour || "");
+                return <label key={key} className="flex items-center justify-between gap-3 rounded border bg-background px-3 py-2"><span>{[variant.size, variant.material, variant.colour].filter(Boolean).join(" / ")}</span>
+                  {/* <Input className="h-8 w-24" type="number" min="1" value={variant.requestedQuantity} onChange={(event) => setVariantQuantities((current) => ({ ...current, [key]: Number(event.target.value) || 1 }))} /> */}
+                </label>;
+              })}</div> : <p className="mt-1 text-muted-foreground">Add at least one size, material, or colour.</p>}
+              {form.formState.errors.variants && <p className="mt-2 text-xs text-destructive">{form.formState.errors.variants.message}</p>}
+            </div>
             {field("referenceUrl", "Product link", "Paste a Shopee, Lazada, or website link")}
-            <label className="grid gap-1.5 text-sm font-medium sm:col-span-2">
-              Extra notes
-              <Textarea rows={3} placeholder="Budget, packaging, quality, delivery, or supplier requirements" {...form.register("notes")} />
-            </label>
             {templates.length > 0 && (
               <label className="grid gap-1.5 text-sm font-medium sm:col-span-2">
                 Start from a saved template
@@ -195,16 +234,16 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
                 </Select>
               </label>
             )}
-            {isAdminView && (
-              <div className="grid gap-2 border-t pt-4 sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Reusable template name" />
-                <Button type="button" variant="outline" disabled={!workspaceId || !templateName.trim()} isLoading={createTemplate.isPending} onClick={async () => {
-                  const values = form.getValues();
-                  await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr } });
-                  setTemplateName("");
-                }}>Save as reusable template</Button>
-              </div>
-            )}
+            {/* {isAdminView && ( */}
+            {/*   <div className="grid gap-2 border-t pt-4 sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto]"> */}
+            {/*     <Input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="Reusable template name" /> */}
+            {/*     <Button type="button" variant="outline" disabled={!workspaceId || !templateName.trim()} isLoading={createTemplate.isPending} onClick={async () => { */}
+            {/*       const values = form.getValues(); */}
+            {/*       await createTemplate.mutateAsync({ workspaceId, name: templateName, data: { title: values.title, size: values.size, material: values.material, variant: values.variant, specifications: values.specifications, requestedQuantity: values.requestedQuantity, targetUnitPriceMyr: values.targetUnitPriceMyr } }); */}
+            {/*       setTemplateName(""); */}
+            {/*     }}>Save as reusable template</Button> */}
+            {/*   </div> */}
+            {/* )} */}
           </CardContent>
         </details>
 
@@ -215,7 +254,9 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
           <CardContent className="grid gap-4 sm:grid-cols-2">
             {canAssign ? (
               <label className="grid gap-1.5 text-sm font-medium">
+                <div>
                 Who should source this? <span className="text-destructive">*</span>
+                </div>
                 <Select value={assignedToId || undefined} onValueChange={(value) => form.setValue("assignedToId", value)}>
                   <SelectTrigger><SelectValue placeholder="Choose a sourcer" /></SelectTrigger>
                   <SelectContent>
@@ -236,7 +277,7 @@ export default function SourcingCaseForm({ basePath = "/sourcing" }: { basePath?
         </Card>
 
         <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
-          <Button type="button" variant="outline" isLoading={isSubmitting} onClick={form.handleSubmit((values) => submit(values, false))}>Save for later</Button>
+          <Button type="button" variant="outline" isLoading={isSubmitting} onClick={() => submitForm(false)}>Save for later</Button>
           <Button type="submit" className="min-h-11 px-6" disabled={canAssign && (!assignedToId || sourcers.length === 0)} isLoading={isSubmitting}>
             {canAssign ? "Send to sourcer" : "Create request"}
           </Button>

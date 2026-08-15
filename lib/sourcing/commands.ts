@@ -281,6 +281,7 @@ function assertVersion(version: number, expected: number) {
 const listInclude = {
   quotes: { orderBy: { revision: "desc" as const }, take: 1 },
   orders: true,
+  variants: { orderBy: { position: "asc" as const } },
 };
 
 export async function createSourcingCase(
@@ -295,6 +296,9 @@ export async function createSourcingCase(
     throw new SourcingAccessError("Title is required", 400);
   const assignedToId =
     input.assignedToId || (access.role === "sourcer" ? actor.id : null);
+  const requestedVariants = input.variants.length
+    ? input.variants
+    : [{ size: null, material: null, colour: null, targetUnitPriceMyr: null, requestedQuantity: input.requestedQuantity ?? 1 }];
   if (assignedToId) {
     if (input.assignedToId && !access.globalAdmin && access.role !== "admin")
       throw new SourcingAccessError("Only workspace admins can assign cases");
@@ -339,6 +343,17 @@ export async function createSourcingCase(
         notes: input.notes?.trim() || null,
         requestedQuantity: input.requestedQuantity ?? null,
         targetUnitPriceMyr: input.targetUnitPriceMyr ?? null,
+        variants: {
+          create: requestedVariants.map((variant, position) => ({
+            workspaceId: input.workspaceId,
+            position,
+            size: variant.size?.trim() || null,
+            material: variant.material?.trim() || null,
+            colour: variant.colour?.trim() || null,
+            requestedQuantity: variant.requestedQuantity,
+            targetUnitPriceMyr: variant.targetUnitPriceMyr ?? null,
+          })),
+        },
         assignedToId,
         createdById: actor.id,
         stage: assignedToId ? "sourcing" : "draft",

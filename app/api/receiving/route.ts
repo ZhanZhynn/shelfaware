@@ -87,10 +87,18 @@ export async function POST(request: NextRequest) {
         if (complete) {
           await tx.purchaseOrder.update({ where: { id: po.id }, data: { status: "received", receivedAt: new Date(), updatedBy: user.id } });
           if (po.sourcingOrder?.caseId) {
-            const now = new Date();
-            await completeSourcingSla(tx, po.sourcingOrder.caseId, "shipment", now);
-            await tx.sourcingCase.update({ where: { id: po.sourcingOrder.caseId }, data: { stage: "received", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now } });
-            await tx.sourcingEvent.create({ data: { caseId: po.sourcingOrder.caseId, workspaceId: po.workspaceId!, actorId: user.id, type: "received", payload: { purchaseOrderId: po.id, poNumber: po.poNumber } } });
+            const linkedOrders = await tx.sourcingOrder.findMany({
+              where: { caseId: po.sourcingOrder.caseId },
+              include: { purchaseOrder: { select: { status: true } } },
+            });
+            // A variant case can create one PO per supplier. Keep it in progress
+            // until every selected supplier order has been fully received.
+            if (linkedOrders.every((order) => order.purchaseOrder?.status === "received")) {
+              const now = new Date();
+              await completeSourcingSla(tx, po.sourcingOrder.caseId, "shipment", now);
+              await tx.sourcingCase.update({ where: { id: po.sourcingOrder.caseId }, data: { stage: "received", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now } });
+              await tx.sourcingEvent.create({ data: { caseId: po.sourcingOrder.caseId, workspaceId: po.workspaceId!, actorId: user.id, type: "received", payload: { purchaseOrderId: po.id, poNumber: po.poNumber } } });
+            }
           }
         }
         if (po.workspaceId) {

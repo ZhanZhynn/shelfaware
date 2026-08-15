@@ -33,6 +33,15 @@ const priceBreak = z.object({
   minQuantity: z.coerce.number().int().positive(),
   unitPriceRmb: z.coerce.number().nonnegative(),
 });
+const sourcingVariant = z.object({
+  size: optionalText(200),
+  material: optionalText(200),
+  colour: optionalText(200),
+  requestedQuantity: z.coerce.number().int().positive("Quantity is required"),
+  targetUnitPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
+}).refine((variant) => variant.size || variant.material || variant.colour, {
+  message: "Each variant needs a size, material, or colour",
+});
 
 export const sourcingCaseSchema = z.object({
   workspaceId: z.string().min(1, "Workspace is required"),
@@ -48,6 +57,7 @@ export const sourcingCaseSchema = z.object({
   requestedQuantity: optionalNumber(z.coerce.number().int().positive()),
   targetUnitPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
   assignedToId: z.string().min(1).optional().nullable(),
+  variants: z.array(sourcingVariant).max(200).default([]),
 });
 
 export const sourcingRequestUpdateSchema = sourcingCaseSchema
@@ -82,6 +92,46 @@ export const sourcingQuoteSchema = z.object({
   priceBreaks: z.array(priceBreak).max(20).optional().default([]),
   remarks: optionalText(4000),
 });
+export const sourcingQuoteLineSchema = z.object({
+  caseVariantId: z.string().min(1),
+  availability: z.enum(["available", "unavailable"]),
+  unitPriceRmb: optionalNumber(z.coerce.number().positive()),
+  piecesPerSellingUnit: optionalNumber(z.coerce.number().int().positive()),
+  cartonLengthCm: optionalNumber(z.coerce.number().positive()),
+  cartonWidthCm: optionalNumber(z.coerce.number().positive()),
+  cartonHeightCm: optionalNumber(z.coerce.number().positive()),
+  piecesPerCarton: optionalNumber(z.coerce.number().int().positive()),
+  marketPriceMyr: optionalNumber(z.coerce.number().positive()),
+  marketPack: optionalNumber(z.coerce.number().int().positive()),
+  overrideCostMyr: optionalNumber(z.coerce.number().positive()),
+  moq: optionalNumber(z.coerce.number().int().positive()),
+  leadTimeDays: optionalNumber(z.coerce.number().int().nonnegative()),
+  notes: optionalText(2000),
+}).superRefine((line, context) => {
+  if (line.availability === "available" && !line.unitPriceRmb && !line.overrideCostMyr)
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["unitPriceRmb"], message: "Available variants need a quoted price" });
+});
+
+export const sourcingVariantQuoteSheetSchema = z.object({
+  supplierId: z.string().min(1).optional().nullable(),
+  supplierName: z.string().trim().min(1, "Supplier is required").max(200),
+  paymentTerms: optionalText(500),
+  leadTimeDays: optionalNumber(z.coerce.number().int().nonnegative()),
+  notes: optionalText(4000),
+  lines: z.array(sourcingQuoteLineSchema).min(1),
+});
+
+export const sourcingVariantSelectionSchema = z.object({
+  caseVariantId: z.string().min(1),
+  quoteLineId: z.string().min(1).optional(),
+  status: z.enum(["selected", "skipped"]),
+  skipReason: optionalText(1000),
+}).superRefine((selection, context) => {
+  if (selection.status === "selected" && !selection.quoteLineId)
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["quoteLineId"], message: "Select an offer" });
+  if (selection.status === "skipped" && !selection.skipReason)
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["skipReason"], message: "Explain why this variant is skipped" });
+});
 
 export const sourcingCommandSchema = z
   .object({
@@ -103,6 +153,10 @@ export const sourcingCommandSchema = z
       "archive",
       "revive",
       "repeat",
+      "submit_variant_quote",
+      "save_variant_quote",
+      "confirm_variant_selection",
+      "create_variant_orders",
     ]),
     version: z.number().int().positive(),
     assigneeId: z.string().min(1).optional(),
@@ -112,6 +166,8 @@ export const sourcingCommandSchema = z
     orderQuantity: z.coerce.number().int().positive().optional(),
     quote: sourcingQuoteSchema.optional(),
     reason: z.string().trim().min(1).max(2000).optional(),
+    quoteSheet: sourcingVariantQuoteSheetSchema.optional(),
+    selections: z.array(sourcingVariantSelectionSchema).optional(),
   })
   .superRefine((value, context) => {
     if (["create_quote", "save_quote", "submit_quote"].includes(value.action) && !value.quote) {
@@ -137,6 +193,10 @@ export const sourcingCommandSchema = z
         message: "An exchange-rate override reason is required",
       });
     }
+    if (["save_variant_quote", "submit_variant_quote"].includes(value.action) && !value.quoteSheet)
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["quoteSheet"], message: "A supplier quote sheet is required" });
+    if (value.action === "confirm_variant_selection" && !value.selections?.length)
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["selections"], message: "Choose or skip every variant" });
   });
 
 export const sourcingCommentSchema = z.object({
@@ -183,6 +243,8 @@ export const sourcingCostSettingsSchema = z.object({
 export type SourcingCaseInput = z.infer<typeof sourcingCaseSchema>;
 export type SourcingRequestUpdateInput = z.infer<typeof sourcingRequestUpdateSchema>;
 export type SourcingQuoteInput = z.infer<typeof sourcingQuoteSchema>;
+export type SourcingVariantQuoteSheetInput = z.infer<typeof sourcingVariantQuoteSheetSchema>;
+export type SourcingVariantSelectionInput = z.infer<typeof sourcingVariantSelectionSchema>;
 export type SourcingCommentInput = z.infer<typeof sourcingCommentSchema>;
 export type SourcingNextActionInput = z.infer<typeof sourcingNextActionSchema>;
 export type SourcingSlaSettingsInput = z.infer<typeof sourcingSlaSettingsSchema>;

@@ -604,6 +604,9 @@ model Workspace {
   sourcingAttachments   SourcingAttachment[]
   sourcingSlaRecords    SourcingSlaRecord[]
   sourcingCostScenarios SourcingCostScenario[]
+  sourcingCaseVariants  SourcingCaseVariant[]
+  sourcingQuoteLines    SourcingQuoteLine[]
+  sourcingSelections    SourcingVariantSelection[]
   purchaseReceipts      PurchaseReceipt[]
   supplierEvaluations   SupplierEvaluation[]
   invitations           WorkspaceInvitation[]
@@ -679,6 +682,8 @@ model SourcingCase {
   slaRecords         SourcingSlaRecord[]
   costScenarios      SourcingCostScenario[]
   receipts           PurchaseReceipt[]
+  variants           SourcingCaseVariant[]
+  selections         SourcingVariantSelection[]
 
   @@index([workspaceId, stage])
   @@index([workspaceId, assignedToId])
@@ -765,10 +770,85 @@ model SourcingQuote {
   createdAt            DateTime     @default(now()) @db.Date
   workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase         SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  lines                SourcingQuoteLine[]
 
   @@unique([caseId, revision])
   @@index([workspaceId, caseId])
   @@index([caseId, quoteGroupId])
+}
+
+model SourcingCaseVariant {
+  id                 String                    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId        String                    @db.ObjectId
+  caseId             String                    @db.ObjectId
+  position           Int
+  size               String?
+  material           String?
+  colour             String?
+  requestedQuantity  Int
+  targetUnitPriceMyr Float?
+  createdAt          DateTime                  @default(now()) @db.Date
+  updatedAt          DateTime?                 @updatedAt @db.Date
+  workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase       SourcingCase              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  quoteLines         SourcingQuoteLine[]
+  selection          SourcingVariantSelection?
+
+  @@unique([caseId, position])
+  @@index([workspaceId, caseId])
+}
+
+model SourcingQuoteLine {
+  id                   String                    @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId          String                    @db.ObjectId
+  quoteId              String                    @db.ObjectId
+  caseVariantId        String                    @db.ObjectId
+  availability         String                    @default("available")
+  size                 String?
+  material             String?
+  colour               String?
+  requestedQuantity    Int
+  unitPriceRmb         Float?
+  piecesPerSellingUnit Int?
+  cartonLengthCm       Float?
+  cartonWidthCm        Float?
+  cartonHeightCm       Float?
+  piecesPerCarton      Int?
+  marketPriceMyr       Float?
+  marketPack           Int?
+  overrideCostMyr      Float?
+  moq                  Int?
+  leadTimeDays         Int?
+  notes                String?
+  costConfigSnapshot   Json?
+  landedCostSnapshot   Json?
+  createdAt            DateTime                  @default(now()) @db.Date
+  updatedAt            DateTime?                 @updatedAt @db.Date
+  workspace            Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  quote                SourcingQuote             @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  caseVariant          SourcingCaseVariant       @relation(fields: [caseVariantId], references: [id], onDelete: Cascade)
+  selection            SourcingVariantSelection?
+
+  @@unique([quoteId, caseVariantId])
+  @@index([workspaceId, caseVariantId])
+}
+
+model SourcingVariantSelection {
+  id            String              @id @default(auto()) @map("_id") @db.ObjectId
+  workspaceId   String              @db.ObjectId
+  caseId        String              @db.ObjectId
+  caseVariantId String              @unique @db.ObjectId
+  quoteLineId   String?             @unique @db.ObjectId
+  status        String
+  skipReason    String?
+  decidedById   String              @db.ObjectId
+  decidedAt     DateTime            @default(now()) @db.Date
+  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcingCase  SourcingCase        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseVariant   SourcingCaseVariant @relation(fields: [caseVariantId], references: [id], onDelete: Cascade)
+  quoteLine     SourcingQuoteLine?  @relation(fields: [quoteLineId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, caseId])
 }
 
 model SourcingOrder {
@@ -1470,6 +1550,8 @@ model PurchaseOrderItem {
   quantityReceived Int           @default(0) // Quantity received so far (for partial receiving)
   unitCost         Float
   subtotal         Float
+  sourcingCaseVariantId String? @db.ObjectId
+  sourcingQuoteLineId   String? @db.ObjectId
   createdAt        DateTime      @default(now()) @db.Date
   purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
 

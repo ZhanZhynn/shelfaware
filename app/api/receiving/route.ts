@@ -33,7 +33,10 @@ export async function POST(request: NextRequest) {
        if (po && !["approved", "ordered", "shipping"].includes(po.status)) throw new SourcingAccessError(`PO must be approved, ordered, or shipping to receive (current: ${po.status})`, 409);
       if (po?.workspaceId) {
         await requireWorkspaceRole(user, po.workspaceId, ["admin", "warehouse"]);
-        if (warehouse.workspaceId !== po.workspaceId) throw new SourcingAccessError("Warehouse must belong to the purchase order workspace", 400);
+        const compatibleLegacyWarehouse =
+          !warehouse.workspaceId && warehouse.userId === po.userId;
+        if (warehouse.workspaceId !== po.workspaceId && !compatibleLegacyWarehouse)
+          throw new SourcingAccessError("Warehouse must belong to the purchase order workspace", 400);
       } else {
         if (warehouse.workspaceId || (po && po.userId !== warehouse.userId)) {
           throw new SourcingAccessError("Legacy purchase order and warehouse must have the same owner", 400);

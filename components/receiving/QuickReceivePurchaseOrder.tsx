@@ -36,7 +36,8 @@ export function QuickReceivePurchaseOrder({ order }: QuickReceivePurchaseOrderPr
   const unfinishedItems = order.items.filter((item) => item.quantityReceived < item.quantity);
   const compatibleWarehouses = (warehouses ?? []).filter((warehouse) =>
     warehouse.status && (order.workspaceId
-      ? warehouse.workspaceId === order.workspaceId
+      ? warehouse.workspaceId === order.workspaceId ||
+        (!warehouse.workspaceId && warehouse.userId === order.userId)
       : !warehouse.workspaceId && warehouse.userId === order.userId),
   );
 

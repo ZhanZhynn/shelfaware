@@ -85,11 +85,14 @@ function isTransactionConflict(error: unknown) {
   );
 }
 
+const pause = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
 export async function withOfferLocks<T>(
   offers: { platform: string; shopId: string; offerKey: string }[],
   operation: (tx: Prisma.TransactionClient) => Promise<T>,
 ) {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       return await prisma.$transaction(async (tx) => {
         const uniqueOffers = [...new Map(
@@ -121,13 +124,16 @@ export async function withOfferLocks<T>(
         return operation(tx);
       });
     } catch (error) {
-      if (attempt === 2 || !isTransactionConflict(error)) {
+      if (attempt === 4 || !isTransactionConflict(error)) {
         if (isTransactionConflict(error))
           throw new Error(
             "This offer is being updated by another confirmation. Please retry.",
           );
         throw error;
       }
+      // Mongo may briefly retain a conflicting write after a transaction abort.
+      // Backoff prevents an immediate retry from colliding with the same lock.
+      await pause(50 * 2 ** attempt);
     }
   }
   throw new Error(

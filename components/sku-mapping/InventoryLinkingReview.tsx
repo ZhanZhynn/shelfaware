@@ -13,7 +13,7 @@ type SalesSku = { id: string; code: string; name: string; family: { name: string
 type Candidate = { id: string; shopId: string; externalProductId: string; externalVariantId: string | null; offerKind: "variant" | "verified-product"; proposedSalesSkuId: string | null; confidence: string };
 type ReviewVariant = { modelId: string | null; name: string; rawSku: string; stock: number | null; status: string; state: Exclude<ReviewState, "all">; candidate?: Candidate; proposedSalesSku: SalesSku | null; draftSalesSku: SalesSku | null; mapping?: { id: string; effectiveFrom: string; salesSku: SalesSku } };
 type ReviewRow = { shop: { id: string; name: string; externalId: string }; listing: { itemId: string; name: string; rawSku: string | null; imageUrl: string | null; status: string }; variants: ReviewVariant[] };
-type ReviewResponse = { rows: ReviewRow[]; catalog: SalesSku[]; pagination: { page: number; totalParents: number; totalPages: number }; counts: Record<ReviewState, number> };
+type ReviewResponse = { rows: ReviewRow[]; catalog: SalesSku[]; pagination: { page: number; totalParents: number; totalPages: number }; counts: Record<ReviewState, number> & { suggested: number } };
 type ReviewTarget = { row: ReviewRow; variant: ReviewVariant };
 
 const tabs: { state: ReviewState; label: string }[] = [
@@ -45,6 +45,8 @@ export default function InventoryLinkingReview({ canMutate }: { canMutate: boole
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [savingDraft, setSavingDraft] = useState(false);
+  const [savingAllKnown, setSavingAllKnown] = useState(false);
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["skuMapping", "review", state, submittedSearch, page],
     enabled: hydrated,
@@ -73,6 +75,18 @@ export default function InventoryLinkingReview({ canMutate }: { canMutate: boole
     setSavingDraft(false); setSelected({});
     await client.invalidateQueries({ queryKey: ["skuMapping", "review"] });
   };
+  const saveAllKnownDrafts = async () => {
+    setSavingAllKnown(true); setDraftMessage(null);
+    try {
+      const response = await axios.post("/api/inventory/sku-mapping/review", { command: "save-all-suggested-drafts" }, { withCredentials: true });
+      setDraftMessage(`${response.data.drafted} known link${response.data.drafted === 1 ? "" : "s"} added to Draft Listing.`);
+      await client.invalidateQueries({ queryKey: ["skuMapping", "review"] });
+    } catch (error) {
+      setDraftMessage(axios.isAxiosError(error) ? error.response?.data?.error ?? "Could not add known links to the draft." : "Could not add known links to the draft.");
+    } finally {
+      setSavingAllKnown(false);
+    }
+  };
 
   return <div className="mx-auto max-w-6xl space-y-5 px-3 pb-10 sm:px-6">
     <header className="flex flex-wrap items-end justify-between gap-3 pt-1">
@@ -82,8 +96,9 @@ export default function InventoryLinkingReview({ canMutate }: { canMutate: boole
     <section className="rounded-xl border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
         <div className="flex flex-wrap gap-1">{tabs.map((tab) => <button key={tab.state} onClick={() => setTab(tab.state)} className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${state === tab.state ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>{tab.label} <span className="ml-1 text-xs">{data.counts[tab.state]}</span></button>)}</div>
-        <div className="flex gap-2"><Button asChild size="sm" variant="outline"><a href="/admin/inventory/sku-mapping/draft">Review Draft Listing ({data.counts.draft})</a></Button>{canMutate && selectedTargets.length > 0 && <Button size="sm" disabled={savingDraft} onClick={() => saveDrafts(selectedTargets)}>{savingDraft ? "Saving…" : `Add to Draft (${selectedTargets.length})`}</Button>}</div>
+        <div className="flex flex-wrap justify-end gap-2"><Button asChild size="sm" variant="outline"><a href="/admin/inventory/sku-mapping/draft">Review Draft Listing ({data.counts.draft})</a></Button>{canMutate && data.counts.suggested > 0 && <Button size="sm" variant="outline" disabled={savingAllKnown} onClick={saveAllKnownDrafts}>{savingAllKnown ? "Adding known links…" : `Add all known to Draft (${data.counts.suggested})`}</Button>}{canMutate && selectedTargets.length > 0 && <Button size="sm" disabled={savingDraft} onClick={() => saveDrafts(selectedTargets)}>{savingDraft ? "Saving…" : `Add to Draft (${selectedTargets.length})`}</Button>}</div>
       </div>
+      {draftMessage && <p className="border-b bg-muted/20 px-4 py-2 text-sm text-muted-foreground sm:px-5">{draftMessage}</p>}
       <form className="flex gap-2 border-b bg-muted/20 p-3 sm:px-5" onSubmit={(event) => { event.preventDefault(); setSubmittedSearch(search); setPage(1); }}><Input value={search} onChange={(event) => setSearch(event.target.value)} className="max-w-lg bg-background" placeholder="Search product name, Shopee SKU, or Sitegiant iSKU" /><Button type="submit" size="sm" variant="outline"><Search className="mr-2 h-4 w-4" />Search</Button></form>
       <div className="grid grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] border-b bg-muted/30 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:px-5"><span>Channel Listing</span><span className="text-center">Status</span><span>Sitegiant Inventory</span></div>
       <datalist id="sitegiant-isku-options">{data.catalog.map((sku) => <option key={sku.id} value={sku.code}>{sku.name}</option>)}</datalist>

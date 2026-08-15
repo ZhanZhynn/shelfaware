@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 describe("feature flags", () => {
   const originalEnv = { ...process.env };
+  const mutableEnv = () => process.env as Record<string, string | undefined>;
 
   beforeEach(() => {
     vi.resetModules();
@@ -9,7 +10,7 @@ describe("feature flags", () => {
   });
 
   it("defaults all flags to true in development", async () => {
-    process.env.NODE_ENV = "development";
+    mutableEnv().NODE_ENV = "development";
     delete process.env.SHARED_SKU_MAPPING_ENABLED;
     delete process.env.SHARED_SKU_MAPPING_MUTATIONS_ENABLED;
     delete process.env.SHARED_SKU_MAPPING_ANALYTICS_ENABLED;
@@ -26,7 +27,7 @@ describe("feature flags", () => {
   });
 
   it("defaults all flags to false in production", async () => {
-    process.env.NODE_ENV = "production";
+    mutableEnv().NODE_ENV = "production";
     delete process.env.SHARED_SKU_MAPPING_ENABLED;
     delete process.env.SHARED_SKU_MAPPING_MUTATIONS_ENABLED;
     delete process.env.SHARED_SKU_MAPPING_ANALYTICS_ENABLED;
@@ -43,7 +44,7 @@ describe("feature flags", () => {
   });
 
   it("respects explicit SHARED_SKU_MAPPING_ENABLED=true in production", async () => {
-    process.env.NODE_ENV = "production";
+    mutableEnv().NODE_ENV = "production";
     process.env.SHARED_SKU_MAPPING_ENABLED = "true";
     delete process.env.SHARED_SKU_MAPPING_MUTATIONS_ENABLED;
     delete process.env.SHARED_SKU_MAPPING_ANALYTICS_ENABLED;
@@ -53,7 +54,7 @@ describe("feature flags", () => {
   });
 
   it("respects explicit SHARED_SKU_MAPPING_ENABLED=false in development", async () => {
-    process.env.NODE_ENV = "development";
+    mutableEnv().NODE_ENV = "development";
     process.env.SHARED_SKU_MAPPING_ENABLED = "false";
 
     const { isSharedSkuMappingEnabled } = await import("./feature-flags");
@@ -61,7 +62,7 @@ describe("feature flags", () => {
   });
 
   it("respects SHARED_SKU_MAPPING_MUTATIONS_ENABLED=1", async () => {
-    process.env.NODE_ENV = "production";
+    mutableEnv().NODE_ENV = "production";
     process.env.SHARED_SKU_MAPPING_MUTATIONS_ENABLED = "1";
 
     const { isSharedSkuMappingMutationsEnabled } = await import("./feature-flags");
@@ -69,7 +70,7 @@ describe("feature flags", () => {
   });
 
   it("respects SHARED_SKU_MAPPING_ANALYTICS_ENABLED=1", async () => {
-    process.env.NODE_ENV = "production";
+    mutableEnv().NODE_ENV = "production";
     process.env.SHARED_SKU_MAPPING_ANALYTICS_ENABLED = "1";
 
     const { isSharedSkuMappingAnalyticsEnabled } = await import("./feature-flags");
@@ -77,7 +78,7 @@ describe("feature flags", () => {
   });
 
   it("treats empty string as default", async () => {
-    process.env.NODE_ENV = "production";
+    mutableEnv().NODE_ENV = "production";
     process.env.SHARED_SKU_MAPPING_ENABLED = "";
 
     const { isSharedSkuMappingEnabled } = await import("./feature-flags");

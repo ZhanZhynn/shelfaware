@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import axios from "axios";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronLeft, ChevronRight, Search } from "lucide-react";
@@ -12,6 +12,7 @@ type SalesSku = { id: string; code: string; name: string; family: { name: string
 type Variant = { name: string; rawSku: string; candidate: { id: string }; draftSalesSku: SalesSku };
 type Row = { shop: { name: string }; listing: { itemId: string; name: string; imageUrl: string | null }; variants: Variant[] };
 type Data = { rows: Row[]; pagination: { page: number; totalParents: number; totalPages: number }; counts: { draft: number } };
+type ConfirmationRun = { id: string; status: "running" | "completed" | "completed_with_errors"; totalCount: number; processedCount: number; confirmedCount: number; skippedCount: number; errorCount: number; errors: { candidateId: string; error: string }[] | null };
 
 function recipeSummary(sku: SalesSku) {
   const components = sku.recipe ?? [];
@@ -31,7 +32,10 @@ export default function DraftListingReview() {
   const [page, setPage] = useState(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const confirmingRef = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [outcomes, setOutcomes] = useState<{ candidateId: string; mappingId?: string; error?: string }[]>([]);
+  const [run, setRun] = useState<ConfirmationRun | null>(null);
   const query = useQuery({
     queryKey: ["skuMapping", "draft-review", submittedSearch, page],
     enabled: hydrated,
@@ -44,18 +48,38 @@ export default function DraftListingReview() {
     await axios.post("/api/inventory/sku-mapping/review", { command: "remove-draft", candidateId }, { withCredentials: true });
     await client.invalidateQueries({ queryKey: ["skuMapping"] });
   };
-  const confirmAll = async () => {
-    setConfirming(true); setMessage(null);
+  const processRun = async (runId: string) => {
     try {
-      const response = await axios.post("/api/inventory/sku-mapping/review", { command: "confirm-drafts" }, { withCredentials: true });
-      const outcomes = response.data.outcomes as { mappingId?: string; error?: string }[];
-      const confirmed = outcomes.filter((outcome) => outcome.mappingId).length;
-      const failed = outcomes.length - confirmed;
-      setMessage(`${confirmed} link${confirmed === 1 ? "" : "s"} confirmed${failed ? `; ${failed} need attention.` : "."}`);
+      const response = await axios.post("/api/inventory/sku-mapping/review", { command: "process-confirmation-run", runId }, { withCredentials: true });
+      const next = response.data as ConfirmationRun;
+      setRun(next);
+      if (next.status === "running") {
+        window.setTimeout(() => { void processRun(runId); }, 250);
+        return;
+      }
+      confirmingRef.current = false;
+      setConfirming(false);
+      setMessage(`${next.confirmedCount} link${next.confirmedCount === 1 ? "" : "s"} confirmed${next.errorCount ? `; ${next.errorCount} need attention.` : "."}`);
+      setOutcomes((next.errors ?? []).map((error) => ({ candidateId: error.candidateId, error: error.error })));
       await client.invalidateQueries({ queryKey: ["skuMapping"] });
     } catch (error) {
+      confirmingRef.current = false;
+      setConfirming(false);
+      setMessage(axios.isAxiosError(error) ? error.response?.data?.error ?? "Confirmation run failed." : "Confirmation run failed.");
+    }
+  };
+  const confirmAll = async () => {
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
+    setConfirming(true); setMessage(null); setOutcomes([]); setRun(null);
+    try {
+      const response = await axios.post("/api/inventory/sku-mapping/review", { command: "start-confirmation-run" }, { withCredentials: true });
+      const started = response.data as ConfirmationRun;
+      setRun(started);
+      await processRun(started.id);
+    } catch (error) {
       setMessage(axios.isAxiosError(error) ? error.response?.data?.error ?? "Could not confirm draft listings." : "Could not confirm draft listings.");
-    } finally {
+      confirmingRef.current = false;
       setConfirming(false);
     }
   };
@@ -80,6 +104,6 @@ export default function DraftListingReview() {
       {!data.rows.length && <p className="py-12 text-center text-sm text-muted-foreground">No draft listings are ready for review.</p>}
     </section>
     <div className="flex items-center justify-between px-1 text-sm text-muted-foreground"><span>{data.pagination.totalParents} products · page {data.pagination.page} of {data.pagination.totalPages}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={data.pagination.page <= 1} onClick={() => setPage((current) => current - 1)}><ChevronLeft className="h-4 w-4" />Previous</Button><Button size="sm" variant="outline" disabled={data.pagination.page >= data.pagination.totalPages} onClick={() => setPage((current) => current + 1)}>Next<ChevronRight className="h-4 w-4" /></Button></div></div>
-    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogHeader><DialogTitle>Confirm and save draft links</DialogTitle><DialogDescription>This will create effective Shopee-to-Sitegiant mappings for all {data.counts.draft} draft listings. Any conflicting link stays in draft for correction.</DialogDescription></DialogHeader>{message && <p className="text-sm">{message}</p>}<DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button><Button disabled={confirming} onClick={confirmAll}>{confirming ? "Confirming…" : "Confirm and Save Links"}</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}><DialogContent><DialogHeader><DialogTitle>Confirm and save draft links</DialogTitle><DialogDescription>Links are saved in small batches so you can see progress. Any conflicting link stays in draft for correction.</DialogDescription></DialogHeader>{run && <div className="space-y-2 rounded border bg-muted/30 p-3"><div className="flex justify-between text-sm"><span>Processing {run.processedCount} of {run.totalCount}</span><strong>{run.confirmedCount} confirmed</strong></div><progress className="h-2 w-full accent-primary" value={run.processedCount} max={run.totalCount} /><p className="text-xs text-muted-foreground">{run.errorCount ? `${run.errorCount} need attention` : `${Math.max(0, run.totalCount - run.processedCount)} remaining`}</p></div>}{message && <p className="text-sm">{message}</p>}{outcomes.some((outcome) => outcome.error) && <div className="max-h-40 space-y-1 overflow-y-auto rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">{outcomes.filter((outcome) => outcome.error).map((outcome) => <p key={outcome.candidateId}>{outcome.error}</p>)}</div>}<DialogFooter><Button variant="outline" onClick={() => setConfirmOpen(false)}>{confirming ? "Hide" : "Close"}</Button><Button disabled={confirming} onClick={confirmAll}>{confirming ? "Confirming…" : "Confirm and Save Links"}</Button></DialogFooter></DialogContent></Dialog>
   </div>;
 }

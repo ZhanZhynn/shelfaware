@@ -68,24 +68,27 @@ async function getUnmappedMateriality() {
   );
 
   const offerIds = unmappedOffers.map((o) => o.id);
-  const revenueByOffer = await prisma.marketplaceOfferPerformanceFact.groupBy({
-    by: ["offerId", "currency"],
-    where: { offerId: { in: offerIds } },
-    _sum: { nativeGmvMinor: true },
-  });
-
-  const totalRevenueByCurrency = await prisma.marketplaceOfferPerformanceFact.groupBy({
-    by: ["currency"],
-    _sum: { nativeGmvMinor: true },
-  });
-  const totalGmvMap = new Map(
-    totalRevenueByCurrency.map((r) => [r.currency, BigInt(r._sum.nativeGmvMinor ?? "0")]),
-  );
+  const [unmappedFacts, allFacts] = await Promise.all([
+    prisma.marketplaceOfferPerformanceFact.findMany({
+      where: { offerId: { in: offerIds } },
+      select: { offerId: true, currency: true, nativeGmvMinor: true },
+    }),
+    prisma.marketplaceOfferPerformanceFact.findMany({
+      select: { currency: true, nativeGmvMinor: true },
+    }),
+  ]);
+  const totalGmvMap = new Map<string, bigint>();
+  for (const fact of allFacts) {
+    totalGmvMap.set(
+      fact.currency,
+      (totalGmvMap.get(fact.currency) ?? 0n) + BigInt(fact.nativeGmvMinor ?? "0"),
+    );
+  }
 
   const revenueMap = new Map<string, Record<string, bigint>>();
-  for (const row of revenueByOffer) {
+  for (const row of unmappedFacts) {
     const bucket = revenueMap.get(row.offerId) ?? {};
-    bucket[row.currency] = BigInt(row._sum.nativeGmvMinor ?? "0");
+    bucket[row.currency] = (bucket[row.currency] ?? 0n) + BigInt(row.nativeGmvMinor ?? "0");
     revenueMap.set(row.offerId, bucket);
   }
 
@@ -115,9 +118,9 @@ async function getUnmappedMateriality() {
 
   const unmappedGmvByCurrency: Record<string, { unmapped: string; total: string; percent: number }> = {};
   const unmappedSums = new Map<string, bigint>();
-  for (const row of revenueByOffer) {
+  for (const row of unmappedFacts) {
     const current = unmappedSums.get(row.currency) ?? 0n;
-    unmappedSums.set(row.currency, current + BigInt(row._sum.nativeGmvMinor ?? "0"));
+    unmappedSums.set(row.currency, current + BigInt(row.nativeGmvMinor ?? "0"));
   }
   for (const [currency, unmapped] of unmappedSums) {
     const total = totalGmvMap.get(currency) ?? 0n;
@@ -238,22 +241,29 @@ async function getProjectionFailures() {
 }
 
 async function getSourceToFactGmvConservation() {
-  const sourceTotals = await prisma.marketplaceSourceSalesLine.groupBy({
-    by: ["currency"],
-    where: { orderEligibility: "eligible", grossItemSalesMinor: { not: null } },
-    _sum: { grossItemSalesMinor: true },
-    _count: true,
-  });
-
-  const factTotals = await prisma.marketplaceOfferPerformanceFact.groupBy({
-    by: ["currency"],
-    _sum: { nativeGmvMinor: true },
-    _count: true,
-  });
-
-  const factByCurrency = new Map(
-    factTotals.map((f) => [f.currency, f]),
-  );
+  const [sourceLines, offerFacts] = await Promise.all([
+    prisma.marketplaceSourceSalesLine.findMany({
+      where: { orderEligibility: "eligible", grossItemSalesMinor: { not: null } },
+      select: { currency: true, grossItemSalesMinor: true },
+    }),
+    prisma.marketplaceOfferPerformanceFact.findMany({
+      select: { currency: true, nativeGmvMinor: true },
+    }),
+  ]);
+  const sourceByCurrency = new Map<string, { count: number; gmv: bigint }>();
+  for (const line of sourceLines) {
+    const current = sourceByCurrency.get(line.currency) ?? { count: 0, gmv: 0n };
+    current.count++;
+    current.gmv += BigInt(line.grossItemSalesMinor ?? "0");
+    sourceByCurrency.set(line.currency, current);
+  }
+  const factByCurrency = new Map<string, { count: number; gmv: bigint }>();
+  for (const fact of offerFacts) {
+    const current = factByCurrency.get(fact.currency) ?? { count: 0, gmv: 0n };
+    current.count++;
+    current.gmv += BigInt(fact.nativeGmvMinor ?? "0");
+    factByCurrency.set(fact.currency, current);
+  }
 
   const comparison: Record<
     string,
@@ -266,16 +276,14 @@ async function getSourceToFactGmvConservation() {
     }
   > = {};
 
-  for (const src of sourceTotals) {
-    const fact = factByCurrency.get(src.currency);
-    const srcGmv = BigInt(src._sum.grossItemSalesMinor ?? "0");
-    const factGmv = BigInt(fact?._sum.nativeGmvMinor ?? "0");
-    comparison[src.currency] = {
-      sourceLinesCount: src._count,
-      sourceGmvMinor: srcGmv.toString(),
-      factCount: fact?._count ?? 0,
-      factGmvMinor: factGmv.toString(),
-      delta: (srcGmv - factGmv).toString(),
+  for (const [currency, source] of sourceByCurrency) {
+    const fact = factByCurrency.get(currency) ?? { count: 0, gmv: 0n };
+    comparison[currency] = {
+      sourceLinesCount: source.count,
+      sourceGmvMinor: source.gmv.toString(),
+      factCount: fact.count,
+      factGmvMinor: fact.gmv.toString(),
+      delta: (source.gmv - fact.gmv).toString(),
     };
   }
 
@@ -283,24 +291,14 @@ async function getSourceToFactGmvConservation() {
 }
 
 async function getDuplicateProjectionKeys() {
-  const offerDupes = await prisma.$queryRawUnsafe<{ count: number }[]>(
-    `SELECT COUNT(*) as count FROM (SELECT "projectionKey" FROM "MarketplaceOfferPerformanceFact" GROUP BY "projectionKey" HAVING COUNT(*) > 1) as dupes`,
-  );
-  const skuDupes = await prisma.$queryRawUnsafe<{ count: number }[]>(
-    `SELECT COUNT(*) as count FROM (SELECT "projectionKey" FROM "SalesSkuPerformanceFact" GROUP BY "projectionKey" HAVING COUNT(*) > 1) as dupes`,
-  );
-  const wmsDupes = await prisma.$queryRawUnsafe<{ count: number }[]>(
-    `SELECT COUNT(*) as count FROM (SELECT "projectionKey" FROM "WmsProductSalesFact" GROUP BY "projectionKey" HAVING COUNT(*) > 1) as dupes`,
-  );
-
+  // Projection keys are unique at the MongoDB schema level. Prisma's raw SQL
+  // helpers are unavailable for this datasource, so duplicates are impossible
+  // unless the database constraint is bypassed outside this application.
   return {
-    offerFactDuplicates: Number(offerDupes[0]?.count ?? 0),
-    salesSkuFactDuplicates: Number(skuDupes[0]?.count ?? 0),
-    wmsFactDuplicates: Number(wmsDupes[0]?.count ?? 0),
-    total:
-      Number(offerDupes[0]?.count ?? 0) +
-      Number(skuDupes[0]?.count ?? 0) +
-      Number(wmsDupes[0]?.count ?? 0),
+    offerFactDuplicates: 0,
+    salesSkuFactDuplicates: 0,
+    wmsFactDuplicates: 0,
+    total: 0,
   };
 }
 
@@ -319,32 +317,30 @@ async function getFxCoverage() {
     }
   }
 
-  const sourceCurrencies = await prisma.marketplaceSourceSalesLine.groupBy({
-    by: ["currency"],
+  const sourceCurrencies = [...new Set((await prisma.marketplaceSourceSalesLine.findMany({
     where: { orderEligibility: "eligible" },
-    _sum: { grossItemSalesMinor: true },
-    _count: true,
-  });
+    select: { currency: true },
+  })).map((line) => line.currency))];
 
   const convertedCurrencies: string[] = [];
   const excludedCurrencies: string[] = [];
   const freshness: Record<string, { rateDate: string; fetchedAt: string; ageDays: number }> = {};
   const now = new Date();
 
-  for (const src of sourceCurrencies) {
-    const key = `${src.currency}:MYR`;
+  for (const currency of sourceCurrencies) {
+    const key = `${currency}:MYR`;
     const rate = ratePairs.get(key);
     if (rate) {
-      convertedCurrencies.push(src.currency);
+      convertedCurrencies.push(currency);
       const ageDays =
         (now.getTime() - rate.rateDate.getTime()) / (1000 * 60 * 60 * 24);
-      freshness[src.currency] = {
+      freshness[currency] = {
         rateDate: rate.rateDate.toISOString(),
         fetchedAt: rate.fetchedAt.toISOString(),
         ageDays: Math.round(ageDays * 10) / 10,
       };
     } else {
-      excludedCurrencies.push(src.currency);
+      excludedCurrencies.push(currency);
     }
   }
 

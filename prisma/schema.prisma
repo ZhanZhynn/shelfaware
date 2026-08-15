@@ -365,6 +365,25 @@ model MarketplaceSkuMappingEvent {
   @@index([mappingId, occurredAt])
 }
 
+// Client-driven confirmation batches keep large draft saves responsive on
+// serverless hosts while retaining progress after a browser refresh.
+model InventoryLinkingConfirmationRun {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  actorId       String   @db.ObjectId
+  candidateIds  Json
+  status        String   @default("running") // running | completed | completed_with_errors
+  totalCount    Int
+  processedCount Int     @default(0)
+  confirmedCount Int     @default(0)
+  skippedCount   Int     @default(0)
+  errorCount     Int     @default(0)
+  errors        Json?
+  createdAt     DateTime @default(now()) @db.Date
+  updatedAt     DateTime @updatedAt
+
+  @@index([actorId, status, createdAt])
+}
+
 model ProductChannelMapping {
   id               String   @id @default(auto()) @map("_id") @db.ObjectId
   wmsProductId     String   @db.ObjectId

@@ -7,6 +7,43 @@ import { isSharedSkuMappingEnabled } from "@/lib/marketplace-attribution/feature
 import { confirmMapping } from "@/lib/marketplace-attribution/service";
 
 const pageSize = 20;
+const confirmationBatchSize = 8;
+
+type DraftCandidate = {
+  id: string;
+  shopId: string;
+  offerKey: string;
+  externalProductId: string;
+  externalVariantId: string | null;
+  offerKind: string;
+  draftSalesSkuId: string | null;
+};
+
+async function confirmDraftCandidate(draft: DraftCandidate, actorId: string) {
+  try {
+    const mapping = await confirmMapping({
+      platform: "shopee", shopId: draft.shopId, externalProductId: draft.externalProductId,
+      externalVariantId: draft.externalVariantId ?? undefined,
+      offerKind: draft.offerKind as "variant" | "verified-product",
+      salesSkuId: draft.draftSalesSkuId!, candidateId: draft.id,
+    }, actorId);
+    return { candidateId: draft.id, mappingId: mapping.id };
+  } catch (error) {
+    // A duplicate browser request can race the successful one. Treat an
+    // already-created mapping to the same iSKU as an idempotent success.
+    const existing = await prisma.marketplaceSkuMapping.findFirst({
+      where: {
+        platform: "shopee", shopId: draft.shopId,
+        offerKey: draft.offerKey, salesSkuId: draft.draftSalesSkuId!,
+      },
+      orderBy: { effectiveFrom: "desc" },
+      select: { id: true },
+    });
+    return existing
+      ? { candidateId: draft.id, mappingId: existing.id }
+      : { candidateId: draft.id, error: error instanceof Error ? error.message : "Could not confirm draft." };
+  }
+}
 
 export async function GET(request: NextRequest) {
   if (!isSharedSkuMappingEnabled())
@@ -127,11 +164,13 @@ export async function GET(request: NextRequest) {
   const totalPages = Math.max(1, Math.ceil(totalParents / pageSize));
   const page = Math.min(requestedPage, totalPages);
   const draft = candidates.filter((candidate) => candidate.draftSalesSkuId).length;
+  const suggested = candidates.filter((candidate) => candidate.proposedSalesSkuId && !candidate.draftSalesSkuId).length;
+  const unlinked = candidates.filter((candidate) => !candidate.proposedSalesSkuId && !candidate.draftSalesSkuId).length;
   return NextResponse.json({
     rows: rows.slice((page - 1) * pageSize, page * pageSize),
     catalog,
     pagination: { page, pageSize, totalParents, totalPages },
-    counts: { all: candidates.length + mappings.length, unlinked: candidates.length - draft, draft, linked: mappings.length },
+    counts: { all: candidates.length + mappings.length, unlinked, suggested, draft, linked: mappings.length },
   });
 }
 
@@ -142,7 +181,7 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!canMutateSharedAttribution(session))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const body = await request.json() as { command?: string; links?: { candidateId: string; salesSkuId: string }[]; candidateId?: string };
+  const body = await request.json() as { command?: string; links?: { candidateId: string; salesSkuId: string }[]; candidateId?: string; runId?: string };
   try {
     if (body.command === "save-drafts") {
       const links = body.links ?? [];
@@ -159,6 +198,31 @@ export async function POST(request: NextRequest) {
           throw new Error("One or more listings changed before they could be drafted. Refresh and retry.");
       });
       return NextResponse.json({ drafted: links.length });
+    }
+    if (body.command === "save-all-suggested-drafts") {
+      const candidates = await prisma.marketplaceSkuCandidate.findMany({
+        where: {
+          platform: "shopee", status: "open",
+          proposedSalesSkuId: { not: null }, draftSalesSkuId: { isSet: false },
+        },
+        select: { id: true, proposedSalesSkuId: true },
+      });
+      const batchSize = 50;
+      let drafted = 0;
+      for (let start = 0; start < candidates.length; start += batchSize) {
+        const batch = candidates.slice(start, start + batchSize);
+        const results = await prisma.$transaction(batch.map((candidate) =>
+          prisma.marketplaceSkuCandidate.updateMany({
+            where: {
+              id: candidate.id, platform: "shopee", status: "open",
+              proposedSalesSkuId: candidate.proposedSalesSkuId!, draftSalesSkuId: { isSet: false },
+            },
+            data: { draftSalesSkuId: candidate.proposedSalesSkuId!, draftedAt: new Date(), draftedById: session.id },
+          }),
+        ));
+        drafted += results.reduce((total, result) => total + result.count, 0);
+      }
+      return NextResponse.json({ drafted, skipped: candidates.length - drafted });
     }
     if (body.command === "remove-draft") {
       if (!body.candidateId) throw new Error("A draft listing is required.");
@@ -177,19 +241,60 @@ export async function POST(request: NextRequest) {
       if (!drafts.length) throw new Error("There are no open draft listings to confirm.");
       const outcomes = [];
       for (const draft of drafts) {
-        try {
-          const mapping = await confirmMapping({
-            platform: "shopee", shopId: draft.shopId, externalProductId: draft.externalProductId,
-            externalVariantId: draft.externalVariantId ?? undefined,
-            offerKind: draft.offerKind as "variant" | "verified-product",
-            salesSkuId: draft.draftSalesSkuId!, candidateId: draft.id,
-          }, session.id);
-          outcomes.push({ candidateId: draft.id, mappingId: mapping.id });
-        } catch (error) {
-          outcomes.push({ candidateId: draft.id, error: error instanceof Error ? error.message : "Could not confirm draft." });
-        }
+        outcomes.push(await confirmDraftCandidate(draft, session.id));
       }
       return NextResponse.json({ outcomes });
+    }
+    if (body.command === "start-confirmation-run") {
+      const running = await prisma.inventoryLinkingConfirmationRun.findFirst({
+        where: { actorId: session.id, status: "running" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (running) return NextResponse.json(running);
+      const drafts = await prisma.marketplaceSkuCandidate.findMany({
+        where: { platform: "shopee", status: "open", draftSalesSkuId: { not: null } },
+        select: { id: true },
+      });
+      if (!drafts.length) throw new Error("There are no open draft listings to confirm.");
+      return NextResponse.json(await prisma.inventoryLinkingConfirmationRun.create({
+        data: { actorId: session.id, candidateIds: drafts.map((draft) => draft.id), totalCount: drafts.length },
+      }));
+    }
+    if (body.command === "process-confirmation-run") {
+      if (!body.runId) throw new Error("A confirmation run is required.");
+      const run = await prisma.inventoryLinkingConfirmationRun.findFirst({ where: { id: body.runId, actorId: session.id } });
+      if (!run) throw new Error("Confirmation run not found.");
+      if (run.status !== "running") return NextResponse.json(run);
+      const candidateIds = Array.isArray(run.candidateIds) ? run.candidateIds.filter((id): id is string => typeof id === "string") : [];
+      const batchIds = candidateIds.slice(run.processedCount, run.processedCount + confirmationBatchSize);
+      const drafts = await prisma.marketplaceSkuCandidate.findMany({
+        where: { id: { in: batchIds }, platform: "shopee", status: "open", draftSalesSkuId: { not: null } },
+        select: { id: true, shopId: true, offerKey: true, externalProductId: true, externalVariantId: true, offerKind: true, draftSalesSkuId: true },
+      });
+      const draftById = new Map(drafts.map((draft) => [draft.id, draft]));
+      const outcomes = [];
+      for (const id of batchIds) {
+        const draft = draftById.get(id);
+        outcomes.push(draft ? await confirmDraftCandidate(draft, session.id) : { candidateId: id, skipped: true });
+      }
+      const confirmed = outcomes.filter((outcome) => "mappingId" in outcome).length;
+      const skipped = outcomes.filter((outcome) => "skipped" in outcome).length;
+      const errors = outcomes.flatMap((outcome) => "error" in outcome ? [{ candidateId: outcome.candidateId, error: outcome.error }] : []);
+      const previousErrors = Array.isArray(run.errors) ? run.errors : [];
+      const processedCount = run.processedCount + batchIds.length;
+      const completed = processedCount >= run.totalCount;
+      const updated = await prisma.inventoryLinkingConfirmationRun.update({
+        where: { id: run.id },
+        data: {
+          processedCount,
+          confirmedCount: { increment: confirmed },
+          skippedCount: { increment: skipped },
+          errorCount: { increment: errors.length },
+          errors: [...previousErrors, ...errors].slice(-100),
+          status: completed ? errors.length || run.errorCount ? "completed_with_errors" : "completed" : "running",
+        },
+      });
+      return NextResponse.json(updated);
     }
     return NextResponse.json({ error: "Unknown inventory-linking command." }, { status: 400 });
   } catch (error) {

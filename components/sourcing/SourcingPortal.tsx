@@ -162,7 +162,7 @@ export default function SourcingPortal({
     error,
   } = useSourcingCases(activeWorkspace);
   const [search, setSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState<SourcingPresentationGroup | "all">("all");
+  const [groupFilter, setGroupFilter] = useState<SourcingPresentationGroup | "all">("needs_action");
   const [pendingAction, setPendingAction] = useState<{
     type: "cancel" | "delete";
     item: any;

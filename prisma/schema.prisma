@@ -787,6 +787,8 @@ model SourcingCaseVariant {
   colour             String?
   requestedQuantity  Int
   targetUnitPriceMyr Float?
+  marketPriceMyr     Float?
+  marketPack         Int?
   createdAt          DateTime                  @default(now()) @db.Date
   updatedAt          DateTime?                 @updatedAt @db.Date
   workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -841,6 +843,7 @@ model SourcingVariantSelection {
   quoteLineId   String?             @unique @db.ObjectId
   status        String
   skipReason    String?
+  marketValidationWaived Boolean @default(false)
   decidedById   String              @db.ObjectId
   decidedAt     DateTime            @default(now()) @db.Date
   workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

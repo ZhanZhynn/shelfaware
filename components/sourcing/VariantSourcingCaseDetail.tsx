@@ -59,11 +59,13 @@ type SheetLine = {
   cartonWidthCm: string;
   cartonHeightCm: string;
   piecesPerCarton: string;
-  marketPriceMyr: string;
-  marketPack: string;
   moq: string;
   leadTimeDays: string;
   notes: string;
+};
+type MarketBenchmark = {
+  marketPriceMyr?: number;
+  marketPack?: number;
 };
 const emptyLine = (): SheetLine => ({
   availability: "available",
@@ -73,8 +75,6 @@ const emptyLine = (): SheetLine => ({
   cartonWidthCm: "",
   cartonHeightCm: "",
   piecesPerCarton: "",
-  marketPriceMyr: "",
-  marketPack: "1",
   moq: "",
   leadTimeDays: "",
   notes: "",
@@ -88,6 +88,7 @@ const statusStyle: Record<string, string> = {
   pass: "bg-emerald-100 text-emerald-800",
   fail: "bg-red-100 text-red-800",
   needs_data: "bg-amber-100 text-amber-800",
+  market_unchecked: "bg-amber-100 text-amber-800",
 };
 
 export default function VariantSourcingCaseDetail({
@@ -115,6 +116,9 @@ export default function VariantSourcingCaseDetail({
   const [activeVariantId, setActiveVariantId] = useState("");
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [skipped, setSkipped] = useState<Record<string, string>>({});
+  const [marketBenchmarks, setMarketBenchmarks] = useState<
+    Record<string, MarketBenchmark>
+  >({});
   const [commentBody, setCommentBody] = useState("");
   const [batchVariantIds, setBatchVariantIds] = useState<string[]>([]);
   const [batch, setBatch] = useState({
@@ -125,8 +129,6 @@ export default function VariantSourcingCaseDetail({
     cartonWidthCm: "",
     cartonHeightCm: "",
     piecesPerCarton: "",
-    marketPriceMyr: "",
-    marketPack: "",
     moq: "",
   });
   useEffect(() => {
@@ -157,6 +159,17 @@ export default function VariantSourcingCaseDetail({
           ]),
       ),
     );
+    setMarketBenchmarks(
+      Object.fromEntries(
+        item.variants.map((variant: any) => [
+          variant.id,
+          {
+            marketPriceMyr: variant.marketPriceMyr ?? undefined,
+            marketPack: variant.marketPack ?? 1,
+          },
+        ]),
+      ),
+    );
   }, [item?.id]);
   if (isLoading)
     return (
@@ -171,7 +184,7 @@ export default function VariantSourcingCaseDetail({
       </main>
     );
   const submittedLines = item.quotes.flatMap((quote: any) =>
-    quote.status === "submitted"
+    ["submitted", "changes_requested"].includes(quote.status)
       ? quote.lines.map((line: any) => ({ ...line, quote }))
       : [],
   );
@@ -183,13 +196,24 @@ export default function VariantSourcingCaseDetail({
       return groups;
     }, {}),
   ).filter((quote: any) =>
-    ["draft", "submitted"].includes(quote.status),
+    ["draft", "submitted", "changes_requested"].includes(quote.status),
   ) as any[];
+  const activeCorrection = item.events?.find(
+    (event: any) =>
+      event.type === "variant_quote_changes_requested" &&
+      event.payload?.quoteId === activeSheetId,
+  );
   const activeVariant = item.variants.find(
     (variant: any) => variant.id === activeVariantId,
   );
+  const activeMarket = marketBenchmarks[activeVariantId] || {
+    marketPriceMyr: activeVariant?.marketPriceMyr ?? undefined,
+    marketPack: activeVariant?.marketPack ?? 1,
+  };
   const offers = submittedLines.filter(
-    (line: any) => line.caseVariantId === activeVariantId,
+    (line: any) =>
+      line.caseVariantId === activeVariantId &&
+      line.availability === "available",
   );
   const selectedOfferLines = submittedLines.filter(
     (line: any) => selected[line.caseVariantId] === line.id,
@@ -324,8 +348,6 @@ export default function VariantSourcingCaseDetail({
                   cartonWidthCm: line.cartonWidthCm?.toString() || "",
                   cartonHeightCm: line.cartonHeightCm?.toString() || "",
                   piecesPerCarton: line.piecesPerCarton?.toString() || "",
-                  marketPriceMyr: line.marketPriceMyr?.toString() || "",
-                  marketPack: line.marketPack?.toString() || "1",
                   moq: line.moq?.toString() || "",
                   leadTimeDays: line.leadTimeDays?.toString() || "",
                   notes: line.notes || "",
@@ -388,11 +410,13 @@ export default function VariantSourcingCaseDetail({
               caseVariantId: variant.id,
               quoteLineId: selected[variant.id],
               status: "selected",
+              ...marketBenchmarks[variant.id],
             }
           : {
               caseVariantId: variant.id,
               status: "skipped",
               skipReason: skipped[variant.id] || "No viable offer selected",
+              ...marketBenchmarks[variant.id],
             },
       ),
     });
@@ -404,6 +428,18 @@ export default function VariantSourcingCaseDetail({
     setLines((current) => ({
       ...current,
       [variantId]: { ...(current[variantId] || emptyLine()), [field]: value },
+    }));
+  const updateMarketBenchmark = (
+    variantId: string,
+    update: Partial<MarketBenchmark>,
+  ) =>
+    setMarketBenchmarks((current) => ({
+      ...current,
+      [variantId]: {
+        marketPriceMyr: current[variantId]?.marketPriceMyr,
+        marketPack: current[variantId]?.marketPack ?? 1,
+        ...update,
+      },
     }));
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
@@ -604,13 +640,18 @@ export default function VariantSourcingCaseDetail({
                   type="button"
                   key={sheet.id}
                   onClick={() => selectSheet(sheet)}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm ${activeSheetId === sheet.id ? "border-sky-600 bg-sky-50" : "hover:bg-muted/50"}`}
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${sheet.status === "changes_requested" ? "border-red-500 bg-red-50 hover:bg-red-100" : activeSheetId === sheet.id ? "border-sky-600 bg-sky-50" : "hover:bg-muted/50"}`}
                 >
                   <span className="block font-medium">
                     {sheet.supplierName}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {sheet.status === "submitted" ? "Submitted" : "Draft"} ·{" "}
+                    {sheet.status === "changes_requested"
+                      ? "Needs correction"
+                      : sheet.status === "submitted"
+                        ? "Submitted"
+                        : "Draft"}{" "}
+                    ·{" "}
                     {
                       sheet.lines.filter(
                         (line: any) => line.availability === "available",
@@ -639,6 +680,24 @@ export default function VariantSourcingCaseDetail({
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
+              {activeCorrection && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="font-medium">Missing information requested</p>
+                  <p className="mt-1">
+                    Update the requested variants, then resubmit this supplier
+                    sheet.
+                  </p>
+                  <ul className="mt-2 list-disc pl-5">
+                    {(activeCorrection.payload.issues || []).map(
+                      (issue: any) => (
+                        <li key={issue.variantId}>
+                          {issue.variant}: {issue.fields.join(", ")}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <Popover
                   open={supplierPickerOpen}
@@ -718,7 +777,7 @@ export default function VariantSourcingCaseDetail({
                 />
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1050px] text-sm">
+                <table className="w-full min-w-[880px] text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
                       <th className="w-10 p-2">
@@ -744,7 +803,6 @@ export default function VariantSourcingCaseDetail({
                       <th className="p-2">Pieces / unit</th>
                       <th className="p-2">Carton L x W x H cm</th>
                       <th className="p-2">Pieces / carton</th>
-                      <th className="p-2">Market RM / pack</th>
                       <th className="p-2">MOQ</th>
                     </tr>
                   </thead>
@@ -870,34 +928,6 @@ export default function VariantSourcingCaseDetail({
                             }))
                           }
                         />
-                      </td>
-                      <td className="p-2">
-                        <div className="flex gap-1">
-                          <Input
-                            className="h-8 min-w-16 text-xs"
-                            type="number"
-                            placeholder="RM"
-                            value={batch.marketPriceMyr}
-                            onChange={(event) =>
-                              setBatch((current) => ({
-                                ...current,
-                                marketPriceMyr: event.target.value,
-                              }))
-                            }
-                          />
-                          <Input
-                            className="h-8 min-w-14 text-xs"
-                            type="number"
-                            placeholder="Pack"
-                            value={batch.marketPack}
-                            onChange={(event) =>
-                              setBatch((current) => ({
-                                ...current,
-                                marketPack: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
                       </td>
                       <td className="p-2">
                         <Input
@@ -1037,32 +1067,6 @@ export default function VariantSourcingCaseDetail({
                             />
                           </td>
                           <td className="p-2">
-                            <div className="flex gap-1">
-                              <Input
-                                type="number"
-                                value={line.marketPriceMyr}
-                                onChange={(event) =>
-                                  updateLine(
-                                    variant.id,
-                                    "marketPriceMyr",
-                                    event.target.value,
-                                  )
-                                }
-                              />
-                              <Input
-                                type="number"
-                                value={line.marketPack}
-                                onChange={(event) =>
-                                  updateLine(
-                                    variant.id,
-                                    "marketPack",
-                                    event.target.value,
-                                  )
-                                }
-                              />
-                            </div>
-                          </td>
-                          <td className="p-2">
                             <Input
                               type="number"
                               value={line.moq}
@@ -1101,7 +1105,10 @@ export default function VariantSourcingCaseDetail({
                   disabled={!supplierName.trim()}
                   isLoading={command.isPending}
                 >
-                  <Send className="h-4 w-4" /> Submit supplier sheet
+                  <Send className="h-4 w-4" />{" "}
+                  {activeCorrection
+                    ? "Resubmit corrections"
+                    : "Submit supplier sheet"}
                 </Button>
               </div>
             </CardContent>
@@ -1184,28 +1191,6 @@ export default function VariantSourcingCaseDetail({
                     }))
                   }
                 />
-                <Input
-                  type="number"
-                  placeholder="Market RM / pack"
-                  value={batch.marketPriceMyr}
-                  onChange={(event) =>
-                    setBatch((current) => ({
-                      ...current,
-                      marketPriceMyr: event.target.value,
-                    }))
-                  }
-                />
-                <Input
-                  type="number"
-                  placeholder="Market pieces / pack"
-                  value={batch.marketPack}
-                  onChange={(event) =>
-                    setBatch((current) => ({
-                      ...current,
-                      marketPack: event.target.value,
-                    }))
-                  }
-                />
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Input
@@ -1284,16 +1269,21 @@ export default function VariantSourcingCaseDetail({
                   type="button"
                   key={variant.id}
                   onClick={() => setActiveVariantId(variant.id)}
-                  className={`w-full rounded-lg border p-3 text-left text-sm ${activeVariantId === variant.id ? "border-sky-600 bg-sky-50" : ""}`}
+                  className={`flex w-full items-center justify-between rounded-lg border p-3 text-left text-sm ${activeVariantId === variant.id ? "border-sky-600 bg-sky-50" : ""}`}
                 >
-                  <span className="font-medium">{label(variant)}</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {selected[variant.id]
-                      ? "Offer selected"
-                      : skipped[variant.id]
-                        ? "Skipped"
-                        : "Needs decision"}
+                  <span>
+                    <span className="font-medium">{label(variant)}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {selected[variant.id]
+                        ? "Offer selected"
+                        : skipped[variant.id]
+                          ? "Skipped"
+                          : "Needs decision"}
+                    </span>
                   </span>
+                  {selected[variant.id] && (
+                    <Check className="h-5 w-5 shrink-0 text-emerald-600" />
+                  )}
                 </button>
               ))}
             </CardContent>
@@ -1304,14 +1294,71 @@ export default function VariantSourcingCaseDetail({
                 {activeVariant ? label(activeVariant) : "Variant offers"}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Select only offers that pass the canonical landed-cost model. A
-                missing freight, market, or pack input needs correction first.
+                Market benchmarks are admin-only. They compare every supplier
+                offer for this variant against the same selling-price evidence.
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
+              {activeVariant && (
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-sm font-medium">
+                    Market benchmark (optional)
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Enter an observed competitor price to validate viability, or
+                    explicitly proceed without market validation.
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label className="space-y-1 text-sm">
+                      <span>Competitor listing price (RM)</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={activeMarket.marketPriceMyr ?? ""}
+                        onChange={(event) =>
+                          updateMarketBenchmark(activeVariant.id, {
+                            marketPriceMyr: event.target.value
+                              ? Number(event.target.value)
+                              : undefined,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span>Pieces per competitor listing</span>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={activeMarket.marketPack ?? 1}
+                        disabled={!activeMarket.marketPriceMyr}
+                        onChange={(event) =>
+                          updateMarketBenchmark(activeVariant.id, {
+                            marketPack: event.target.value
+                              ? Number(event.target.value)
+                              : 1,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                  {!activeMarket.marketPriceMyr && (
+                    <p className="mt-3 text-sm text-amber-700">
+                      No market benchmark: you can still select an offer, but
+                      its market competitiveness will not be validated.
+                    </p>
+                  )}
+                </div>
+              )}
               {offers.length ? (
                 offers.map((offer: any) => {
-                  const evaluation = variantViability(offer, costConfig);
+                  const evaluation = variantViability(
+                    offer,
+                    costConfig,
+                    activeMarket,
+                  );
+                  const correctionPending =
+                    offer.quote.status === "changes_requested";
                   const result = evaluation.result;
                   const chosen = selected[activeVariantId] === offer.id;
                   return (
@@ -1333,8 +1380,16 @@ export default function VariantSourcingCaseDetail({
                             days
                           </p>
                         </div>
-                        <Badge className={statusStyle[evaluation.status]}>
-                          {evaluation.status.replaceAll("_", " ")}
+                        <Badge
+                          className={
+                            correctionPending
+                              ? "bg-sky-100 text-sky-800"
+                              : statusStyle[evaluation.status]
+                          }
+                        >
+                          {correctionPending
+                            ? "info requested"
+                            : evaluation.status.replaceAll("_", " ")}
                         </Badge>
                       </div>
                       {result && (
@@ -1360,14 +1415,38 @@ export default function VariantSourcingCaseDetail({
                               {result.flags.join(", ")}
                             </p>
                           )}
+                          {correctionPending && (
+                            <p className="mt-2 text-sky-700">
+                              Waiting for the sourcer to provide the requested
+                              information.
+                            </p>
+                          )}
                         </div>
                       )}
                       <Button
                         className="mt-3"
                         size="sm"
-                        disabled={evaluation.status !== "pass"}
+                        disabled={
+                          (evaluation.status !== "pass" &&
+                            evaluation.status !== "market_unchecked") ||
+                          correctionPending
+                        }
                         variant={chosen ? "default" : "outline"}
                         onClick={() => {
+                          if (chosen) {
+                            setSelected((current) => {
+                              const next = { ...current };
+                              delete next[activeVariantId];
+                              return next;
+                            });
+                            command.mutate({
+                              id: item.id,
+                              action: "clear_variant_selection",
+                              version: item.version,
+                              caseVariantId: activeVariantId,
+                            });
+                            return;
+                          }
                           setSelected((current) => ({
                             ...current,
                             [activeVariantId]: offer.id,
@@ -1377,11 +1456,45 @@ export default function VariantSourcingCaseDetail({
                             delete next[activeVariantId];
                             return next;
                           });
+                          command.mutate({
+                            id: item.id,
+                            action: "save_variant_selection",
+                            version: item.version,
+                            selection: {
+                              caseVariantId: activeVariantId,
+                              quoteLineId: offer.id,
+                              status: "selected",
+                              ...activeMarket,
+                            },
+                          });
                         }}
                       >
                         <Check className="h-4 w-4" />{" "}
-                        {chosen ? "Selected" : "Select offer"}
+                        {chosen
+                          ? "Deselect offer"
+                          : evaluation.status === "market_unchecked"
+                            ? "Select with warning"
+                            : "Select offer"}
                       </Button>
+                      {evaluation.status === "needs_data" &&
+                        !correctionPending && (
+                          <Button
+                            className="mt-3 ml-2"
+                            size="sm"
+                            variant="outline"
+                            disabled={command.isPending}
+                            onClick={() =>
+                              command.mutate({
+                                id: item.id,
+                                action: "request_variant_quote_changes",
+                                version: item.version,
+                                quoteId: offer.quote.id,
+                              })
+                            }
+                          >
+                            Request missing info
+                          </Button>
+                        )}
                     </div>
                   );
                 })

@@ -15,14 +15,30 @@ const completeLine = {
 
 describe("variantViability", () => {
   it("passes a complete offer above its canonical minimum viable price", () => {
-    expect(variantViability(completeLine, null).status).toBe("pass");
+    expect(variantViability(completeLine, null, completeLine).status).toBe(
+      "pass",
+    );
   });
 
   it("fails when the observed market price is below the break-even price", () => {
-    expect(variantViability({ ...completeLine, marketPriceMyr: 0.5 }, null).status).toBe("fail");
+    expect(
+      variantViability(completeLine, null, {
+        marketPriceMyr: 0.5,
+        marketPack: 1,
+      }).status,
+    ).toBe("fail");
   });
 
-  it("requires missing freight and market evidence instead of guessing", () => {
-    expect(variantViability({ availability: "available", unitPriceRmb: 1.2 }, null).status).toBe("needs_data");
+  it("marks complete costs without a market benchmark as unchecked", () => {
+    expect(variantViability(completeLine, null).status).toBe(
+      "market_unchecked",
+    );
+  });
+
+  it("requires missing freight evidence instead of guessing", () => {
+    expect(
+      variantViability({ availability: "available", unitPriceRmb: 1.2 }, null)
+        .status,
+    ).toBe("needs_data");
   });
 });

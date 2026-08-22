@@ -5,7 +5,10 @@ import { queryKeys } from "@/lib/react-query/config";
 import { getErrorMessage } from "@/lib/api/errors";
 import type { PurchaseOrder } from "@/types/purchase-order";
 
-export function usePurchaseOrders(filters?: { status?: string; supplierId?: string }) {
+export function usePurchaseOrders(filters?: {
+  status?: string;
+  supplierId?: string;
+}) {
   return useQuery({
     queryKey: queryKeys.purchaseOrders.list(filters),
     queryFn: async () => {
@@ -39,7 +42,11 @@ export function useCreatePurchaseOrder() {
       toast({ title: "Purchase order created" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -48,7 +55,10 @@ export function useUpdatePurchaseOrder() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: async ({ id, ...data }: Record<string, unknown> & { id: string }) => {
+    mutationFn: async ({
+      id,
+      ...data
+    }: Record<string, unknown> & { id: string }) => {
       const response = await apiClient.purchaseOrders.update(id, data);
       return response.data;
     },
@@ -57,7 +67,11 @@ export function useUpdatePurchaseOrder() {
       toast({ title: "Purchase order updated" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -75,7 +89,11 @@ export function useDeletePurchaseOrder() {
       toast({ title: "Purchase order cancelled" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -84,7 +102,13 @@ export function useApprovePurchaseOrder() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: async ({ id, action }: { id: string; action: "approve" | "reject" }) => {
+    mutationFn: async ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "approve" | "reject";
+    }) => {
       const response = await apiClient.purchaseOrders.approve(id, { action });
       return response.data;
     },
@@ -93,7 +117,11 @@ export function useApprovePurchaseOrder() {
       toast({ title: "Purchase order updated" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -112,7 +140,11 @@ export function useGeneratePurchaseOrders() {
       toast({ title: `Generated ${count} purchase order(s)` });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -121,7 +153,10 @@ export function useShipPurchaseOrder() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: async ({ id, ...data }: Record<string, unknown> & { id: string }) => {
+    mutationFn: async ({
+      id,
+      ...data
+    }: Record<string, unknown> & { id: string }) => {
       const response = await apiClient.purchaseOrders.ship(id, data);
       return response.data;
     },
@@ -131,7 +166,35 @@ export function useShipPurchaseOrder() {
       toast({ title: "Purchase order marked as shipped" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+export function usePlacePurchaseOrder() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...data
+    }: Record<string, unknown> & { id: string }) =>
+      (await apiClient.purchaseOrders.place(id, data)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
+      toast({ title: "Supplier order marked as placed" });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -140,7 +203,10 @@ export function useUpdateShippingInfo() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: async ({ id, ...data }: Record<string, unknown> & { id: string }) => {
+    mutationFn: async ({
+      id,
+      ...data
+    }: Record<string, unknown> & { id: string }) => {
       const response = await apiClient.purchaseOrders.updateShipping(id, data);
       return response.data;
     },
@@ -150,7 +216,11 @@ export function useUpdateShippingInfo() {
       toast({ title: "Shipping info updated" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }
@@ -160,7 +230,9 @@ export function useUpdatePONotes() {
   const { toast } = useToast();
   return useMutation({
     mutationFn: async ({ id, notes }: { id: string; notes: string }) => {
-      const response = await apiClient.purchaseOrders.updateNotes(id, { notes });
+      const response = await apiClient.purchaseOrders.updateNotes(id, {
+        notes,
+      });
       return response.data;
     },
     onSuccess: () => {
@@ -169,7 +241,11 @@ export function useUpdatePONotes() {
       toast({ title: "Notes updated" });
     },
     onError: (error: unknown) => {
-      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
     },
   });
 }

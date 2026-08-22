@@ -10,11 +10,7 @@ export type SourcingPresentationGroup =
   | "closed";
 
 export type SourcingBadgeVariant =
-  | "secondary"
-  | "warning"
-  | "info"
-  | "success"
-  | "destructive";
+  "secondary" | "warning" | "info" | "success" | "destructive";
 
 type TimelineStep = { id: string; label: string };
 
@@ -24,6 +20,7 @@ const ADMIN_STAGE_TO_GROUP: Record<string, SourcingPresentationGroup> = {
   changes_requested: "changes_requested",
   quoted: "needs_action",
   approved: "needs_action",
+  order_pending: "waiting",
   ordered: "shipped",
   shipping: "shipped",
   received: "completed",
@@ -39,6 +36,7 @@ const SOURCER_STAGE_TO_GROUP: Record<string, SourcingPresentationGroup> = {
   changes_requested: "needs_action",
   quoted: "waiting",
   approved: "waiting",
+  order_pending: "needs_action",
   ordered: "needs_action",
   shipping: "shipped",
   received: "completed",
@@ -52,7 +50,8 @@ const ADMIN_TIMELINE: TimelineStep[] = [
   { id: "draft", label: "Request" },
   { id: "sourcing", label: "Sourcing" },
   { id: "quoted", label: "Review" },
-  { id: "approved", label: "Approved" },
+  { id: "approved", label: "Create orders" },
+  { id: "order_pending", label: "Place with supplier" },
   { id: "ordered", label: "Ordered" },
   { id: "shipping", label: "Shipping" },
   { id: "received", label: "Received" },
@@ -62,6 +61,7 @@ const SOURCER_TIMELINE: TimelineStep[] = [
   { id: "draft", label: "Request" },
   { id: "sourcing", label: "Sourcing" },
   { id: "quoted", label: "Awaiting approval" },
+  { id: "order_pending", label: "To order" },
   { id: "ordered", label: "To ship" },
   { id: "shipping", label: "Shipped" },
   { id: "received", label: "Received" },
@@ -73,9 +73,10 @@ const ADMIN_TIMELINE_INDEX: Record<string, number> = {
   changes_requested: 1,
   quoted: 2,
   approved: 3,
-  ordered: 4,
-  shipping: 5,
-  received: 6,
+  order_pending: 4,
+  ordered: 5,
+  shipping: 6,
+  received: 7,
 };
 
 const SOURCER_TIMELINE_INDEX: Record<string, number> = {
@@ -84,16 +85,18 @@ const SOURCER_TIMELINE_INDEX: Record<string, number> = {
   changes_requested: 1,
   quoted: 2,
   approved: 2,
-  ordered: 3,
-  shipping: 4,
-  received: 5,
+  order_pending: 3,
+  ordered: 4,
+  shipping: 5,
+  received: 6,
 };
 
 export function getSourcingGroup(
   stage: string,
   viewer: SourcingViewer,
 ): SourcingPresentationGroup {
-  const groups = viewer === "admin" ? ADMIN_STAGE_TO_GROUP : SOURCER_STAGE_TO_GROUP;
+  const groups =
+    viewer === "admin" ? ADMIN_STAGE_TO_GROUP : SOURCER_STAGE_TO_GROUP;
   return groups[stage] ?? "needs_action";
 }
 
@@ -110,6 +113,7 @@ export function getSourcingStatusMessage(
       changes_requested: `Waiting on ${sourcer} to revise the offer`,
       quoted: "Your action: review submitted offers",
       approved: "Your action: confirm the order",
+      order_pending: `Waiting on ${sourcer} to place supplier orders`,
       ordered: `Waiting on ${sourcer} to arrange shipment`,
       shipping: "Awaiting receipt through Receiving",
       received: "Order received",
@@ -122,8 +126,10 @@ export function getSourcingStatusMessage(
       draft: "Your action: complete the request",
       sourcing: "Your action: source and submit offers",
       changes_requested: "Your action: revise and resubmit",
-      quoted: "Offers sent to the manager. You can add or withdraw offers until one is approved.",
+      quoted:
+        "Offers sent to the manager. You can add or withdraw offers until one is approved.",
       approved: "Waiting for admin to place the order",
+      order_pending: "Your action: place supplier orders",
       ordered: "Your action: arrange shipment",
       shipping: "Shipped, awaiting receipt",
       received: "Order received",
@@ -145,6 +151,7 @@ export function getSourcingStageBadgeVariant(
     changes_requested: "warning",
     quoted: "warning",
     approved: "warning",
+    order_pending: "info",
     ordered: "info",
     shipping: "info",
     received: "success",
@@ -164,6 +171,7 @@ export function getSourcingTimelineIndex(
   stage: string,
   viewer: SourcingViewer,
 ) {
-  const indexes = viewer === "admin" ? ADMIN_TIMELINE_INDEX : SOURCER_TIMELINE_INDEX;
+  const indexes =
+    viewer === "admin" ? ADMIN_TIMELINE_INDEX : SOURCER_TIMELINE_INDEX;
   return indexes[stage] ?? -1;
 }

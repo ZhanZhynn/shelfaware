@@ -126,6 +126,7 @@ export const API_ENDPOINTS = {
     detail: (id: string) => `/purchase-orders/${id}`,
     approve: (id: string) => `/purchase-orders/${id}/approve`,
     ship: (id: string) => `/purchase-orders/${id}/ship`,
+    place: (id: string) => `/purchase-orders/${id}/place`,
     notes: (id: string) => `/purchase-orders/${id}/ship`,
     generate: "/purchase-orders/generate",
   },

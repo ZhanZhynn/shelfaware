@@ -8,8 +8,11 @@ import {
   ChevronsUpDown,
   CircleAlert,
   FileText,
+  ImagePlus,
+  MoreHorizontal,
   PackagePlus,
   Send,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,10 +42,41 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   useCreateSourcingComment,
   useSourcingCase,
   useSourcingCommand,
   useSourcingSuppliers,
+  useUploadSourcingAttachment,
+  useDeleteSourcingAttachment,
 } from "@/hooks/queries";
 import { normalizeSourcingCostConfig } from "@/lib/sourcing/landed-cost";
 import { variantViability } from "@/lib/sourcing/variant-viability";
@@ -58,6 +92,7 @@ type SheetLine = {
   cartonLengthCm: string;
   cartonWidthCm: string;
   cartonHeightCm: string;
+  cartonWeightKg: string;
   piecesPerCarton: string;
   moq: string;
   leadTimeDays: string;
@@ -67,6 +102,14 @@ type MarketBenchmark = {
   marketPriceMyr?: number;
   marketPack?: number;
 };
+type ProposalDraft = SheetLine & {
+  clientKey: string;
+  caseVariantId?: string;
+  size: string;
+  material: string;
+  colour: string;
+  customLabel: string;
+};
 const emptyLine = (): SheetLine => ({
   availability: "available",
   unitPriceRmb: "",
@@ -74,6 +117,7 @@ const emptyLine = (): SheetLine => ({
   cartonLengthCm: "",
   cartonWidthCm: "",
   cartonHeightCm: "",
+  cartonWeightKg: "",
   piecesPerCarton: "",
   moq: "",
   leadTimeDays: "",
@@ -81,9 +125,11 @@ const emptyLine = (): SheetLine => ({
 });
 const asNumber = (value: string) => (value === "" ? undefined : Number(value));
 const label = (variant: any) =>
+  variant.customLabel ||
   [variant.size, variant.material, variant.colour]
     .filter(Boolean)
-    .join(" / ") || "Standard";
+    .join(" / ") ||
+  "Standard";
 const statusStyle: Record<string, string> = {
   pass: "bg-emerald-100 text-emerald-800",
   fail: "bg-red-100 text-red-800",
@@ -101,6 +147,8 @@ export default function VariantSourcingCaseDetail({
   const { data: item, isLoading, error } = useSourcingCase(caseId);
   const command = useSourcingCommand();
   const comment = useCreateSourcingComment();
+  const uploadAttachment = useUploadSourcingAttachment();
+  const deleteAttachment = useDeleteSourcingAttachment();
   const { data: suppliers = [] } = useSourcingSuppliers(
     item?.workspaceId || "",
   );
@@ -113,9 +161,37 @@ export default function VariantSourcingCaseDetail({
   const [paymentTerms, setPaymentTerms] = useState("");
   const [sheetNotes, setSheetNotes] = useState("");
   const [lines, setLines] = useState<Record<string, SheetLine>>({});
+  const [proposals, setProposals] = useState<ProposalDraft[]>([]);
+  const [proposalImages, setProposalImages] = useState<
+    Record<string, File | undefined>
+  >({});
+  const [proposalImagePreviews, setProposalImagePreviews] = useState<
+    Record<string, string>
+  >({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [activeVariantId, setActiveVariantId] = useState("");
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [skipped, setSkipped] = useState<Record<string, string>>({});
+  const [skipDialogVariantId, setSkipDialogVariantId] = useState<string | null>(
+    null,
+  );
+  const [skipReason, setSkipReason] = useState("");
+  const [changeDialog, setChangeDialog] = useState<{
+    offer: any;
+    variantId: string;
+  } | null>(null);
+  const [changeReason, setChangeReason] = useState("");
+  const [selectionDialog, setSelectionDialog] = useState<{
+    offer: any;
+    variant: any;
+    market: MarketBenchmark;
+  } | null>(null);
+  const [selectionQuantity, setSelectionQuantity] = useState("");
+  const [confirmDecisionsOpen, setConfirmDecisionsOpen] = useState(false);
+  const [orderQuantities, setOrderQuantities] = useState<
+    Record<string, string>
+  >({});
+  const [bulkOrderQuantity, setBulkOrderQuantity] = useState("");
   const [marketBenchmarks, setMarketBenchmarks] = useState<
     Record<string, MarketBenchmark>
   >({});
@@ -128,6 +204,7 @@ export default function VariantSourcingCaseDetail({
     cartonLengthCm: "",
     cartonWidthCm: "",
     cartonHeightCm: "",
+    cartonWeightKg: "",
     piecesPerCarton: "",
     moq: "",
   });
@@ -188,6 +265,12 @@ export default function VariantSourcingCaseDetail({
       ? quote.lines.map((line: any) => ({ ...line, quote }))
       : [],
   );
+  const decisionsLocked = item.stage !== "quoted";
+  const quoteSheetLocked = ![
+    "sourcing",
+    "changes_requested",
+    "quoted",
+  ].includes(item.stage);
   const supplierSheets = Object.values(
     item.quotes.reduce((groups: Record<string, any>, quote: any) => {
       const key = quote.quoteGroupId || quote.id;
@@ -198,6 +281,10 @@ export default function VariantSourcingCaseDetail({
   ).filter((quote: any) =>
     ["draft", "submitted", "changes_requested"].includes(quote.status),
   ) as any[];
+  const quoteRequestedVariants = item.variants.filter(
+    (variant: any) =>
+      variant.origin === "admin" && variant.requestQuote !== false,
+  );
   const activeCorrection = item.events?.find(
     (event: any) =>
       event.type === "variant_quote_changes_requested" &&
@@ -206,7 +293,7 @@ export default function VariantSourcingCaseDetail({
   const activeVariant = item.variants.find(
     (variant: any) => variant.id === activeVariantId,
   );
-  const activeMarket = marketBenchmarks[activeVariantId] || {
+  const activeMarket = {
     marketPriceMyr: activeVariant?.marketPriceMyr ?? undefined,
     marketPack: activeVariant?.marketPack ?? 1,
   };
@@ -227,7 +314,10 @@ export default function VariantSourcingCaseDetail({
   );
   const costConfig = normalizeSourcingCostConfig(item.costConfig);
   const caseAttachments = (item.attachments || []).filter(
-    (attachment: any) => !attachment.quoteId,
+    (attachment: any) => !attachment.quoteId && !attachment.caseVariantId,
+  );
+  const variantAttachments = (item.attachments || []).filter(
+    (attachment: any) => attachment.caseVariantId,
   );
   const caseImages = caseAttachments.filter((attachment: any) =>
     attachment.mimeType?.startsWith("image/"),
@@ -244,6 +334,13 @@ export default function VariantSourcingCaseDetail({
   const timelineIndex = getSourcingTimelineIndex(item.stage, viewer);
   const currentTimelineLabel =
     timelineSteps.find((step) => step.id === item.stage)?.label || item.stage;
+  const updateCaseVariant = (variant: any, patch: Record<string, unknown>) =>
+    command.mutate({
+      id: item.id,
+      action: "update_case_variant",
+      version: item.version,
+      variant: { caseVariantId: variant.id, ...patch },
+    });
   const action = admin
     ? item.stage === "quoted"
       ? [
@@ -296,34 +393,116 @@ export default function VariantSourcingCaseDetail({
     supplierName,
     paymentTerms: paymentTerms || null,
     notes: sheetNotes || null,
-    lines: item.variants.map((variant: any) => ({
-      caseVariantId: variant.id,
-      ...Object.fromEntries(
-        Object.entries(lines[variant.id] || emptyLine()).map(([key, value]) => [
-          key,
-          ["availability", "notes"].includes(key)
-            ? value
-            : asNumber(value as string),
-        ]),
-      ),
-    })),
+    lines: item.variants
+      .filter(
+        (variant: any) =>
+          variant.requestQuote !== false && variant.origin === "admin",
+      )
+      .map((variant: any) => ({
+        caseVariantId: variant.id,
+        ...Object.fromEntries(
+          Object.entries(lines[variant.id] || emptyLine()).map(
+            ([key, value]) => [
+              key,
+              ["availability", "notes"].includes(key)
+                ? value
+                : asNumber(value as string),
+            ],
+          ),
+        ),
+      })),
+    proposals: proposals.map(
+      ({ clientKey: _clientKey, caseVariantId, ...proposal }) => ({
+        ...Object.fromEntries(
+          Object.entries(proposal).map(([key, value]) => [
+            key,
+            [
+              "availability",
+              "notes",
+              "size",
+              "material",
+              "colour",
+              "customLabel",
+            ].includes(key)
+              ? value
+              : asNumber(value as string),
+          ]),
+        ),
+        ...(caseVariantId ? { caseVariantId } : {}),
+      }),
+    ),
   });
-  const submitSheet = () =>
-    command.mutate({
+  const missingQuoteFields = (line: SheetLine) =>
+    [
+      !line.unitPriceRmb && "unitPriceRmb",
+      !line.piecesPerSellingUnit && "piecesPerSellingUnit",
+      !line.cartonWeightKg && "cartonWeightKg",
+      !line.cartonLengthCm && "cartonLengthCm",
+      !line.cartonWidthCm && "cartonWidthCm",
+      !line.cartonHeightCm && "cartonHeightCm",
+      !line.piecesPerCarton && "piecesPerCarton",
+    ].filter(Boolean) as (keyof SheetLine)[];
+  const incompleteQuoteVariantIds = item.variants
+    .filter(
+      (variant: any) =>
+        variant.requestQuote !== false && variant.origin === "admin",
+    )
+    .filter((variant: any) => {
+      const line = lines[variant.id] || emptyLine();
+      return (
+        line.availability === "available" && missingQuoteFields(line).length > 0
+      );
+    })
+    .map((variant: any) => variant.id);
+  const submitBlocker = !supplierName.trim()
+    ? "Choose a supplier before submitting."
+    : incompleteQuoteVariantIds.length
+      ? `${incompleteQuoteVariantIds.length} available variant${incompleteQuoteVariantIds.length === 1 ? " is" : "s are"} missing required quote or carton information.`
+      : "";
+  const quoteFieldClass = (
+    variantId: string,
+    line: SheetLine,
+    field: keyof SheetLine,
+  ) =>
+    submitAttempted &&
+    incompleteQuoteVariantIds.includes(variantId) &&
+    missingQuoteFields(line).includes(field)
+      ? "border-destructive focus-visible:ring-destructive"
+      : "";
+  const uploadProposalImages = async (result: any) => {
+    const ids: string[] = result?.proposalVariantIds || [];
+    await Promise.all(
+      proposals.map((proposal, index) => {
+        const file = proposalImages[proposal.clientKey];
+        const caseVariantId = proposal.caseVariantId || ids[index];
+        return file && caseVariantId
+          ? uploadAttachment.mutateAsync({ id: item.id, file, caseVariantId })
+          : Promise.resolve();
+      }),
+    );
+  };
+  const submitSheet = async () => {
+    setSubmitAttempted(true);
+    if (submitBlocker) return;
+    const result = await command.mutateAsync({
       id: item.id,
       action: "submit_variant_quote",
       version: item.version,
       quoteId: activeSheetId || undefined,
       quoteSheet: sheetPayload(),
     });
-  const saveSheet = () =>
-    command.mutate({
+    await uploadProposalImages(result);
+  };
+  const saveSheet = async () => {
+    const result = await command.mutateAsync({
       id: item.id,
       action: "save_variant_quote",
       version: item.version,
       quoteId: activeSheetId || undefined,
       quoteSheet: sheetPayload(),
     });
+    await uploadProposalImages(result);
+  };
   const selectSheet = (sheet: any) => {
     setActiveSheetId(sheet.id);
     setSupplierId(sheet.supplierId || "");
@@ -347,6 +526,7 @@ export default function VariantSourcingCaseDetail({
                   cartonLengthCm: line.cartonLengthCm?.toString() || "",
                   cartonWidthCm: line.cartonWidthCm?.toString() || "",
                   cartonHeightCm: line.cartonHeightCm?.toString() || "",
+                  cartonWeightKg: line.cartonWeightKg?.toString() || "",
                   piecesPerCarton: line.piecesPerCarton?.toString() || "",
                   moq: line.moq?.toString() || "",
                   leadTimeDays: line.leadTimeDays?.toString() || "",
@@ -357,6 +537,55 @@ export default function VariantSourcingCaseDetail({
         }),
       ),
     );
+    setProposals(
+      item.variants
+        .filter(
+          (variant: any) =>
+            variant.origin === "sourcer" &&
+            variant.proposedQuoteGroupId === sheet.quoteGroupId,
+        )
+        .map((variant: any) => {
+          const line = sheet.lines.find(
+            (entry: any) => entry.caseVariantId === variant.id,
+          );
+          return {
+            clientKey: variant.id,
+            caseVariantId: variant.id,
+            size: variant.size || "",
+            material: variant.material || "",
+            colour: variant.colour || "",
+            customLabel: variant.customLabel || "",
+            availability: line?.availability || "available",
+            unitPriceRmb: line?.unitPriceRmb?.toString() || "",
+            piecesPerSellingUnit: line?.piecesPerSellingUnit?.toString() || "1",
+            cartonLengthCm: line?.cartonLengthCm?.toString() || "",
+            cartonWidthCm: line?.cartonWidthCm?.toString() || "",
+            cartonHeightCm: line?.cartonHeightCm?.toString() || "",
+            cartonWeightKg: line?.cartonWeightKg?.toString() || "",
+            piecesPerCarton: line?.piecesPerCarton?.toString() || "",
+            moq: line?.moq?.toString() || "",
+            leadTimeDays: line?.leadTimeDays?.toString() || "",
+            notes: line?.notes || "",
+          } as ProposalDraft;
+        }),
+    );
+  };
+  const startNewQuoteSheet = () => {
+    setActiveSheetId(null);
+    setSupplierId("");
+    setSupplierName("");
+    setPaymentTerms("");
+    setSheetNotes("");
+    setLines(
+      Object.fromEntries(
+        item.variants.map((variant: any) => [variant.id, emptyLine()]),
+      ),
+    );
+    setProposals([]);
+    setProposalImages({});
+    setProposalImagePreviews({});
+    setSubmitAttempted(false);
+    setSupplierPickerOpen(true);
   };
   const selectSupplier = (supplier: any) => {
     const existingSheet = supplierSheets.find(
@@ -369,9 +598,6 @@ export default function VariantSourcingCaseDetail({
       setActiveSheetId(null);
       setSupplierId(supplier.id);
       setSupplierName(supplier.name);
-      setPaymentTerms("");
-      setSheetNotes("");
-      setLines({});
     }
     setSupplierSearch("");
     setSupplierPickerOpen(false);
@@ -380,15 +606,13 @@ export default function VariantSourcingCaseDetail({
     setActiveSheetId(null);
     setSupplierId("");
     setSupplierName(name.trim());
-    setPaymentTerms("");
-    setSheetNotes("");
-    setLines({});
     setSupplierSearch("");
     setSupplierPickerOpen(false);
   };
-  const applyBatch = () =>
-    setLines((current) =>
-      Object.fromEntries(
+  const applyBatch = () => {
+    setLines((current) => ({
+      ...current,
+      ...Object.fromEntries(
         item.variants
           .filter((variant: any) => batchVariantIds.includes(variant.id))
           .map((variant: any) => {
@@ -398,7 +622,17 @@ export default function VariantSourcingCaseDetail({
             return [variant.id, line];
           }),
       ),
+    }));
+    setProposals((current) =>
+      current.map((proposal) => {
+        if (!batchVariantIds.includes(proposal.clientKey)) return proposal;
+        const next = { ...proposal };
+        for (const [field, value] of Object.entries(batch))
+          if (value !== "") (next as any)[field] = value;
+        return next;
+      }),
     );
+  };
   const confirmSelections = () =>
     command.mutate({
       id: item.id,
@@ -420,6 +654,12 @@ export default function VariantSourcingCaseDetail({
             },
       ),
     });
+  const undecidedVariants = item.variants.filter(
+    (variant: any) =>
+      variant.requestQuote !== false &&
+      !selected[variant.id] &&
+      !skipped[variant.id]?.trim(),
+  );
   const updateLine = (
     variantId: string,
     field: keyof SheetLine,
@@ -429,6 +669,34 @@ export default function VariantSourcingCaseDetail({
       ...current,
       [variantId]: { ...(current[variantId] || emptyLine()), [field]: value },
     }));
+  const updateProposal = (index: number, patch: Partial<ProposalDraft>) =>
+    setProposals((current) =>
+      current.map((proposal, position) =>
+        position === index ? { ...proposal, ...patch } : proposal,
+      ),
+    );
+  const addProposal = () =>
+    setProposals((current) => [
+      ...current,
+      {
+        clientKey: crypto.randomUUID(),
+        size: "",
+        material: "",
+        colour: "",
+        customLabel: "",
+        availability: "available",
+        unitPriceRmb: "",
+        piecesPerSellingUnit: "1",
+        cartonLengthCm: "",
+        cartonWidthCm: "",
+        cartonHeightCm: "",
+        cartonWeightKg: "",
+        piecesPerCarton: "",
+        moq: "",
+        leadTimeDays: "",
+        notes: "",
+      },
+    ]);
   const updateMarketBenchmark = (
     variantId: string,
     update: Partial<MarketBenchmark>,
@@ -599,28 +867,7 @@ export default function VariantSourcingCaseDetail({
           <p className="mt-3 text-sm text-muted-foreground">{action[2]}</p>
         </CardContent>
       </Card>
-      {admin ? (
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium">Requested variants</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {item.variants.map((variant: any) => (
-                <button
-                  type="button"
-                  key={variant.id}
-                  onClick={() => setActiveVariantId(variant.id)}
-                  className={`rounded-full border px-3 py-1.5 text-sm ${activeVariantId === variant.id ? "border-sky-600 bg-sky-600 text-white" : "bg-background"}`}
-                >
-                  {label(variant)}{" "}
-                  <span className="opacity-75">
-                    x{variant.requestedQuantity}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
+      {!admin && (
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -631,6 +878,13 @@ export default function VariantSourcingCaseDetail({
                   supplier.
                 </p>
               </div>
+              <Button
+                type="button"
+                onClick={startNewQuoteSheet}
+                disabled={quoteSheetLocked}
+              >
+                Add new quote sheet
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
@@ -654,10 +908,14 @@ export default function VariantSourcingCaseDetail({
                     ·{" "}
                     {
                       sheet.lines.filter(
-                        (line: any) => line.availability === "available",
+                        (line: any) =>
+                          line.availability === "available" &&
+                          quoteRequestedVariants.some(
+                            (variant: any) => variant.id === line.caseVariantId,
+                          ),
                       ).length
                     }
-                    /{item.variants.length} available
+                    /{quoteRequestedVariants.length} available
                   </span>
                 </button>
               ))
@@ -670,7 +928,15 @@ export default function VariantSourcingCaseDetail({
         </Card>
       )}
       {!admin &&
-        ["sourcing", "changes_requested", "quoted"].includes(item.stage) && (
+        [
+          "sourcing",
+          "changes_requested",
+          "quoted",
+          "order_pending",
+          "ordered",
+          "shipping",
+          "received",
+        ].includes(item.stage) && (
           <Card>
             <CardHeader>
               <CardTitle>Supplier quote sheet</CardTitle>
@@ -678,377 +944,791 @@ export default function VariantSourcingCaseDetail({
                 Complete every variant for this supplier, then submit the sheet
                 before moving to the next supplier.
               </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {activeCorrection && (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                  <p className="font-medium">Missing information requested</p>
-                  <p className="mt-1">
-                    Update the requested variants, then resubmit this supplier
-                    sheet.
-                  </p>
-                  <ul className="mt-2 list-disc pl-5">
-                    {(activeCorrection.payload.issues || []).map(
-                      (issue: any) => (
-                        <li key={issue.variantId}>
-                          {issue.variant}: {issue.fields.join(", ")}
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </div>
+              {quoteSheetLocked && (
+                <p className="text-sm text-muted-foreground">
+                  Submitted quote sheets are read-only after purchase orders are
+                  created.
+                </p>
               )}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Popover
-                  open={supplierPickerOpen}
-                  onOpenChange={setSupplierPickerOpen}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={supplierPickerOpen}
-                      className="justify-between font-normal"
-                    >
-                      {supplierName || "Search or add a supplier"}
-                      <ChevronsUpDown className="h-4 w-4 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-[--radix-popover-trigger-width] p-0"
-                    align="start"
+            </CardHeader>
+            <CardContent className="min-w-0 space-y-4 overflow-hidden">
+              <fieldset
+                disabled={quoteSheetLocked}
+                className="min-w-0 space-y-4"
+              >
+                {activeCorrection && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                    <p className="font-medium">Missing information requested</p>
+                    <p className="mt-1">
+                      Update the requested variants, then resubmit this supplier
+                      sheet.
+                    </p>
+                    <ul className="mt-2 list-disc pl-5">
+                      {(activeCorrection.payload.issues || []).map(
+                        (issue: any) => (
+                          <li key={issue.variantId}>
+                            {issue.variant}: {issue.fields.join(", ")}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Popover
+                    open={supplierPickerOpen}
+                    onOpenChange={setSupplierPickerOpen}
                   >
-                    <Command shouldFilter={false}>
-                      <CommandInput
-                        value={supplierSearch}
-                        onValueChange={setSupplierSearch}
-                        placeholder="Search suppliers"
-                      />
-                      <CommandList>
-                        <CommandEmpty>
-                          {supplierSearch.trim()
-                            ? `\"${supplierSearch.trim()}\" (add new supplier)`
-                            : "Type to search suppliers"}
-                        </CommandEmpty>
-                        <CommandGroup heading="Suppliers">
-                          {suppliers
-                            .filter((supplier: any) =>
-                              supplier.name
-                                .toLowerCase()
-                                .includes(supplierSearch.toLowerCase()),
-                            )
-                            .map((supplier: any) => (
-                              <CommandItem
-                                key={supplier.id}
-                                value={supplier.name}
-                                onSelect={() => selectSupplier(supplier)}
-                              >
-                                <Check
-                                  className={`mr-2 h-4 w-4 ${supplierId === supplier.id ? "opacity-100" : "opacity-0"}`}
-                                />
-                                {supplier.name}
-                              </CommandItem>
-                            ))}
-                          {supplierSearch.trim() &&
-                            !suppliers.some(
-                              (supplier: any) =>
-                                supplier.name.toLowerCase() ===
-                                supplierSearch.trim().toLowerCase(),
-                            ) && (
-                              <CommandItem
-                                value={`new-${supplierSearch.trim()}`}
-                                onSelect={() =>
-                                  selectNewSupplierName(supplierSearch)
-                                }
-                              >
-                                {supplierSearch.trim()} (add new supplier)
-                              </CommandItem>
-                            )}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                <Input
-                  value={paymentTerms}
-                  onChange={(event) => setPaymentTerms(event.target.value)}
-                  placeholder="Payment terms (optional)"
-                />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[880px] text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th className="w-10 p-2">
-                        <Checkbox
-                          checked={
-                            batchVariantIds.length === item.variants.length
-                          }
-                          onCheckedChange={(checked) =>
-                            setBatchVariantIds(
-                              checked
-                                ? item.variants.map(
-                                    (variant: any) => variant.id,
-                                  )
-                                : [],
-                            )
-                          }
-                          aria-label="Select all variants"
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={supplierPickerOpen}
+                        className="justify-between font-normal"
+                      >
+                        {supplierName || "Search or add a supplier"}
+                        <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      className="w-[--radix-popover-trigger-width] p-0"
+                      align="start"
+                    >
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          value={supplierSearch}
+                          onValueChange={setSupplierSearch}
+                          placeholder="Search suppliers"
                         />
-                      </th>
-                      <th className="p-2">Variant</th>
-                      <th className="p-2">Available</th>
-                      <th className="p-2">CNY / selling unit</th>
-                      <th className="p-2">Pieces / unit</th>
-                      <th className="p-2">Carton L x W x H cm</th>
-                      <th className="p-2">Pieces / carton</th>
-                      <th className="p-2">MOQ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b bg-muted/40 align-middle">
-                      <td className="p-2" />
-                      <td className="p-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">Batch edit</span>
-                          <span className="text-xs text-muted-foreground">
-                            {batchVariantIds.length} selected
-                          </span>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            disabled={!batchVariantIds.length}
-                            onClick={applyBatch}
-                          >
-                            Apply
-                          </Button>
-                        </div>
-                      </td>
-                      <td className="p-2">
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={batch.availability === "available"}
+                        <CommandList>
+                          <CommandEmpty>
+                            {supplierSearch.trim()
+                              ? `\"${supplierSearch.trim()}\" (add new supplier)`
+                              : "Type to search suppliers"}
+                          </CommandEmpty>
+                          <CommandGroup heading="Suppliers">
+                            {suppliers
+                              .filter((supplier: any) =>
+                                supplier.name
+                                  .toLowerCase()
+                                  .includes(supplierSearch.toLowerCase()),
+                              )
+                              .map((supplier: any) => (
+                                <CommandItem
+                                  key={supplier.id}
+                                  value={supplier.name}
+                                  onSelect={() => selectSupplier(supplier)}
+                                >
+                                  <Check
+                                    className={`mr-2 h-4 w-4 ${supplierId === supplier.id ? "opacity-100" : "opacity-0"}`}
+                                  />
+                                  {supplier.name}
+                                </CommandItem>
+                              ))}
+                            {supplierSearch.trim() &&
+                              !suppliers.some(
+                                (supplier: any) =>
+                                  supplier.name.toLowerCase() ===
+                                  supplierSearch.trim().toLowerCase(),
+                              ) && (
+                                <CommandItem
+                                  value={`new-${supplierSearch.trim()}`}
+                                  onSelect={() =>
+                                    selectNewSupplierName(supplierSearch)
+                                  }
+                                >
+                                  {supplierSearch.trim()} (add new supplier)
+                                </CommandItem>
+                              )}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <Input
+                    value={paymentTerms}
+                    onChange={(event) => setPaymentTerms(event.target.value)}
+                    placeholder="Payment terms (optional)"
+                  />
+                </div>
+                <div className="w-full max-w-full overflow-x-auto">
+                  <table className="w-full min-w-[1300px] text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="w-10 p-2">
+                          <Checkbox
+                            checked={[
+                              ...item.variants
+                                .filter(
+                                  (variant: any) =>
+                                    variant.requestQuote !== false &&
+                                    variant.origin === "admin",
+                                )
+                                .map((variant: any) => variant.id),
+                              ...proposals.map(
+                                (proposal) => proposal.clientKey,
+                              ),
+                            ].every((id) => batchVariantIds.includes(id))}
                             onCheckedChange={(checked) =>
-                              setBatch((current) => ({
-                                ...current,
-                                availability: checked
-                                  ? "available"
-                                  : "unavailable",
-                              }))
+                              setBatchVariantIds(
+                                checked
+                                  ? [
+                                      ...item.variants
+                                        .filter(
+                                          (variant: any) =>
+                                            variant.requestQuote !== false &&
+                                            variant.origin === "admin",
+                                        )
+                                        .map((variant: any) => variant.id),
+                                      ...proposals.map(
+                                        (proposal) => proposal.clientKey,
+                                      ),
+                                    ]
+                                  : [],
+                              )
                             }
+                            aria-label="Select all variants"
                           />
-                          <span className="text-xs text-muted-foreground">
-                            {batch.availability === "available"
-                              ? "Available"
-                              : "Unavailable"}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-2">
-                        <Input
-                          className="h-8 min-w-20 text-xs"
-                          type="number"
-                          placeholder="CNY"
-                          value={batch.unitPriceRmb}
-                          onChange={(event) =>
-                            setBatch((current) => ({
-                              ...current,
-                              unitPriceRmb: event.target.value,
-                            }))
-                          }
-                        />
-                      </td>
-                      <td className="p-2">
-                        <Input
-                          className="h-8 min-w-20 text-xs"
-                          type="number"
-                          placeholder="Pieces"
-                          value={batch.piecesPerSellingUnit}
-                          onChange={(event) =>
-                            setBatch((current) => ({
-                              ...current,
-                              piecesPerSellingUnit: event.target.value,
-                            }))
-                          }
-                        />
-                      </td>
-                      <td className="p-2">
-                        <div className="flex gap-1">
+                        </th>
+                        <th className="p-2">Variant</th>
+                        <th className="p-2">Marketplace</th>
+                        <th className="p-2">Remarks</th>
+                        <th className="p-2">Available</th>
+                        <th className="p-2">CNY / selling unit</th>
+                        <th className="p-2">Carton weight</th>
+                        <th className="p-2">Pieces / unit</th>
+                        <th className="p-2">Carton L x W x H cm</th>
+                        <th className="p-2">Pieces / carton</th>
+                        <th className="p-2">MOQ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b bg-muted/40 align-middle">
+                        <td className="p-2" />
+                        <td className="p-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">Batch edit</span>
+                            <span className="text-xs text-muted-foreground">
+                              {batchVariantIds.length} selected
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              disabled={!batchVariantIds.length}
+                              onClick={applyBatch}
+                            >
+                              Apply
+                            </Button>
+                          </div>
+                        </td>
+                        <td className="p-2" />
+                        <td className="p-2" />
+                        <td className="p-2">
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={batch.availability === "available"}
+                              onCheckedChange={(checked) =>
+                                setBatch((current) => ({
+                                  ...current,
+                                  availability: checked
+                                    ? "available"
+                                    : "unavailable",
+                                }))
+                              }
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {batch.availability === "available"
+                                ? "Available"
+                                : "Unavailable"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-2">
                           <Input
-                            className="h-8 min-w-14 text-xs"
+                            className="h-8 min-w-20 text-xs"
                             type="number"
-                            placeholder="L"
-                            value={batch.cartonLengthCm}
+                            placeholder="CNY"
+                            value={batch.unitPriceRmb}
                             onChange={(event) =>
                               setBatch((current) => ({
                                 ...current,
-                                cartonLengthCm: event.target.value,
+                                unitPriceRmb: event.target.value,
                               }))
                             }
                           />
+                        </td>
+                        <td className="p-2">
+                          <div className="flex items-center">
+                            <Input
+                              className="h-8 min-w-20 text-xs"
+                              type="number"
+                              placeholder="kg"
+                              value={batch.cartonWeightKg}
+                              onChange={(event) =>
+                                setBatch((current) => ({
+                                  ...current,
+                                  cartonWeightKg: event.target.value,
+                                }))
+                              }
+                            />
+                            <span className="-ml-7 text-xs text-muted-foreground">
+                              kg
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-2">
                           <Input
-                            className="h-8 min-w-14 text-xs"
+                            className="h-8 min-w-20 text-xs"
                             type="number"
-                            placeholder="W"
-                            value={batch.cartonWidthCm}
+                            placeholder="Pieces"
+                            value={batch.piecesPerSellingUnit}
                             onChange={(event) =>
                               setBatch((current) => ({
                                 ...current,
-                                cartonWidthCm: event.target.value,
+                                piecesPerSellingUnit: event.target.value,
                               }))
                             }
                           />
+                        </td>
+                        <td className="p-2">
+                          <div className="flex gap-1">
+                            <Input
+                              className="h-8 min-w-14 text-xs"
+                              type="number"
+                              placeholder="L"
+                              value={batch.cartonLengthCm}
+                              onChange={(event) =>
+                                setBatch((current) => ({
+                                  ...current,
+                                  cartonLengthCm: event.target.value,
+                                }))
+                              }
+                            />
+                            <Input
+                              className="h-8 min-w-14 text-xs"
+                              type="number"
+                              placeholder="W"
+                              value={batch.cartonWidthCm}
+                              onChange={(event) =>
+                                setBatch((current) => ({
+                                  ...current,
+                                  cartonWidthCm: event.target.value,
+                                }))
+                              }
+                            />
+                            <Input
+                              className="h-8 min-w-14 text-xs"
+                              type="number"
+                              placeholder="H"
+                              value={batch.cartonHeightCm}
+                              onChange={(event) =>
+                                setBatch((current) => ({
+                                  ...current,
+                                  cartonHeightCm: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                        </td>
+                        <td className="p-2">
                           <Input
-                            className="h-8 min-w-14 text-xs"
+                            className="h-8 min-w-20 text-xs"
                             type="number"
-                            placeholder="H"
-                            value={batch.cartonHeightCm}
+                            placeholder="Pieces"
+                            value={batch.piecesPerCarton}
                             onChange={(event) =>
                               setBatch((current) => ({
                                 ...current,
-                                cartonHeightCm: event.target.value,
+                                piecesPerCarton: event.target.value,
                               }))
                             }
                           />
-                        </div>
-                      </td>
-                      <td className="p-2">
-                        <Input
-                          className="h-8 min-w-20 text-xs"
-                          type="number"
-                          placeholder="Pieces"
-                          value={batch.piecesPerCarton}
-                          onChange={(event) =>
-                            setBatch((current) => ({
-                              ...current,
-                              piecesPerCarton: event.target.value,
-                            }))
-                          }
-                        />
-                      </td>
-                      <td className="p-2">
-                        <Input
-                          className="h-8 min-w-16 text-xs"
-                          type="number"
-                          placeholder="MOQ"
-                          value={batch.moq}
-                          onChange={(event) =>
-                            setBatch((current) => ({
-                              ...current,
-                              moq: event.target.value,
-                            }))
-                          }
-                        />
-                      </td>
-                    </tr>
-                    {item.variants.map((variant: any) => {
-                      const line = lines[variant.id] || emptyLine();
-                      return (
+                        </td>
+                        <td className="p-2">
+                          <Input
+                            className="h-8 min-w-16 text-xs"
+                            type="number"
+                            placeholder="MOQ"
+                            value={batch.moq}
+                            onChange={(event) =>
+                              setBatch((current) => ({
+                                ...current,
+                                moq: event.target.value,
+                              }))
+                            }
+                          />
+                        </td>
+                      </tr>
+                      {item.variants
+                        .filter(
+                          (variant: any) =>
+                            variant.requestQuote !== false &&
+                            variant.origin === "admin",
+                        )
+                        .map((variant: any) => {
+                          const line = lines[variant.id] || emptyLine();
+                          return (
+                            <tr
+                              key={variant.id}
+                              className={`border-b align-top ${line.availability === "unavailable" ? "bg-muted/20 text-muted-foreground" : ""}`}
+                            >
+                              <td className="p-2">
+                                <Checkbox
+                                  checked={batchVariantIds.includes(variant.id)}
+                                  onCheckedChange={(checked) =>
+                                    setBatchVariantIds((current) =>
+                                      checked
+                                        ? [...new Set([...current, variant.id])]
+                                        : current.filter(
+                                            (id) => id !== variant.id,
+                                          ),
+                                    )
+                                  }
+                                  aria-label={`Select ${label(variant)}`}
+                                />
+                              </td>
+                              <td className="p-2 font-medium">
+                                {label(variant)}
+                                <div className="text-xs text-muted-foreground">
+                                  Need {variant.requestedQuantity}
+                                </div>
+                                {variantAttachments.find(
+                                  (attachment: any) =>
+                                    attachment.caseVariantId === variant.id &&
+                                    attachment.mimeType?.startsWith("image/"),
+                                ) && (
+                                  <a
+                                    href={
+                                      variantAttachments.find(
+                                        (attachment: any) =>
+                                          attachment.caseVariantId ===
+                                            variant.id &&
+                                          attachment.mimeType?.startsWith(
+                                            "image/",
+                                          ),
+                                      )!.url
+                                    }
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Open image"
+                                  >
+                                    <img
+                                      className="mt-2 h-12 w-12 rounded border object-cover"
+                                      src={
+                                        variantAttachments.find(
+                                          (attachment: any) =>
+                                            attachment.caseVariantId ===
+                                              variant.id &&
+                                            attachment.mimeType?.startsWith(
+                                              "image/",
+                                            ),
+                                        )!.url
+                                      }
+                                      alt={label(variant)}
+                                    />
+                                  </a>
+                                )}
+                              </td>
+                              <td className="p-2">
+                                {variant.productUrl ? (
+                                  <a
+                                    className="text-sky-600 underline"
+                                    href={variant.productUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Open link
+                                  </a>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    -
+                                  </span>
+                                )}
+                              </td>
+                              <td className="max-w-40 p-2 text-xs text-muted-foreground">
+                                {variant.remarks || "-"}
+                              </td>
+                              <td className="p-2">
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={line.availability === "available"}
+                                    onCheckedChange={(checked) =>
+                                      updateLine(
+                                        variant.id,
+                                        "availability",
+                                        checked ? "available" : "unavailable",
+                                      )
+                                    }
+                                  />
+                                  <span className="text-xs text-muted-foreground">
+                                    {line.availability === "available"
+                                      ? "Available"
+                                      : "Unavailable"}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-2">
+                                <Input
+                                  className={quoteFieldClass(
+                                    variant.id,
+                                    line,
+                                    "unitPriceRmb",
+                                  )}
+                                  disabled={line.availability === "unavailable"}
+                                  type="number"
+                                  min="0"
+                                  value={line.unitPriceRmb}
+                                  onChange={(event) =>
+                                    updateLine(
+                                      variant.id,
+                                      "unitPriceRmb",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="p-2">
+                                <div className="flex items-center">
+                                  <Input
+                                    className={quoteFieldClass(
+                                      variant.id,
+                                      line,
+                                      "cartonWeightKg",
+                                    )}
+                                    disabled={
+                                      line.availability === "unavailable"
+                                    }
+                                    type="number"
+                                    min="0"
+                                    value={line.cartonWeightKg}
+                                    onChange={(event) =>
+                                      updateLine(
+                                        variant.id,
+                                        "cartonWeightKg",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                  <span className="-ml-7 text-xs text-muted-foreground">
+                                    kg
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-2">
+                                <Input
+                                  className={quoteFieldClass(
+                                    variant.id,
+                                    line,
+                                    "piecesPerSellingUnit",
+                                  )}
+                                  disabled={line.availability === "unavailable"}
+                                  type="number"
+                                  min="1"
+                                  value={line.piecesPerSellingUnit}
+                                  onChange={(event) =>
+                                    updateLine(
+                                      variant.id,
+                                      "piecesPerSellingUnit",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="p-2">
+                                <div className="flex gap-1">
+                                  <Input
+                                    className={quoteFieldClass(
+                                      variant.id,
+                                      line,
+                                      "cartonLengthCm",
+                                    )}
+                                    value={line.cartonLengthCm}
+                                    onChange={(event) =>
+                                      updateLine(
+                                        variant.id,
+                                        "cartonLengthCm",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                  <Input
+                                    className={quoteFieldClass(
+                                      variant.id,
+                                      line,
+                                      "cartonWidthCm",
+                                    )}
+                                    value={line.cartonWidthCm}
+                                    onChange={(event) =>
+                                      updateLine(
+                                        variant.id,
+                                        "cartonWidthCm",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                  <Input
+                                    className={quoteFieldClass(
+                                      variant.id,
+                                      line,
+                                      "cartonHeightCm",
+                                    )}
+                                    value={line.cartonHeightCm}
+                                    onChange={(event) =>
+                                      updateLine(
+                                        variant.id,
+                                        "cartonHeightCm",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </td>
+                              <td className="p-2">
+                                <Input
+                                  className={quoteFieldClass(
+                                    variant.id,
+                                    line,
+                                    "piecesPerCarton",
+                                  )}
+                                  type="number"
+                                  value={line.piecesPerCarton}
+                                  onChange={(event) =>
+                                    updateLine(
+                                      variant.id,
+                                      "piecesPerCarton",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="p-2">
+                                <Input
+                                  type="number"
+                                  value={line.moq}
+                                  onChange={(event) =>
+                                    updateLine(
+                                      variant.id,
+                                      "moq",
+                                      event.target.value,
+                                    )
+                                  }
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      {proposals.map((proposal, index) => (
                         <tr
-                          key={variant.id}
-                          className={`border-b align-top ${line.availability === "unavailable" ? "bg-muted/20 text-muted-foreground" : ""}`}
+                          key={proposal.clientKey}
+                          className="border-b bg-sky-50/40 align-top"
                         >
                           <td className="p-2">
                             <Checkbox
-                              checked={batchVariantIds.includes(variant.id)}
+                              checked={batchVariantIds.includes(
+                                proposal.clientKey,
+                              )}
                               onCheckedChange={(checked) =>
                                 setBatchVariantIds((current) =>
                                   checked
-                                    ? [...new Set([...current, variant.id])]
-                                    : current.filter((id) => id !== variant.id),
+                                    ? [
+                                        ...new Set([
+                                          ...current,
+                                          proposal.clientKey,
+                                        ]),
+                                      ]
+                                    : current.filter(
+                                        (id) => id !== proposal.clientKey,
+                                      ),
                                 )
                               }
-                              aria-label={`Select ${label(variant)}`}
+                              aria-label={`Select ${proposal.customLabel || "supplier proposal"}`}
                             />
-                          </td>
-                          <td className="p-2 font-medium">
-                            {label(variant)}
-                            <div className="text-xs text-muted-foreground">
-                              Need {variant.requestedQuantity}
-                            </div>
+                            <Button
+                              className="mt-2 text-destructive"
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() =>
+                                setProposals((current) =>
+                                  current.filter(
+                                    (_, position) => position !== index,
+                                  ),
+                                )
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </td>
                           <td className="p-2">
-                            <div className="flex items-center gap-2">
-                              <Switch
-                                checked={line.availability === "available"}
-                                onCheckedChange={(checked) =>
-                                  updateLine(
-                                    variant.id,
-                                    "availability",
-                                    checked ? "available" : "unavailable",
-                                  )
+                            <Input
+                              placeholder="Variant name"
+                              value={proposal.customLabel}
+                              onChange={(event) =>
+                                updateProposal(index, {
+                                  customLabel: event.target.value,
+                                })
+                              }
+                            />
+                            <label className="mt-2 flex h-12 w-12 cursor-pointer items-center justify-center overflow-hidden rounded border border-dashed bg-background">
+                              {proposalImagePreviews[proposal.clientKey] ? (
+                                <img
+                                  className="h-full w-full object-cover"
+                                  src={
+                                    proposalImagePreviews[proposal.clientKey]
+                                  }
+                                  alt={
+                                    proposal.customLabel || "Supplier proposal"
+                                  }
+                                />
+                              ) : proposal.caseVariantId &&
+                                variantAttachments.find(
+                                  (attachment: any) =>
+                                    attachment.caseVariantId ===
+                                      proposal.caseVariantId &&
+                                    attachment.mimeType?.startsWith("image/"),
+                                ) ? (
+                                <img
+                                  className="h-full w-full object-cover"
+                                  src={
+                                    variantAttachments.find(
+                                      (attachment: any) =>
+                                        attachment.caseVariantId ===
+                                          proposal.caseVariantId &&
+                                        attachment.mimeType?.startsWith(
+                                          "image/",
+                                        ),
+                                    )!.url
+                                  }
+                                  alt={
+                                    proposal.customLabel || "Supplier proposal"
+                                  }
+                                />
+                              ) : (
+                                <ImagePlus className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <input
+                                className="sr-only"
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return;
+                                  setProposalImages((current) => ({
+                                    ...current,
+                                    [proposal.clientKey]: file,
+                                  }));
+                                  setProposalImagePreviews((current) => ({
+                                    ...current,
+                                    [proposal.clientKey]:
+                                      URL.createObjectURL(file),
+                                  }));
+                                  if (proposal.caseVariantId)
+                                    uploadAttachment.mutate({
+                                      id: item.id,
+                                      file,
+                                      caseVariantId: proposal.caseVariantId,
+                                    });
+                                }}
+                              />
+                            </label>
+                          </td>
+                          <td className="p-2 text-muted-foreground">
+                            Supplier proposal
+                          </td>
+                          <td className="p-2">
+                            <Input
+                              placeholder="Notes"
+                              value={proposal.notes}
+                              onChange={(event) =>
+                                updateProposal(index, {
+                                  notes: event.target.value,
+                                })
+                              }
+                            />
+                          </td>
+                          <td className="p-2">
+                            <Switch
+                              checked={proposal.availability === "available"}
+                              onCheckedChange={(checked) =>
+                                updateProposal(index, {
+                                  availability: checked
+                                    ? "available"
+                                    : "unavailable",
+                                })
+                              }
+                            />
+                          </td>
+                          <td className="p-2">
+                            <Input
+                              type="number"
+                              placeholder="CNY"
+                              value={proposal.unitPriceRmb}
+                              onChange={(event) =>
+                                updateProposal(index, {
+                                  unitPriceRmb: event.target.value,
+                                })
+                              }
+                            />
+                          </td>
+                          <td className="p-2">
+                            <div className="flex items-center">
+                              <Input
+                                type="number"
+                                placeholder="kg"
+                                value={proposal.cartonWeightKg}
+                                onChange={(event) =>
+                                  updateProposal(index, {
+                                    cartonWeightKg: event.target.value,
+                                  })
                                 }
                               />
-                              <span className="text-xs text-muted-foreground">
-                                {line.availability === "available"
-                                  ? "Available"
-                                  : "Unavailable"}
+                              <span className="-ml-7 text-xs text-muted-foreground">
+                                kg
                               </span>
                             </div>
                           </td>
                           <td className="p-2">
                             <Input
-                              disabled={line.availability === "unavailable"}
                               type="number"
-                              min="0"
-                              value={line.unitPriceRmb}
+                              placeholder="Pieces"
+                              value={proposal.piecesPerSellingUnit}
                               onChange={(event) =>
-                                updateLine(
-                                  variant.id,
-                                  "unitPriceRmb",
-                                  event.target.value,
-                                )
-                              }
-                            />
-                          </td>
-                          <td className="p-2">
-                            <Input
-                              disabled={line.availability === "unavailable"}
-                              type="number"
-                              min="1"
-                              value={line.piecesPerSellingUnit}
-                              onChange={(event) =>
-                                updateLine(
-                                  variant.id,
-                                  "piecesPerSellingUnit",
-                                  event.target.value,
-                                )
+                                updateProposal(index, {
+                                  piecesPerSellingUnit: event.target.value,
+                                })
                               }
                             />
                           </td>
                           <td className="p-2">
                             <div className="flex gap-1">
                               <Input
-                                value={line.cartonLengthCm}
+                                placeholder="L"
+                                value={proposal.cartonLengthCm}
                                 onChange={(event) =>
-                                  updateLine(
-                                    variant.id,
-                                    "cartonLengthCm",
-                                    event.target.value,
-                                  )
+                                  updateProposal(index, {
+                                    cartonLengthCm: event.target.value,
+                                  })
                                 }
                               />
                               <Input
-                                value={line.cartonWidthCm}
+                                placeholder="W"
+                                value={proposal.cartonWidthCm}
                                 onChange={(event) =>
-                                  updateLine(
-                                    variant.id,
-                                    "cartonWidthCm",
-                                    event.target.value,
-                                  )
+                                  updateProposal(index, {
+                                    cartonWidthCm: event.target.value,
+                                  })
                                 }
                               />
                               <Input
-                                value={line.cartonHeightCm}
+                                placeholder="H"
+                                value={proposal.cartonHeightCm}
                                 onChange={(event) =>
-                                  updateLine(
-                                    variant.id,
-                                    "cartonHeightCm",
-                                    event.target.value,
-                                  )
+                                  updateProposal(index, {
+                                    cartonHeightCm: event.target.value,
+                                  })
                                 }
                               />
                             </div>
@@ -1056,61 +1736,258 @@ export default function VariantSourcingCaseDetail({
                           <td className="p-2">
                             <Input
                               type="number"
-                              value={line.piecesPerCarton}
+                              placeholder="Pieces"
+                              value={proposal.piecesPerCarton}
                               onChange={(event) =>
-                                updateLine(
-                                  variant.id,
-                                  "piecesPerCarton",
-                                  event.target.value,
-                                )
+                                updateProposal(index, {
+                                  piecesPerCarton: event.target.value,
+                                })
                               }
                             />
                           </td>
                           <td className="p-2">
                             <Input
                               type="number"
-                              value={line.moq}
+                              placeholder="MOQ"
+                              value={proposal.moq}
                               onChange={(event) =>
-                                updateLine(
-                                  variant.id,
-                                  "moq",
-                                  event.target.value,
-                                )
+                                updateProposal(index, {
+                                  moq: event.target.value,
+                                })
                               }
                             />
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <Textarea
-                value={sheetNotes}
-                onChange={(event) => setSheetNotes(event.target.value)}
-                placeholder="Supplier-wide notes"
-              />
-              <div className="flex justify-end gap-2 border-t pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!supplierName.trim()}
-                  isLoading={command.isPending}
-                  onClick={saveSheet}
-                >
-                  Save draft
-                </Button>
-                <Button
-                  onClick={submitSheet}
-                  disabled={!supplierName.trim()}
-                  isLoading={command.isPending}
-                >
-                  <Send className="h-4 w-4" />{" "}
-                  {activeCorrection
-                    ? "Resubmit corrections"
-                    : "Submit supplier sheet"}
-                </Button>
-              </div>
+                      ))}
+                      <tr>
+                        <td colSpan={11} className="p-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={addProposal}
+                          >
+                            + Add supplier variant
+                          </Button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                {false && (
+                  <div className="rounded-lg border border-dashed p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">Supplier-added variants</p>
+                        <p className="text-sm text-muted-foreground">
+                          Optional proposals are visible only to this supplier
+                          and require admin approval.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          setProposals((current) => [
+                            ...current,
+                            {
+                              clientKey: crypto.randomUUID(),
+                              size: "",
+                              material: "",
+                              colour: "",
+                              customLabel: "",
+                              availability: "available",
+                              unitPriceRmb: "",
+                              piecesPerSellingUnit: "1",
+                              cartonLengthCm: "",
+                              cartonWidthCm: "",
+                              cartonHeightCm: "",
+                              cartonWeightKg: "",
+                              piecesPerCarton: "",
+                              moq: "",
+                              leadTimeDays: "",
+                              notes: "",
+                            },
+                          ])
+                        }
+                      >
+                        + Add variant
+                      </Button>
+                    </div>
+                    {proposals.map((proposal, index) => (
+                      <div
+                        key={proposal.clientKey}
+                        className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-4"
+                      >
+                        <Input
+                          placeholder="Size"
+                          value={proposal.size}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? { ...entry, size: event.target.value }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Material"
+                          value={proposal.material}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? { ...entry, material: event.target.value }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Colour"
+                          value={proposal.colour}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? { ...entry, colour: event.target.value }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          placeholder="Custom variant name"
+                          value={proposal.customLabel}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? {
+                                      ...entry,
+                                      customLabel: event.target.value,
+                                    }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          type="number"
+                          placeholder="CNY / unit"
+                          value={proposal.unitPriceRmb}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? {
+                                      ...entry,
+                                      unitPriceRmb: event.target.value,
+                                    }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Carton weight kg"
+                          value={proposal.cartonWeightKg}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? {
+                                      ...entry,
+                                      cartonWeightKg: event.target.value,
+                                    }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Pieces / carton"
+                          value={proposal.piecesPerCarton}
+                          onChange={(event) =>
+                            setProposals((current) =>
+                              current.map((entry, position) =>
+                                position === index
+                                  ? {
+                                      ...entry,
+                                      piecesPerCarton: event.target.value,
+                                    }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={() =>
+                            setProposals((current) =>
+                              current.filter(
+                                (_, position) => position !== index,
+                              ),
+                            )
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Textarea
+                  value={sheetNotes}
+                  onChange={(event) => setSheetNotes(event.target.value)}
+                  placeholder="Supplier-wide notes"
+                />
+                <div className="flex justify-end gap-2 border-t pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={quoteSheetLocked || !supplierName.trim()}
+                    isLoading={command.isPending}
+                    onClick={saveSheet}
+                  >
+                    Save draft
+                  </Button>
+                  <TooltipProvider delayDuration={0}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button
+                            onClick={submitSheet}
+                            disabled={
+                              quoteSheetLocked ||
+                              !!submitBlocker ||
+                              command.isPending
+                            }
+                            isLoading={command.isPending}
+                          >
+                            <Send className="h-4 w-4" />{" "}
+                            {activeCorrection
+                              ? "Resubmit corrections"
+                              : activeSheetId
+                                ? "Update supplier sheet"
+                                : "Submit supplier sheet"}
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {submitBlocker && (
+                        <TooltipContent side="top">
+                          {submitBlocker}
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </fieldset>
             </CardContent>
           </Card>
         )}
@@ -1254,284 +2131,792 @@ export default function VariantSourcingCaseDetail({
             </Button>
           </div>
         )}
+      {/* {admin && */}
+      {/*   ["draft", "sourcing", "changes_requested", "quoted"].includes( */}
+      {/*     item.stage, */}
+      {/*   ) && ( */}
+      {/*     <Card> */}
+      {/*       <CardHeader> */}
+      {/*         <CardTitle>Variant planning</CardTitle> */}
+      {/*         <p className="text-sm text-muted-foreground"> */}
+      {/*           Market price is used for admin viability checks. Turn off quote */}
+      {/*           scope to keep a variant out of supplier sheets. */}
+      {/*         </p> */}
+      {/*       </CardHeader> */}
+      {/*       <CardContent className="overflow-x-auto"> */}
+      {/*         <table className="w-full min-w-[980px] border-collapse text-sm [&_td]:border [&_th]:border"> */}
+      {/*           <thead className="text-left text-muted-foreground"> */}
+      {/*             <tr> */}
+      {/*               <th className="p-2">Variant</th> */}
+      {/*               <th className="p-2">Marketplace link</th> */}
+      {/*               <th className="p-2">Remarks</th> */}
+      {/*               <th className="p-2">Quote?</th> */}
+      {/*               <th className="p-2">Quantity</th> */}
+      {/*               <th className="p-2">Market RM</th> */}
+      {/*             </tr> */}
+      {/*           </thead> */}
+      {/*           <tbody> */}
+      {/*             {item.variants */}
+      {/*               .filter( */}
+      {/*                 (variant: any) => variant.proposalStatus !== "dismissed", */}
+      {/*               ) */}
+      {/*               .map((variant: any) => { */}
+      {/*                 const image = variantAttachments.find( */}
+      {/*                   (attachment: any) => */}
+      {/*                     attachment.caseVariantId === variant.id && */}
+      {/*                     attachment.mimeType?.startsWith("image/"), */}
+      {/*                 ); */}
+      {/*                 const structureLocked = item.quotes.some((quote: any) => */}
+      {/*                   ["submitted", "changes_requested"].includes( */}
+      {/*                     quote.status, */}
+      {/*                   ), */}
+      {/*                 ); */}
+      {/*                 return ( */}
+      {/*                   <tr */}
+      {/*                     key={variant.id} */}
+      {/*                     className={`border-b align-top ${variant.requestQuote !== false ? "" : "bg-muted/30 text-muted-foreground"}`} */}
+      {/*                   > */}
+      {/*                     <td className="min-w-44 p-2"> */}
+      {/*                       <p className="font-medium"> */}
+      {/*                         {variant.customLabel || label(variant)} */}
+      {/*                       </p> */}
+      {/*                       {variant.origin === "sourcer" && ( */}
+      {/*                         <Badge className="mt-1">Sourcer added</Badge> */}
+      {/*                       )} */}
+      {/*                       <label className="mt-2 flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded border border-dashed bg-background hover:bg-muted"> */}
+      {/*                         {image ? ( */}
+      {/*                           <img */}
+      {/*                             src={image.url} */}
+      {/*                             alt={label(variant)} */}
+      {/*                             className="h-full w-full object-cover" */}
+      {/*                           /> */}
+      {/*                         ) : ( */}
+      {/*                           <ImagePlus className="h-5 w-5 text-muted-foreground" /> */}
+      {/*                         )} */}
+      {/*                         <input */}
+      {/*                           className="sr-only" */}
+      {/*                           type="file" */}
+      {/*                           accept="image/jpeg,image/png,image/webp,image/gif" */}
+      {/*                           onChange={(event) => { */}
+      {/*                             const file = event.target.files?.[0]; */}
+      {/*                             if (file) */}
+      {/*                               uploadAttachment.mutate({ */}
+      {/*                                 id: item.id, */}
+      {/*                                 file, */}
+      {/*                                 caseVariantId: variant.id, */}
+      {/*                               }); */}
+      {/*                           }} */}
+      {/*                         /> */}
+      {/*                       </label> */}
+      {/*                       {image && ( */}
+      {/*                         <Button */}
+      {/*                           className="mt-1" */}
+      {/*                           type="button" */}
+      {/*                           size="icon" */}
+      {/*                           variant="ghost" */}
+      {/*                           onClick={() => */}
+      {/*                             deleteAttachment.mutate({ */}
+      {/*                               id: item.id, */}
+      {/*                               attachmentId: image.id, */}
+      {/*                             }) */}
+      {/*                           } */}
+      {/*                         > */}
+      {/*                           <Trash2 className="h-3 w-3" /> */}
+      {/*                         </Button> */}
+      {/*                       )} */}
+      {/*                     </td> */}
+      {/*                     <td className="p-2"> */}
+      {/*                       {variant.productUrl ? ( */}
+      {/*                         <a */}
+      {/*                           className="text-sky-600 underline" */}
+      {/*                           href={variant.productUrl} */}
+      {/*                           target="_blank" */}
+      {/*                           rel="noreferrer" */}
+      {/*                         > */}
+      {/*                           Open link */}
+      {/*                         </a> */}
+      {/*                       ) : ( */}
+      {/*                         <span className="text-muted-foreground">-</span> */}
+      {/*                       )} */}
+      {/*                     </td> */}
+      {/*                     <td className="max-w-40 p-2 text-xs text-muted-foreground"> */}
+      {/*                       {variant.remarks || "-"} */}
+      {/*                     </td> */}
+      {/*                     <td className="p-2"> */}
+      {/*                       <Switch */}
+      {/*                         disabled={structureLocked} */}
+      {/*                         checked={variant.requestQuote !== false} */}
+      {/*                         onCheckedChange={(requestQuote) => */}
+      {/*                           updateCaseVariant(variant, { requestQuote }) */}
+      {/*                         } */}
+      {/*                       /> */}
+      {/*                     </td> */}
+      {/*                     <td className="p-2"> */}
+      {/*                       <Input */}
+      {/*                         className="w-24" */}
+      {/*                         type="number" */}
+      {/*                         min="1" */}
+      {/*                         defaultValue={variant.requestedQuantity || ""} */}
+      {/*                         onBlur={(event) => */}
+      {/*                           updateCaseVariant(variant, { */}
+      {/*                             requestedQuantity: */}
+      {/*                               Number(event.target.value) || 1, */}
+      {/*                           }) */}
+      {/*                         } */}
+      {/*                       /> */}
+      {/*                     </td> */}
+      {/*                     <td className="p-2"> */}
+      {/*                       <Input */}
+      {/*                         className="w-28" */}
+      {/*                         type="number" */}
+      {/*                         min="0" */}
+      {/*                         step="0.01" */}
+      {/*                         defaultValue={variant.marketPriceMyr ?? ""} */}
+      {/*                         onBlur={(event) => { */}
+      {/*                           const marketPriceMyr = event.target.value */}
+      {/*                             ? Number(event.target.value) */}
+      {/*                             : undefined; */}
+      {/*                           updateMarketBenchmark(variant.id, { */}
+      {/*                             marketPriceMyr, */}
+      {/*                             marketPack: 1, */}
+      {/*                           }); */}
+      {/*                           updateCaseVariant(variant, { */}
+      {/*                             marketPriceMyr: marketPriceMyr ?? null, */}
+      {/*                             marketPack: 1, */}
+      {/*                           }); */}
+      {/*                         }} */}
+      {/*                       /> */}
+      {/*                     </td> */}
+      {/*                     <td className="p-2"> */}
+      {/*                       <Input */}
+      {/*                         className="min-w-44" */}
+      {/*                         type="url" */}
+      {/*                         placeholder="Optional URL" */}
+      {/*                         defaultValue={variant.productUrl || ""} */}
+      {/*                         onBlur={(event) => */}
+      {/*                           updateCaseVariant(variant, { */}
+      {/*                             productUrl: event.target.value || null, */}
+      {/*                           }) */}
+      {/*                         } */}
+      {/*                       /> */}
+      {/*                     </td> */}
+      {/*                     <td className="p-2"> */}
+      {/*                       <Textarea */}
+      {/*                         className="min-w-48" */}
+      {/*                         rows={2} */}
+      {/*                         placeholder="Optional remarks" */}
+      {/*                         defaultValue={variant.remarks || ""} */}
+      {/*                         onBlur={(event) => */}
+      {/*                           updateCaseVariant(variant, { */}
+      {/*                             remarks: event.target.value || null, */}
+      {/*                           }) */}
+      {/*                         } */}
+      {/*                       /> */}
+      {/*                     </td> */}
+      {/*                   </tr> */}
+      {/*                 ); */}
+      {/*               })} */}
+      {/*           </tbody> */}
+      {/*         </table> */}
+      {/*       </CardContent> */}
+      {/*     </Card> */}
+      {/*   )} */}
       {admin && (
-        <div
-          id="variant-offers"
-          className="grid gap-5 scroll-mt-4 lg:grid-cols-[260px_minmax(0,1fr)]"
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle>Choose variant</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {item.variants.map((variant: any) => (
-                <button
-                  type="button"
-                  key={variant.id}
-                  onClick={() => setActiveVariantId(variant.id)}
-                  className={`flex w-full items-center justify-between rounded-lg border p-3 text-left text-sm ${activeVariantId === variant.id ? "border-sky-600 bg-sky-50" : ""}`}
-                >
-                  <span>
-                    <span className="font-medium">{label(variant)}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {selected[variant.id]
-                        ? "Offer selected"
-                        : skipped[variant.id]
-                          ? "Skipped"
-                          : "Needs decision"}
-                    </span>
-                  </span>
-                  {selected[variant.id] && (
-                    <Check className="h-5 w-5 shrink-0 text-emerald-600" />
-                  )}
-                </button>
-              ))}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {activeVariant ? label(activeVariant) : "Variant offers"}
-              </CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Market benchmarks are admin-only. They compare every supplier
-                offer for this variant against the same selling-price evidence.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {activeVariant && (
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-sm font-medium">
-                    Market benchmark (optional)
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Enter an observed competitor price to validate viability, or
-                    explicitly proceed without market validation.
-                  </p>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <label className="space-y-1 text-sm">
-                      <span>Competitor listing price (RM)</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={activeMarket.marketPriceMyr ?? ""}
-                        onChange={(event) =>
-                          updateMarketBenchmark(activeVariant.id, {
-                            marketPriceMyr: event.target.value
-                              ? Number(event.target.value)
-                              : undefined,
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="space-y-1 text-sm">
-                      <span>Pieces per competitor listing</span>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={activeMarket.marketPack ?? 1}
-                        disabled={!activeMarket.marketPriceMyr}
-                        onChange={(event) =>
-                          updateMarketBenchmark(activeVariant.id, {
-                            marketPack: event.target.value
-                              ? Number(event.target.value)
-                              : 1,
-                          })
-                        }
-                      />
-                    </label>
-                  </div>
-                  {!activeMarket.marketPriceMyr && (
-                    <p className="mt-3 text-sm text-amber-700">
-                      No market benchmark: you can still select an offer, but
-                      its market competitiveness will not be validated.
-                    </p>
-                  )}
-                </div>
-              )}
-              {offers.length ? (
-                offers.map((offer: any) => {
-                  const evaluation = variantViability(
-                    offer,
-                    costConfig,
-                    activeMarket,
-                  );
-                  const correctionPending =
-                    offer.quote.status === "changes_requested";
-                  const result = evaluation.result;
-                  const chosen = selected[activeVariantId] === offer.id;
-                  return (
-                    <div
-                      key={offer.id}
-                      className={`rounded-lg border p-4 ${chosen ? "border-sky-600 ring-1 ring-sky-600" : ""}`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">
-                            {offer.quote.supplierName}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            CNY {offer.unitPriceRmb ?? "-"} per selling unit ·
-                            MOQ {offer.moq || "-"} ·{" "}
-                            {offer.leadTimeDays ||
-                              offer.quote.leadTimeDays ||
-                              "-"}{" "}
-                            days
-                          </p>
-                        </div>
-                        <Badge
-                          className={
-                            correctionPending
-                              ? "bg-sky-100 text-sky-800"
-                              : statusStyle[evaluation.status]
-                          }
-                        >
-                          {correctionPending
-                            ? "info requested"
-                            : evaluation.status.replaceAll("_", " ")}
-                        </Badge>
-                      </div>
-                      {result && (
-                        <div className="mt-3 rounded bg-muted/50 p-3 text-sm">
-                          <span>
-                            Product RM {result.productCostPerPiece.toFixed(2)} +
-                            Shipping RM {result.freightPerPiece.toFixed(2)} ={" "}
-                            <b>Landed RM {result.landed.toFixed(2)}</b>
-                          </span>
-                          <span className="ml-3">
-                            Min viable RM{" "}
-                            {result.minViablePrice?.toFixed(2) || "-"}
-                          </span>
-                          {result.marketPerPiece && (
-                            <span className="ml-3">
-                              Market RM {result.marketPerPiece.toFixed(2)} ·
-                              Margin {result.marginPercent?.toFixed(1)}%
-                            </span>
-                          )}{" "}
-                          {result.flags.length > 0 && (
-                            <p className="mt-2 flex items-center gap-1 text-amber-700">
-                              <CircleAlert className="h-4 w-4" />
-                              {result.flags.join(", ")}
-                            </p>
-                          )}
-                          {correctionPending && (
-                            <p className="mt-2 text-sky-700">
-                              Waiting for the sourcer to provide the requested
-                              information.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      <Button
-                        className="mt-3"
-                        size="sm"
-                        disabled={
-                          (evaluation.status !== "pass" &&
-                            evaluation.status !== "market_unchecked") ||
-                          correctionPending
-                        }
-                        variant={chosen ? "default" : "outline"}
-                        onClick={() => {
-                          if (chosen) {
-                            setSelected((current) => {
-                              const next = { ...current };
-                              delete next[activeVariantId];
-                              return next;
-                            });
-                            command.mutate({
-                              id: item.id,
-                              action: "clear_variant_selection",
-                              version: item.version,
-                              caseVariantId: activeVariantId,
-                            });
-                            return;
-                          }
-                          setSelected((current) => ({
-                            ...current,
-                            [activeVariantId]: offer.id,
-                          }));
-                          setSkipped((current) => {
-                            const next = { ...current };
-                            delete next[activeVariantId];
-                            return next;
-                          });
-                          command.mutate({
-                            id: item.id,
-                            action: "save_variant_selection",
-                            version: item.version,
-                            selection: {
-                              caseVariantId: activeVariantId,
-                              quoteLineId: offer.id,
-                              status: "selected",
-                              ...activeMarket,
-                            },
-                          });
-                        }}
-                      >
-                        <Check className="h-4 w-4" />{" "}
-                        {chosen
-                          ? "Deselect offer"
-                          : evaluation.status === "market_unchecked"
-                            ? "Select with warning"
-                            : "Select offer"}
-                      </Button>
-                      {evaluation.status === "needs_data" &&
-                        !correctionPending && (
-                          <Button
-                            className="mt-3 ml-2"
-                            size="sm"
-                            variant="outline"
-                            disabled={command.isPending}
-                            onClick={() =>
-                              command.mutate({
-                                id: item.id,
-                                action: "request_variant_quote_changes",
-                                version: item.version,
-                                quoteId: offer.quote.id,
-                              })
-                            }
-                          >
-                            Request missing info
-                          </Button>
-                        )}
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-muted-foreground">
-                  No submitted supplier offer covers this variant yet.
+        <Card id="variant-offers" className="scroll-mt-4">
+          <CardHeader>
+            <div className="flex w-full flex-wrap items-end justify-between gap-3">
+              <div>
+                <CardTitle>Supplier offer comparison</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Compare supplier offers under each requested variant, then
+                  select the offer to order.
                 </p>
-              )}
-              <div className="border-t pt-4">
-                <p className="text-sm font-medium">Or skip this variant</p>
-                <Textarea
-                  className="mt-2"
-                  value={skipped[activeVariantId] || ""}
-                  onChange={(event) => {
-                    const reason = event.target.value;
-                    setSkipped((current) => ({
-                      ...current,
-                      [activeVariantId]: reason,
-                    }));
-                    if (reason)
-                      setSelected((current) => {
-                        const next = { ...current };
-                        delete next[activeVariantId];
-                        return next;
-                      });
-                  }}
-                  placeholder="Why this variant is not being ordered"
-                />
+                {decisionsLocked && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Decisions are locked because supplier purchase orders have
+                    been created.
+                  </p>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        </div>
+              <div className="ml-auto flex items-end gap-2">
+                <label className="grid gap-1 text-sm font-medium">
+                  Bulk order qty
+                  <Input
+                    className="w-32"
+                    type="number"
+                    min="1"
+                    value={bulkOrderQuantity}
+                    disabled={decisionsLocked}
+                    onChange={(event) =>
+                      setBulkOrderQuantity(event.target.value)
+                    }
+                  />
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    decisionsLocked ||
+                    !Number.isInteger(Number(bulkOrderQuantity)) ||
+                    Number(bulkOrderQuantity) < 1
+                  }
+                  onClick={() => {
+                    setOrderQuantities(
+                      Object.fromEntries(
+                        item.variants
+                          .filter(
+                            (variant: any) => variant.requestQuote !== false,
+                          )
+                          .map((variant: any) => [
+                            variant.id,
+                            bulkOrderQuantity,
+                          ]),
+                      ),
+                    );
+                  }}
+                >
+                  Apply to all
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full min-w-[1200px] text-sm">
+              <thead className="bg-muted/50 text-left text-muted-foreground">
+                <tr>
+                  <th className="w-[260px] p-3">Variant / supplier</th>
+                  <th className="p-3">Quote</th>
+                  <th className="p-3">Landed cost</th>
+                  <th className="p-3">Market / margin</th>
+                  <th className="p-3">MOQ / lead time</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3">Action</th>
+                </tr>
+              </thead>
+              {item.variants.map((variant: any) => {
+                const variantOffers = submittedLines.filter(
+                  (line: any) =>
+                    line.caseVariantId === variant.id &&
+                    line.availability === "available",
+                );
+                const market = {
+                  marketPriceMyr: variant.marketPriceMyr ?? undefined,
+                  marketPack: variant.marketPack ?? 1,
+                };
+                const image = variantAttachments.find(
+                  (attachment: any) =>
+                    attachment.caseVariantId === variant.id &&
+                    attachment.mimeType?.startsWith("image/"),
+                );
+                const selectedOffer = variantOffers.find(
+                  (offer: any) => selected[variant.id] === offer.id,
+                );
+                const orderQuantity = Number(orderQuantities[variant.id]);
+                const belowMoq =
+                  !!selectedOffer?.moq &&
+                  Number.isFinite(orderQuantity) &&
+                  orderQuantity < selectedOffer.moq;
+                return (
+                  <tbody key={variant.id} className="border-b">
+                    <tr className="bg-muted/30">
+                      <td className="p-3" colSpan={7}>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            {image && (
+                              <img
+                                className="h-10 w-10 rounded border object-cover"
+                                src={image.url}
+                                alt={label(variant)}
+                              />
+                            )}
+                            <div>
+                              <p className="font-semibold">{label(variant)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Requested {variant.requestedQuantity} · Market
+                                RM {variant.marketPriceMyr ?? "-"} ·{" "}
+                                {selected[variant.id]
+                                  ? "Offer selected"
+                                  : skipped[variant.id]
+                                    ? "Skipped"
+                                    : "Needs decision"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="w-44">
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                              Order qty
+                              <Input
+                                className={
+                                  belowMoq
+                                    ? "border-destructive focus-visible:ring-destructive"
+                                    : ""
+                                }
+                                type="number"
+                                min="1"
+                                disabled={decisionsLocked}
+                                value={
+                                  orderQuantities[variant.id] ??
+                                  variant.requestedQuantity
+                                }
+                                onChange={(event) =>
+                                  setOrderQuantities((current) => ({
+                                    ...current,
+                                    [variant.id]: event.target.value,
+                                  }))
+                                }
+                              />
+                            </label>
+                            {belowMoq && (
+                              <p className="mt-1 text-xs text-destructive">
+                                MOQ is {selectedOffer.moq}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    {variant.requestQuote === false ? (
+                      <tr>
+                        <td className="p-3 text-muted-foreground" colSpan={7}>
+                          Quote not requested for this variant.
+                        </td>
+                      </tr>
+                    ) : variantOffers.length ? (
+                      variantOffers.map((offer: any) => {
+                        const evaluation = variantViability(
+                          offer,
+                          costConfig,
+                          market,
+                        );
+                        const result = evaluation.result;
+                        const correctionPending =
+                          offer.quote.status === "changes_requested";
+                        const offerRejected = offer.reviewStatus === "rejected";
+                        const chosen = selected[variant.id] === offer.id;
+                        return (
+                          <tr
+                            key={offer.id}
+                            className={chosen ? "bg-sky-50" : ""}
+                          >
+                            <td className="p-3 font-medium">
+                              {offer.quote.supplierName}
+                            </td>
+                            <td className="p-3">
+                              CNY {offer.unitPriceRmb ?? "-"} / unit
+                              <span className="block text-xs text-muted-foreground">
+                                {offer.piecesPerSellingUnit ?? "-"} pcs / unit
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              {result ? `RM ${result.landed.toFixed(2)}` : "-"}
+                              {result && (
+                                <span className="block text-xs text-muted-foreground">
+                                  Product{" "}
+                                  {result.productCostPerPiece.toFixed(2)}
+                                  {" · "}Freight{" "}
+                                  {result.freightPerPiece.toFixed(2)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              {result?.marketPerPiece
+                                ? `RM ${result.marketPerPiece.toFixed(2)} · ${result.marginPercent?.toFixed(1)}%`
+                                : "Market unchecked"}
+                            </td>
+                            <td className="p-3">
+                              MOQ {offer.moq || "-"}
+                              <span className="block text-xs text-muted-foreground">
+                                {offer.leadTimeDays ||
+                                  offer.quote.leadTimeDays ||
+                                  "-"}{" "}
+                                days
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <Badge
+                                className={
+                                  correctionPending
+                                    ? "bg-sky-100 text-sky-800"
+                                    : offerRejected
+                                      ? "bg-red-100 text-red-800"
+                                      : statusStyle[evaluation.status]
+                                }
+                              >
+                                {correctionPending
+                                  ? "info requested"
+                                  : offerRejected
+                                    ? "rejected"
+                                    : evaluation.status.replaceAll("_", " ")}
+                              </Badge>
+                              {result?.flags.length ? (
+                                <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                                  <CircleAlert className="h-3 w-3" />
+                                  {result.flags.join(", ")}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td className="p-3">
+                              <Button
+                                size="sm"
+                                disabled={
+                                  decisionsLocked ||
+                                  (evaluation.status !== "pass" &&
+                                    evaluation.status !== "market_unchecked") ||
+                                  correctionPending ||
+                                  offerRejected
+                                }
+                                variant={chosen ? "default" : "outline"}
+                                onClick={() => {
+                                  if (chosen) {
+                                    setSelected((current) => {
+                                      const next = { ...current };
+                                      delete next[variant.id];
+                                      return next;
+                                    });
+                                    command.mutate({
+                                      id: item.id,
+                                      action: "clear_variant_selection",
+                                      version: item.version,
+                                      caseVariantId: variant.id,
+                                    });
+                                    return;
+                                  }
+                                  const quantity = Number(
+                                    orderQuantities[variant.id],
+                                  );
+                                  if (
+                                    Number.isInteger(quantity) &&
+                                    quantity > 0
+                                  ) {
+                                    setSelected((current) => ({
+                                      ...current,
+                                      [variant.id]: offer.id,
+                                    }));
+                                    setSkipped((current) => {
+                                      const next = { ...current };
+                                      delete next[variant.id];
+                                      return next;
+                                    });
+                                    command.mutate({
+                                      id: item.id,
+                                      action: "save_variant_selection",
+                                      version: item.version,
+                                      selection: {
+                                        caseVariantId: variant.id,
+                                        quoteLineId: offer.id,
+                                        status: "selected",
+                                        orderQuantity: quantity,
+                                        ...market,
+                                      },
+                                    });
+                                    return;
+                                  }
+                                  setSelectionDialog({
+                                    offer,
+                                    variant,
+                                    market,
+                                  });
+                                  setSelectionQuantity(
+                                    orderQuantities[variant.id] ||
+                                      variant.requestedQuantity.toString(),
+                                  );
+                                }}
+                              >
+                                <Check className="h-4 w-4" />{" "}
+                                {chosen
+                                  ? "Selected"
+                                  : evaluation.status === "market_unchecked"
+                                    ? "Select with warning"
+                                    : "Select"}
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    className="ml-2"
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={decisionsLocked}
+                                    aria-label={`More actions for ${offer.quote.supplierName}`}
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                    More
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    disabled={
+                                      correctionPending || offerRejected
+                                    }
+                                    onClick={() => {
+                                      setChangeDialog({
+                                        offer,
+                                        variantId: variant.id,
+                                      });
+                                      setChangeReason("");
+                                    }}
+                                  >
+                                    Request changes
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={offerRejected}
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => {
+                                      setSelected((current) => {
+                                        if (current[variant.id] !== offer.id)
+                                          return current;
+                                        const next = { ...current };
+                                        delete next[variant.id];
+                                        return next;
+                                      });
+                                      command.mutate({
+                                        id: item.id,
+                                        action: "reject_variant_offer",
+                                        version: item.version,
+                                        quoteLineId: offer.id,
+                                      });
+                                    }}
+                                  >
+                                    Reject offer
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSkipDialogVariantId(variant.id);
+                                      setSkipReason(skipped[variant.id] || "");
+                                    }}
+                                  >
+                                    Skip this variant
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td className="p-3 text-muted-foreground" colSpan={7}>
+                          No submitted supplier offer covers this variant yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                );
+              })}
+            </table>
+          </CardContent>
+        </Card>
+      )}
+      {admin && (
+        <Dialog
+          open={!!skipDialogVariantId}
+          onOpenChange={(open) => !open && setSkipDialogVariantId(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Skip this variant</DialogTitle>
+            </DialogHeader>
+            <Textarea
+              autoFocus
+              value={skipReason}
+              onChange={(event) => setSkipReason(event.target.value)}
+              placeholder="Why is this variant not being ordered?"
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSkipDialogVariantId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!skipReason.trim()}
+                onClick={() => {
+                  if (!skipDialogVariantId) return;
+                  setSkipped((current) => ({
+                    ...current,
+                    [skipDialogVariantId]: skipReason.trim(),
+                  }));
+                  setSelected((current) => {
+                    const next = { ...current };
+                    delete next[skipDialogVariantId];
+                    return next;
+                  });
+                  setSkipDialogVariantId(null);
+                }}
+              >
+                Skip variant
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {admin && (
+        <Dialog
+          open={!!changeDialog}
+          onOpenChange={(open) => !open && setChangeDialog(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Request changes</DialogTitle>
+            </DialogHeader>
+            <Textarea
+              autoFocus
+              value={changeReason}
+              onChange={(event) => setChangeReason(event.target.value)}
+              placeholder="Describe the changes needed from this supplier"
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setChangeDialog(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!changeReason.trim()}
+                onClick={() => {
+                  if (!changeDialog) return;
+                  command.mutate({
+                    id: item.id,
+                    action: "request_variant_quote_changes",
+                    version: item.version,
+                    quoteId: changeDialog.offer.quote.id,
+                    quoteLineId: changeDialog.offer.id,
+                    reason: changeReason.trim(),
+                  });
+                  setChangeDialog(null);
+                }}
+              >
+                Send request
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {admin && (
+        <Dialog
+          open={!!selectionDialog}
+          onOpenChange={(open) => !open && setSelectionDialog(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Select supplier offer</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              {selectionDialog?.variant && label(selectionDialog.variant)} from{" "}
+              {selectionDialog?.offer.quote.supplierName}
+            </p>
+            <label className="grid gap-2 text-sm font-medium">
+              Quantity to order
+              <Input
+                type="number"
+                min="1"
+                autoFocus
+                value={selectionQuantity}
+                onChange={(event) => setSelectionQuantity(event.target.value)}
+              />
+            </label>
+            {selectionDialog?.offer.moq && (
+              <p className="text-sm text-muted-foreground">
+                This supplier requires a minimum order quantity of{" "}
+                {selectionDialog.offer.moq}.
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSelectionDialog(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={
+                  !Number.isInteger(Number(selectionQuantity)) ||
+                  Number(selectionQuantity) < 1 ||
+                  (!!selectionDialog?.offer.moq &&
+                    Number(selectionQuantity) < selectionDialog.offer.moq)
+                }
+                onClick={() => {
+                  if (!selectionDialog) return;
+                  const { offer, variant, market } = selectionDialog;
+                  const quantity = Number(selectionQuantity);
+                  setOrderQuantities((current) => ({
+                    ...current,
+                    [variant.id]: selectionQuantity,
+                  }));
+                  setSelected((current) => ({
+                    ...current,
+                    [variant.id]: offer.id,
+                  }));
+                  setSkipped((current) => {
+                    const next = { ...current };
+                    delete next[variant.id];
+                    return next;
+                  });
+                  command.mutate({
+                    id: item.id,
+                    action: "save_variant_selection",
+                    version: item.version,
+                    selection: {
+                      caseVariantId: variant.id,
+                      quoteLineId: offer.id,
+                      status: "selected",
+                      orderQuantity: quantity,
+                      ...market,
+                    },
+                  });
+                  setSelectionDialog(null);
+                }}
+              >
+                Select offer
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       {admin && item.stage === "quoted" && (
-        <Button onClick={confirmSelections} isLoading={command.isPending}>
+        <Button
+          onClick={() =>
+            undecidedVariants.length
+              ? setConfirmDecisionsOpen(true)
+              : confirmSelections()
+          }
+          isLoading={command.isPending}
+        >
           <Check className="h-4 w-4" /> Confirm variant decisions
         </Button>
+      )}
+      {admin && (
+        <AlertDialog
+          open={confirmDecisionsOpen}
+          onOpenChange={setConfirmDecisionsOpen}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Variants still need a decision
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {undecidedVariants.length} variant
+                {undecidedVariants.length === 1 ? " has" : "s have"} no selected
+                supplier offer or skip reason. Continuing will mark them
+                skipped.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Review variants</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmSelections}>
+                Confirm anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
       {admin && item.stage === "approved" && (
         <Card>

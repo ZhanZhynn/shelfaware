@@ -43,7 +43,9 @@ describe("sourcing presentation", () => {
   it("maps role-specific timelines through receipt", () => {
     expect(getSourcingTimelineIndex("approved", "admin")).toBe(3);
     expect(getSourcingTimelineIndex("approved", "sourcer")).toBe(2);
-    expect(getSourcingTimelineIndex("received", "admin")).toBe(6);
-    expect(getSourcingTimelineIndex("received", "sourcer")).toBe(5);
+    expect(getSourcingTimelineIndex("order_pending", "admin")).toBe(4);
+    expect(getSourcingTimelineIndex("order_pending", "sourcer")).toBe(3);
+    expect(getSourcingTimelineIndex("received", "admin")).toBe(7);
+    expect(getSourcingTimelineIndex("received", "sourcer")).toBe(6);
   });
 });

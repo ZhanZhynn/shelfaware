@@ -215,7 +215,7 @@ async function createOrderFromApprovedQuote(
       supplierId: supplier.id,
       userId: actor.id,
       workspaceId: item.workspaceId,
-      status: "ordered",
+      status: "approved",
       currency: quote.currency,
       convertedTotalMyr:
         quote.unitPriceMyr == null
@@ -232,7 +232,6 @@ async function createOrderFromApprovedQuote(
         0,
       ),
       createdBy: actor.id,
-      orderedAt: new Date(),
       items: {
         create: products.map((line) => ({
           productId: line.id,
@@ -256,18 +255,7 @@ async function createOrderFromApprovedQuote(
     },
   });
   const now = new Date();
-  const shipmentDueAt = dueAtForSourcingSla("shipment", now, slaConfig);
-  await tx.sourcingSlaRecord.create({
-    data: {
-      workspaceId: item.workspaceId,
-      caseId,
-      rule: "shipment",
-      ownerId: item.assignedToId,
-      startedAt: now,
-      dueAt: shipmentDueAt,
-    },
-  });
-  return { purchaseOrderId: po.id, shipmentDueAt };
+  return { purchaseOrderId: po.id };
 }
 
 function assertVersion(version: number, expected: number) {
@@ -298,7 +286,15 @@ export async function createSourcingCase(
     input.assignedToId || (access.role === "sourcer" ? actor.id : null);
   const requestedVariants = input.variants.length
     ? input.variants
-    : [{ size: null, material: null, colour: null, targetUnitPriceMyr: null, requestedQuantity: input.requestedQuantity ?? 1 }];
+    : [
+        {
+          size: null,
+          material: null,
+          colour: null,
+          targetUnitPriceMyr: null,
+          requestedQuantity: input.requestedQuantity ?? 1,
+        },
+      ];
   if (assignedToId) {
     if (input.assignedToId && !access.globalAdmin && access.role !== "admin")
       throw new SourcingAccessError("Only workspace admins can assign cases");
@@ -352,6 +348,11 @@ export async function createSourcingCase(
             colour: variant.colour?.trim() || null,
             requestedQuantity: variant.requestedQuantity,
             targetUnitPriceMyr: variant.targetUnitPriceMyr ?? null,
+            marketPriceMyr: variant.marketPriceMyr ?? null,
+            marketPack: variant.marketPack ?? 1,
+            requestQuote: variant.requestQuote ?? true,
+            productUrl: variant.productUrl?.trim() || null,
+            remarks: variant.remarks?.trim() || null,
           })),
         },
         assignedToId,
@@ -564,7 +565,8 @@ export async function runSourcingCommand(
       ["create_quote", "save_quote", "submit_quote"].includes(command.action)
     ) {
       requireAssigned();
-      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      const stageEditable =
+        editableStages.includes(item.stage) || item.stage === "quoted";
       if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
@@ -675,7 +677,8 @@ export async function runSourcingCommand(
                 caseId,
                 quoteGroupId: new ObjectId().toHexString(),
                 revision,
-                status: command.action === "submit_quote" ? "submitted" : "draft",
+                status:
+                  command.action === "submit_quote" ? "submitted" : "draft",
                 submittedAt:
                   command.action === "submit_quote" ? new Date() : null,
                 ...quoteData,
@@ -723,7 +726,8 @@ export async function runSourcingCommand(
     }
     if (command.action === "submit_all_drafts") {
       requireAssigned();
-      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      const stageEditable =
+        editableStages.includes(item.stage) || item.stage === "quoted";
       if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
@@ -780,7 +784,9 @@ export async function runSourcingCommand(
               slaDueAt: dueAtForSourcingSla("approval", now, slaConfig),
               slaRule: "approval",
             }
-          : { stage: item.stage === "changes_requested" ? "quoted" : item.stage },
+          : {
+              stage: item.stage === "changes_requested" ? "quoted" : item.stage,
+            },
       );
       if (opensApprovalWindow) {
         await completeSourcingSla(tx, caseId, "quote_submission", now);
@@ -802,7 +808,8 @@ export async function runSourcingCommand(
     }
     if (command.action === "delete_quote") {
       requireAssigned();
-      const stageEditable = editableStages.includes(item.stage) || item.stage === "quoted";
+      const stageEditable =
+        editableStages.includes(item.stage) || item.stage === "quoted";
       if (!stageEditable)
         throw new SourcingAccessError(
           "Quotes cannot be changed at this stage",
@@ -814,10 +821,7 @@ export async function runSourcingCommand(
         where: { id: command.quoteId, caseId, status: "draft" },
       });
       if (!target)
-        throw new SourcingAccessError(
-          "Only draft quotes can be deleted",
-          409,
-        );
+        throw new SourcingAccessError("Only draft quotes can be deleted", 409);
       await tx.sourcingQuote.delete({ where: { id: target.id } });
       await event(tx, caseId, item.workspaceId, actor.id, "delete_quote", {
         quoteId: target.id,
@@ -853,7 +857,11 @@ export async function runSourcingCommand(
       const now = new Date();
       let workflowData: Prisma.SourcingCaseUpdateInput = {};
       if (remainingOffers === 0) {
-        const quoteDueAt = dueAtForSourcingSla("quote_submission", now, slaConfig);
+        const quoteDueAt = dueAtForSourcingSla(
+          "quote_submission",
+          now,
+          slaConfig,
+        );
         // End the inactive approval window without treating it as an approval decision.
         await tx.sourcingSlaRecord.updateMany({
           where: { caseId, rule: "approval", completedAt: null },
@@ -914,9 +922,13 @@ export async function runSourcingCommand(
         orderBy: { revision: "desc" },
       });
       if (
-        ["request_changes", "approve", "approve_and_create_order", "reject", "cannot_source"].includes(
-          command.action,
-        ) &&
+        [
+          "request_changes",
+          "approve",
+          "approve_and_create_order",
+          "reject",
+          "cannot_source",
+        ].includes(command.action) &&
         !latestSubmitted &&
         command.action !== "cannot_source"
       )
@@ -1055,19 +1067,22 @@ export async function runSourcingCommand(
           approvalData = { selectedQuoteId: selected.id };
         }
         const now = new Date();
-        if (["approve", "approve_and_create_order", "reject"].includes(command.action))
+        if (
+          ["approve", "approve_and_create_order", "reject"].includes(
+            command.action,
+          )
+        )
           await completeSourcingSla(tx, caseId, "approval", now);
         if (command.action === "approve_and_create_order") {
-          const { purchaseOrderId, shipmentDueAt } =
-            await createOrderFromApprovedQuote(
-              tx,
-              actor,
-              item,
-              caseId,
-              approvedQuote!,
-              slaConfig,
-              command.orderQuantity,
-            );
+          const { purchaseOrderId } = await createOrderFromApprovedQuote(
+            tx,
+            actor,
+            item,
+            caseId,
+            approvedQuote!,
+            slaConfig,
+            command.orderQuantity,
+          );
           await tx.sourcingQuote.updateMany({
             where: {
               caseId,
@@ -1081,19 +1096,24 @@ export async function runSourcingCommand(
             data: { status: "discarded" },
           });
           const updated = await bump({
-            stage: "ordered",
-            slaDueAt: shipmentDueAt,
-            slaRule: "shipment",
+            stage: "order_pending",
             ...approvalData,
           });
           await event(tx, caseId, item.workspaceId, actor.id, "approve", {
             quoteId: latestSubmitted!.id,
             fxRateOverride: command.fxRateOverride,
           });
-          await event(tx, caseId, item.workspaceId, actor.id, "order_confirmed", {
-            purchaseOrderId,
-            quoteId: latestSubmitted!.id,
-          });
+          await event(
+            tx,
+            caseId,
+            item.workspaceId,
+            actor.id,
+            "order_confirmed",
+            {
+              purchaseOrderId,
+              quoteId: latestSubmitted!.id,
+            },
+          );
           return updated;
         }
         const stage =
@@ -1113,7 +1133,17 @@ export async function runSourcingCommand(
         return updated;
       }
       if (command.action === "cancel") {
-        if (["cancelled", "archived", "ordered", "shipping", "received", "rejected", "cannot_source"].includes(item.stage))
+        if (
+          [
+            "cancelled",
+            "archived",
+            "ordered",
+            "shipping",
+            "received",
+            "rejected",
+            "cannot_source",
+          ].includes(item.stage)
+        )
           throw new SourcingAccessError(
             "This case cannot be cancelled at its current stage",
             409,
@@ -1202,7 +1232,7 @@ export async function runSourcingCommand(
           })
         : null;
       if (!quote) throw new SourcingAccessError("No approved quote found", 409);
-      const { purchaseOrderId, shipmentDueAt } = await createOrderFromApprovedQuote(
+      const { purchaseOrderId } = await createOrderFromApprovedQuote(
         tx,
         actor,
         item,
@@ -1211,9 +1241,7 @@ export async function runSourcingCommand(
         slaConfig,
       );
       const updated = await bump({
-        stage: "ordered",
-        slaDueAt: shipmentDueAt,
-        slaRule: "shipment",
+        stage: "order_pending",
       });
       await event(tx, caseId, item.workspaceId, actor.id, "order_confirmed", {
         purchaseOrderId,

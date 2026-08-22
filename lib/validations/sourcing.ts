@@ -44,10 +44,48 @@ const sourcingVariant = z
     colour: optionalText(200),
     requestedQuantity: z.coerce.number().int().positive("Quantity is required"),
     targetUnitPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
+    marketPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
+    marketPack: optionalNumber(z.coerce.number().int().positive()),
+    requestQuote: z.boolean().optional(),
+    productUrl: optionalHttpUrl,
+    remarks: optionalText(2000),
   })
   .refine((variant) => variant.size || variant.material || variant.colour, {
     message: "Each variant needs a size, material, or colour",
   });
+
+export const sourcingVariantUpdateSchema = z.object({
+  caseVariantId: z.string().min(1),
+  size: optionalText(200),
+  material: optionalText(200),
+  colour: optionalText(200),
+  requestedQuantity: optionalNumber(z.coerce.number().int().positive()),
+  marketPriceMyr: optionalNumber(z.coerce.number().nonnegative()),
+  marketPack: optionalNumber(z.coerce.number().int().positive()),
+  requestQuote: z.boolean().optional(),
+  productUrl: optionalHttpUrl,
+  remarks: optionalText(2000),
+});
+
+export const sourcingVariantProposalSchema = z.object({
+  caseVariantId: z.string().min(1).optional(),
+  clientKey: z.string().min(1).optional(),
+  size: optionalText(200),
+  material: optionalText(200),
+  colour: optionalText(200),
+  customLabel: optionalText(200),
+  availability: z.enum(["available", "unavailable"]),
+  unitPriceRmb: optionalNumber(z.coerce.number().positive()),
+  piecesPerSellingUnit: optionalNumber(z.coerce.number().int().positive()),
+  cartonLengthCm: optionalNumber(z.coerce.number().positive()),
+  cartonWidthCm: optionalNumber(z.coerce.number().positive()),
+  cartonHeightCm: optionalNumber(z.coerce.number().positive()),
+  cartonWeightKg: optionalNumber(z.coerce.number().nonnegative()),
+  piecesPerCarton: optionalNumber(z.coerce.number().int().positive()),
+  moq: optionalNumber(z.coerce.number().int().positive()),
+  leadTimeDays: optionalNumber(z.coerce.number().int().nonnegative()),
+  notes: optionalText(2000),
+});
 
 export const sourcingCaseSchema = z.object({
   workspaceId: z.string().min(1, "Workspace is required"),
@@ -108,6 +146,7 @@ export const sourcingQuoteLineSchema = z
     cartonWidthCm: optionalNumber(z.coerce.number().positive()),
     cartonHeightCm: optionalNumber(z.coerce.number().positive()),
     piecesPerCarton: optionalNumber(z.coerce.number().int().positive()),
+    cartonWeightKg: optionalNumber(z.coerce.number().nonnegative()),
     marketPriceMyr: optionalNumber(z.coerce.number().positive()),
     marketPack: optionalNumber(z.coerce.number().int().positive()),
     overrideCostMyr: optionalNumber(z.coerce.number().positive()),
@@ -135,12 +174,18 @@ export const sourcingVariantQuoteSheetSchema = z.object({
   leadTimeDays: optionalNumber(z.coerce.number().int().nonnegative()),
   notes: optionalText(4000),
   lines: z.array(sourcingQuoteLineSchema).min(1),
+  proposals: z
+    .array(sourcingVariantProposalSchema)
+    .max(100)
+    .optional()
+    .default([]),
 });
 
 export const sourcingVariantSelectionSchema = z
   .object({
     caseVariantId: z.string().min(1),
     quoteLineId: z.string().min(1).optional(),
+    orderQuantity: optionalNumber(z.coerce.number().int().positive()),
     status: z.enum(["selected", "skipped"]),
     skipReason: optionalText(1000),
     marketPriceMyr: optionalNumber(z.coerce.number().positive()),
@@ -187,12 +232,18 @@ export const sourcingCommandSchema = z
       "confirm_variant_selection",
       "create_variant_orders",
       "request_variant_quote_changes",
+      "reject_variant_offer",
       "save_variant_selection",
       "clear_variant_selection",
+      "update_case_variant",
+      "add_case_variant",
+      "remove_case_variant",
+      "dismiss_variant_proposal",
     ]),
     version: z.number().int().positive(),
     assigneeId: z.string().min(1).optional(),
     quoteId: z.string().min(1).optional(),
+    quoteLineId: z.string().min(1).optional(),
     fxRateOverride: z.coerce.number().positive().optional(),
     fxOverrideReason: z.string().trim().min(1).max(500).optional(),
     orderQuantity: z.coerce.number().int().positive().optional(),
@@ -202,6 +253,9 @@ export const sourcingCommandSchema = z
     selections: z.array(sourcingVariantSelectionSchema).optional(),
     selection: sourcingVariantSelectionSchema.optional(),
     caseVariantId: z.string().min(1).optional(),
+    variant: sourcingVariantUpdateSchema.optional(),
+    newVariant: sourcingVariant.optional(),
+    proposals: z.array(sourcingVariantProposalSchema).max(100).optional(),
   })
   .superRefine((value, context) => {
     if (
@@ -232,6 +286,22 @@ export const sourcingCommandSchema = z
         message: "A quote must be selected",
       });
     }
+    if (value.action === "reject_variant_offer" && !value.quoteLineId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["quoteLineId"],
+        message: "A supplier offer must be selected",
+      });
+    if (
+      value.action === "request_variant_quote_changes" &&
+      value.quoteLineId &&
+      !value.reason?.trim()
+    )
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reason"],
+        message: "Describe the requested changes",
+      });
     if (
       ["reject", "cannot_source"].includes(value.action) &&
       !value.reason?.trim()
@@ -274,6 +344,29 @@ export const sourcingCommandSchema = z
         message: "A variant selection is required",
       });
     if (value.action === "clear_variant_selection" && !value.caseVariantId)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["caseVariantId"],
+        message: "A variant is required",
+      });
+    if (value.action === "update_case_variant" && !value.variant)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["variant"],
+        message: "Variant details are required",
+      });
+    if (value.action === "add_case_variant" && !value.newVariant)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["newVariant"],
+        message: "Variant details are required",
+      });
+    if (
+      ["remove_case_variant", "dismiss_variant_proposal"].includes(
+        value.action,
+      ) &&
+      !value.caseVariantId
+    )
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["caseVariantId"],
@@ -367,6 +460,13 @@ export const sourcingCostSettingsSchema = z
   );
 
 export type SourcingCaseInput = z.infer<typeof sourcingCaseSchema>;
+export type SourcingVariantInput = z.infer<typeof sourcingVariant>;
+export type SourcingVariantUpdateInput = z.infer<
+  typeof sourcingVariantUpdateSchema
+>;
+export type SourcingVariantProposalInput = z.infer<
+  typeof sourcingVariantProposalSchema
+>;
 export type SourcingRequestUpdateInput = z.infer<
   typeof sourcingRequestUpdateSchema
 >;

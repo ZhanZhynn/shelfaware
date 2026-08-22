@@ -789,12 +789,21 @@ model SourcingCaseVariant {
   targetUnitPriceMyr Float?
   marketPriceMyr     Float?
   marketPack         Int?
+  requestQuote       Boolean                   @default(true)
+  productUrl         String?
+  remarks            String?
+  origin             String                    @default("admin")
+  customLabel        String?
+  proposedById       String?                   @db.ObjectId
+  proposedQuoteGroupId String?                 @db.ObjectId
+  proposalStatus     String                    @default("accepted")
   createdAt          DateTime                  @default(now()) @db.Date
   updatedAt          DateTime?                 @updatedAt @db.Date
   workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  sourcingCase       SourcingCase              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  sourcingCase        SourcingCase              @relation(fields: [caseId], references: [id], onDelete: Cascade)
   quoteLines         SourcingQuoteLine[]
   selection          SourcingVariantSelection?
+  attachments        SourcingAttachment[]
 
   @@unique([caseId, position])
   @@index([workspaceId, caseId])
@@ -821,7 +830,9 @@ model SourcingQuoteLine {
   overrideCostMyr      Float?
   moq                  Int?
   leadTimeDays         Int?
+  cartonWeightKg       Float?
   notes                String?
+  reviewStatus         String?
   costConfigSnapshot   Json?
   landedCostSnapshot   Json?
   createdAt            DateTime                  @default(now()) @db.Date
@@ -841,6 +852,7 @@ model SourcingVariantSelection {
   caseId        String              @db.ObjectId
   caseVariantId String              @unique @db.ObjectId
   quoteLineId   String?             @unique @db.ObjectId
+  orderQuantity Int?
   status        String
   skipReason    String?
   marketValidationWaived Boolean @default(false)
@@ -909,6 +921,7 @@ model SourcingAttachment {
   workspaceId  String       @db.ObjectId
   caseId       String       @db.ObjectId
   quoteId      String?      @db.ObjectId
+  caseVariantId String?      @db.ObjectId
   uploadedById String       @db.ObjectId
   fileName     String
   mimeType     String
@@ -919,10 +932,12 @@ model SourcingAttachment {
   createdAt    DateTime     @default(now()) @db.Date
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sourcingCase SourcingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseVariant  SourcingCaseVariant? @relation(fields: [caseVariantId], references: [id], onDelete: Cascade)
   uploadedBy   User         @relation(fields: [uploadedById], references: [id])
 
   @@index([caseId, createdAt])
   @@index([caseId, quoteId, createdAt])
+  @@index([caseId, caseVariantId, createdAt])
   @@index([workspaceId, createdAt])
   @@index([uploadedById])
 }
@@ -1488,7 +1503,7 @@ model PurchaseOrder {
   supplierId            String              @db.ObjectId
   userId                String              @db.ObjectId
   workspaceId           String?             @db.ObjectId
-  status                String              @default("draft") // draft, pending_approval, approved, rejected, ordered, shipping, received, cancelled
+  status                String              @default("draft") // draft, pending_approval, approved (awaiting supplier order), rejected, ordered, shipping, received, cancelled
   totalAmount           Float               @default(0)
   currency              String              @default("MYR")
   convertedTotalMyr     Float?
@@ -1511,6 +1526,10 @@ model PurchaseOrder {
   approvedBy            String?             @db.ObjectId
   approvedAt            DateTime?           @db.Date
   orderedAt             DateTime?           @db.Date
+  supplierOrderPlacedAt DateTime?           @db.Date
+  supplierOrderPlacedById String?           @db.ObjectId
+  supplierOrderReference String?
+  supplierOrderNotes    String?
   receivedAt            DateTime?           @db.Date
   cancelledAt           DateTime?           @db.Date
   createdAt             DateTime            @default(now()) @db.Date

@@ -9,6 +9,8 @@ import { variantViability } from "./variant-viability";
 import type {
   SourcingVariantQuoteSheetInput,
   SourcingVariantSelectionInput,
+  SourcingVariantUpdateInput,
+  SourcingVariantInput,
 } from "@/lib/validations/sourcing";
 
 type Actor = {
@@ -38,10 +40,14 @@ export async function runVariantSourcingCommand(
     action: string;
     version: number;
     quoteId?: string;
+    quoteLineId?: string;
+    reason?: string;
     quoteSheet?: SourcingVariantQuoteSheetInput;
     selections?: SourcingVariantSelectionInput[];
     selection?: SourcingVariantSelectionInput;
     caseVariantId?: string;
+    variant?: SourcingVariantUpdateInput;
+    newVariant?: SourcingVariantInput;
   },
 ) {
   const item = await prisma.sourcingCase.findUnique({
@@ -66,23 +72,51 @@ export async function runVariantSourcingCommand(
         409,
       );
     const sheet = command.quoteSheet!;
+    const requestedVariants = item.variants.filter(
+      (variant) => variant.requestQuote !== false && variant.origin === "admin",
+    );
     if (
-      sheet.lines.length !== item.variants.length ||
+      sheet.lines.length !== requestedVariants.length ||
       new Set(sheet.lines.map((line) => line.caseVariantId)).size !==
-        item.variants.length
+        requestedVariants.length
     )
       throw new SourcingAccessError(
-        "Supplier sheet must account for every requested variant",
+        "Supplier sheet must account for every quote-enabled variant",
         400,
       );
     const variantsById = new Map(
       item.variants.map((variant) => [variant.id, variant]),
     );
-    if (sheet.lines.some((line) => !variantsById.has(line.caseVariantId)))
+    if (
+      sheet.lines.some(
+        (line) =>
+          !variantsById.has(line.caseVariantId) ||
+          variantsById.get(line.caseVariantId)!.requestQuote === false ||
+          variantsById.get(line.caseVariantId)!.origin !== "admin",
+      )
+    )
       throw new SourcingAccessError(
-        "Supplier sheet contains an unknown variant",
+        "Supplier sheet contains an unknown or unrequested variant",
         400,
       );
+    if (command.action === "submit_variant_quote") {
+      const incomplete = sheet.lines.find(
+        (line) =>
+          line.availability === "available" &&
+          (!line.unitPriceRmb ||
+            !line.piecesPerSellingUnit ||
+            !line.cartonWeightKg ||
+            !line.cartonLengthCm ||
+            !line.cartonWidthCm ||
+            !line.cartonHeightCm ||
+            !line.piecesPerCarton),
+      );
+      if (incomplete)
+        throw new SourcingAccessError(
+          "Available variants need price, pieces per unit, carton weight, carton size, and pieces per carton before submission",
+          400,
+        );
+    }
     const workspace = await prisma.workspace.findUnique({
       where: { id: item.workspaceId },
       select: { sourcingCostConfig: true },
@@ -147,6 +181,126 @@ export async function runVariantSourcingCommand(
           }));
         resolvedSupplierId = supplier.id;
       }
+      const quoteGroupId =
+        existing?.quoteGroupId || new ObjectId().toHexString();
+      const proposalInputs = sheet.proposals ?? [];
+      const proposalVariantIds: string[] = [];
+      let proposalPosition =
+        Math.max(0, ...item.variants.map((variant) => variant.position)) + 1;
+      for (const proposal of proposalInputs) {
+        if (proposal.caseVariantId) {
+          const variant = await tx.sourcingCaseVariant.findFirst({
+            where: {
+              id: proposal.caseVariantId,
+              caseId,
+              origin: "sourcer",
+              proposedQuoteGroupId: quoteGroupId,
+            },
+          });
+          if (!variant)
+            throw new SourcingAccessError(
+              "Proposed variant not found for this supplier sheet",
+              400,
+            );
+          proposalVariantIds.push(variant.id);
+          continue;
+        }
+        const created = await tx.sourcingCaseVariant.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            position: proposalPosition++,
+            size: proposal.size?.trim() || null,
+            material: proposal.material?.trim() || null,
+            colour: proposal.colour?.trim() || null,
+            customLabel: proposal.customLabel?.trim() || null,
+            requestedQuantity: 0,
+            origin: "sourcer",
+            proposedById: actor.id,
+            proposedQuoteGroupId: quoteGroupId,
+            proposalStatus: "pending",
+          },
+        });
+        proposalVariantIds.push(created.id);
+      }
+      const staleProposals = await tx.sourcingCaseVariant.findMany({
+        where: {
+          caseId,
+          origin: "sourcer",
+          proposedQuoteGroupId: quoteGroupId,
+          selection: null,
+        },
+        select: { id: true },
+      });
+      for (const stale of staleProposals)
+        if (!proposalVariantIds.includes(stale.id))
+          await tx.sourcingCaseVariant.delete({ where: { id: stale.id } });
+      const proposalLineCreates = proposalInputs
+        .map((proposal, index) => {
+          const variantId = proposalVariantIds[index];
+          if (!variantId) return null;
+          const cost = variantViability(
+            proposal as unknown as Parameters<typeof variantViability>[0],
+            workspace?.sourcingCostConfig,
+            {},
+          );
+          return {
+            workspaceId: item.workspaceId,
+            caseVariantId: variantId,
+            availability: proposal.availability,
+            requestedQuantity: 0,
+            unitPriceRmb: proposal.unitPriceRmb ?? null,
+            piecesPerSellingUnit: proposal.piecesPerSellingUnit ?? null,
+            cartonLengthCm: proposal.cartonLengthCm ?? null,
+            cartonWidthCm: proposal.cartonWidthCm ?? null,
+            cartonHeightCm: proposal.cartonHeightCm ?? null,
+            cartonWeightKg: proposal.cartonWeightKg ?? null,
+            piecesPerCarton: proposal.piecesPerCarton ?? null,
+            moq: proposal.moq ?? null,
+            leadTimeDays: proposal.leadTimeDays ?? sheet.leadTimeDays ?? null,
+            notes: proposal.notes ?? null,
+            costConfigSnapshot: json(
+              normalizeSourcingCostConfig(workspace?.sourcingCostConfig),
+            ),
+            landedCostSnapshot: cost.result ? json(cost.result) : undefined,
+          };
+        })
+        .filter((line): line is NonNullable<typeof line> => line !== null);
+      const allLineCreates = [
+        ...sheet.lines.map((line) => {
+          const variant = variantsById.get(line.caseVariantId)!;
+          const cost = variantViability(
+            line,
+            workspace?.sourcingCostConfig,
+            variant,
+          );
+          return {
+            workspaceId: item.workspaceId,
+            caseVariantId: variant.id,
+            availability: line.availability,
+            size: variant.size,
+            material: variant.material,
+            colour: variant.colour,
+            requestedQuantity: variant.requestedQuantity,
+            unitPriceRmb: line.unitPriceRmb ?? null,
+            piecesPerSellingUnit: line.piecesPerSellingUnit ?? null,
+            cartonLengthCm: line.cartonLengthCm ?? null,
+            cartonWidthCm: line.cartonWidthCm ?? null,
+            cartonHeightCm: line.cartonHeightCm ?? null,
+            cartonWeightKg: line.cartonWeightKg ?? null,
+            piecesPerCarton: line.piecesPerCarton ?? null,
+            overrideCostMyr: line.overrideCostMyr ?? null,
+            moq: line.moq ?? null,
+            leadTimeDays: line.leadTimeDays ?? sheet.leadTimeDays ?? null,
+            notes: line.notes ?? null,
+            costConfigSnapshot: json(
+              normalizeSourcingCostConfig(workspace?.sourcingCostConfig),
+            ),
+            landedCostSnapshot: cost.result ? json(cost.result) : undefined,
+          };
+        }),
+        ...proposalLineCreates,
+      ];
       const quoteData = {
         supplierId: resolvedSupplierId,
         supplierName: sheet.supplierName,
@@ -166,37 +320,7 @@ export async function runVariantSourcingCommand(
         leadTimeDays: sheet.leadTimeDays ?? null,
         notes: sheet.notes || null,
         lines: {
-          create: sheet.lines.map((line) => {
-            const variant = variantsById.get(line.caseVariantId)!;
-            const cost = variantViability(
-              line,
-              workspace?.sourcingCostConfig,
-              variant,
-            );
-            return {
-              workspaceId: item.workspaceId,
-              caseVariantId: variant.id,
-              availability: line.availability,
-              size: variant.size,
-              material: variant.material,
-              colour: variant.colour,
-              requestedQuantity: variant.requestedQuantity,
-              unitPriceRmb: line.unitPriceRmb ?? null,
-              piecesPerSellingUnit: line.piecesPerSellingUnit ?? null,
-              cartonLengthCm: line.cartonLengthCm ?? null,
-              cartonWidthCm: line.cartonWidthCm ?? null,
-              cartonHeightCm: line.cartonHeightCm ?? null,
-              piecesPerCarton: line.piecesPerCarton ?? null,
-              overrideCostMyr: line.overrideCostMyr ?? null,
-              moq: line.moq ?? null,
-              leadTimeDays: line.leadTimeDays ?? sheet.leadTimeDays ?? null,
-              notes: line.notes ?? null,
-              costConfigSnapshot: json(
-                normalizeSourcingCostConfig(workspace?.sourcingCostConfig),
-              ),
-              landedCostSnapshot: cost.result ? json(cost.result) : undefined,
-            };
-          }),
+          create: allLineCreates,
         },
       };
       const quote =
@@ -214,8 +338,7 @@ export async function runVariantSourcingCommand(
               data: {
                 workspaceId: item.workspaceId,
                 caseId,
-                quoteGroupId:
-                  existing?.quoteGroupId || new ObjectId().toHexString(),
+                quoteGroupId,
                 revision: (latest?.revision ?? 0) + 1,
                 status,
                 createdById: actor.id,
@@ -255,7 +378,7 @@ export async function runVariantSourcingCommand(
           }),
         },
       });
-      return quote;
+      return { ...quote, proposalVariantIds };
     });
   }
   if (!canAdmin)
@@ -263,6 +386,129 @@ export async function runVariantSourcingCommand(
       "Only workspace admins can make selections",
       403,
     );
+  if (
+    [
+      "update_case_variant",
+      "add_case_variant",
+      "remove_case_variant",
+      "dismiss_variant_proposal",
+    ].includes(command.action)
+  ) {
+    if (
+      !["draft", "sourcing", "changes_requested", "quoted"].includes(item.stage)
+    )
+      throw new SourcingAccessError(
+        "Variants cannot be changed at this stage",
+        409,
+      );
+    const submittedQuoteCount = await prisma.sourcingQuote.count({
+      where: { caseId, status: { in: ["submitted", "changes_requested"] } },
+    });
+    if (
+      ["add_case_variant", "remove_case_variant"].includes(command.action) &&
+      submittedQuoteCount > 0
+    )
+      throw new SourcingAccessError(
+        "Variant structure is locked after supplier offers are submitted",
+        409,
+      );
+    return prisma.$transaction(async (tx) => {
+      const current = await tx.sourcingCase.findUnique({
+        where: { id: caseId },
+      });
+      if (!current || current.version !== command.version)
+        throw new SourcingAccessError(
+          "This case has changed. Refresh and try again.",
+          409,
+        );
+      if (command.action === "add_case_variant") {
+        const input = command.newVariant!;
+        const last = await tx.sourcingCaseVariant.findFirst({
+          where: { caseId },
+          orderBy: { position: "desc" },
+          select: { position: true },
+        });
+        await tx.sourcingCaseVariant.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            position: (last?.position ?? -1) + 1,
+            size: input.size?.trim() || null,
+            material: input.material?.trim() || null,
+            colour: input.colour?.trim() || null,
+            requestedQuantity: input.requestedQuantity ?? undefined,
+            targetUnitPriceMyr: input.targetUnitPriceMyr ?? null,
+            marketPriceMyr: input.marketPriceMyr ?? null,
+            marketPack: input.marketPack ?? 1,
+            requestQuote: input.requestQuote ?? true,
+            productUrl: input.productUrl?.trim() || null,
+            remarks: input.remarks?.trim() || null,
+          },
+        });
+      } else if (command.action === "remove_case_variant") {
+        const variant = await tx.sourcingCaseVariant.findFirst({
+          where: { id: command.caseVariantId, caseId, origin: "admin" },
+          select: { id: true },
+        });
+        if (!variant) throw new SourcingAccessError("Variant not found", 404);
+        await tx.sourcingCaseVariant.delete({ where: { id: variant.id } });
+      } else if (command.action === "dismiss_variant_proposal") {
+        const variant = await tx.sourcingCaseVariant.findFirst({
+          where: { id: command.caseVariantId, caseId, origin: "sourcer" },
+          select: { id: true },
+        });
+        if (!variant) throw new SourcingAccessError("Proposal not found", 404);
+        await tx.sourcingCaseVariant.update({
+          where: { id: variant.id },
+          data: { proposalStatus: "dismissed", requestQuote: false },
+        });
+        await tx.sourcingVariantSelection.deleteMany({
+          where: { caseId, caseVariantId: variant.id },
+        });
+      } else {
+        const input = command.variant!;
+        const variant = await tx.sourcingCaseVariant.findFirst({
+          where: { id: input.caseVariantId, caseId },
+          select: { id: true, origin: true },
+        });
+        if (!variant) throw new SourcingAccessError("Variant not found", 404);
+        await tx.sourcingCaseVariant.update({
+          where: { id: variant.id },
+          data: {
+            size:
+              input.size === undefined ? undefined : input.size?.trim() || null,
+            material:
+              input.material === undefined
+                ? undefined
+                : input.material?.trim() || null,
+            colour:
+              input.colour === undefined
+                ? undefined
+                : input.colour?.trim() || null,
+            requestedQuantity: input.requestedQuantity ?? undefined,
+            marketPriceMyr:
+              input.marketPriceMyr === undefined
+                ? undefined
+                : input.marketPriceMyr,
+            marketPack: input.marketPack ?? undefined,
+            requestQuote: input.requestQuote,
+            productUrl:
+              input.productUrl === undefined
+                ? undefined
+                : input.productUrl?.trim() || null,
+            remarks:
+              input.remarks === undefined
+                ? undefined
+                : input.remarks?.trim() || null,
+          },
+        });
+      }
+      return tx.sourcingCase.update({
+        where: { id: caseId },
+        data: { version: { increment: 1 }, updatedAt: new Date() },
+      });
+    });
+  }
   if (
     ["save_variant_selection", "clear_variant_selection"].includes(
       command.action,
@@ -278,6 +524,11 @@ export async function runVariantSourcingCommand(
     const variant = item.variants.find((entry) => entry.id === caseVariantId);
     if (!variant)
       throw new SourcingAccessError("Unknown variant selection", 400);
+    if (variant.requestQuote === false)
+      throw new SourcingAccessError(
+        "This variant was not sent for quoting",
+        409,
+      );
     const updated = await prisma.$transaction(async (tx) => {
       const current = await tx.sourcingCase.findUnique({
         where: { id: caseId },
@@ -304,10 +555,16 @@ export async function runVariantSourcingCommand(
         if (
           !line ||
           line.quote.status !== "submitted" ||
-          line.availability !== "available"
+          line.availability !== "available" ||
+          line.reviewStatus === "rejected"
         )
           throw new SourcingAccessError(
             "Selected offer is no longer available",
+            409,
+          );
+        if (variant.origin === "sourcer" && variant.requestedQuantity <= 0)
+          throw new SourcingAccessError(
+            "Set a quantity before selecting a sourcer-added variant",
             409,
           );
         const workspace = await tx.workspace.findUnique({
@@ -341,12 +598,14 @@ export async function runVariantSourcingCommand(
             caseId,
             caseVariantId,
             quoteLineId: line.id,
+            orderQuantity: selection.orderQuantity,
             status: "selected",
             marketValidationWaived: !selection.marketPriceMyr,
             decidedById: actor.id,
           },
           update: {
             quoteLineId: line.id,
+            orderQuantity: selection.orderQuantity,
             status: "selected",
             skipReason: null,
             marketValidationWaived: !selection.marketPriceMyr,
@@ -354,7 +613,52 @@ export async function runVariantSourcingCommand(
             decidedAt: new Date(),
           },
         });
+        if (variant.origin === "sourcer")
+          await tx.sourcingCaseVariant.update({
+            where: { id: caseVariantId },
+            data: { proposalStatus: "accepted" },
+          });
       }
+      return tx.sourcingCase.update({
+        where: { id: caseId },
+        data: { version: { increment: 1 }, updatedAt: new Date() },
+      });
+    });
+    return updated;
+  }
+  if (command.action === "reject_variant_offer") {
+    if (item.stage !== "quoted")
+      throw new SourcingAccessError(
+        "Supplier offers can only be rejected during review",
+        409,
+      );
+    const updated = await prisma.$transaction(async (tx) => {
+      const current = await tx.sourcingCase.findUnique({
+        where: { id: caseId },
+      });
+      if (!current || current.version !== command.version)
+        throw new SourcingAccessError(
+          "This case has changed. Refresh and try again.",
+          409,
+        );
+      const offer = await tx.sourcingQuoteLine.findFirst({
+        where: {
+          id: command.quoteLineId,
+          quote: { caseId, status: "submitted" },
+        },
+      });
+      if (!offer)
+        throw new SourcingAccessError(
+          "Submitted supplier offer not found",
+          404,
+        );
+      await tx.sourcingQuoteLine.update({
+        where: { id: offer.id },
+        data: { reviewStatus: "rejected" },
+      });
+      await tx.sourcingVariantSelection.deleteMany({
+        where: { caseVariantId: offer.caseVariantId, quoteLineId: offer.id },
+      });
       return tx.sourcingCase.update({
         where: { id: caseId },
         data: { version: { increment: 1 }, updatedAt: new Date() },
@@ -378,24 +682,37 @@ export async function runVariantSourcingCommand(
     });
     if (!quote)
       throw new SourcingAccessError("Submitted supplier offer not found", 404);
-    const issues = quote.lines.flatMap((line) => {
-      const evaluation = variantViability(
-        line,
-        workspace?.sourcingCostConfig,
-        line.caseVariant,
-      );
-      if (evaluation.status !== "needs_data") return [];
-      const fields = evaluation.result?.flags.includes("freight_excluded")
-        ? ["carton dimensions", "pieces per carton"]
-        : ["quoted cost details"];
-      return [
-        {
-          variantId: line.caseVariantId,
-          variant: variantLabel(line.caseVariant),
-          fields,
-        },
-      ];
-    });
+    const requestedLine = command.quoteLineId
+      ? quote.lines.find((line) => line.id === command.quoteLineId)
+      : undefined;
+    if (command.quoteLineId && !requestedLine)
+      throw new SourcingAccessError("Supplier offer not found", 404);
+    const issues = requestedLine
+      ? [
+          {
+            variantId: requestedLine.caseVariantId,
+            variant: variantLabel(requestedLine.caseVariant),
+            fields: [command.reason!],
+          },
+        ]
+      : quote.lines.flatMap((line) => {
+          const evaluation = variantViability(
+            line,
+            workspace?.sourcingCostConfig,
+            line.caseVariant,
+          );
+          if (evaluation.status !== "needs_data") return [];
+          const fields = evaluation.result?.flags.includes("freight_excluded")
+            ? ["carton dimensions", "pieces per carton"]
+            : ["quoted cost details"];
+          return [
+            {
+              variantId: line.caseVariantId,
+              variant: variantLabel(line.caseVariant),
+              fields,
+            },
+          ];
+        });
     if (!issues.length)
       throw new SourcingAccessError(
         "This offer has no missing supplier information",
@@ -461,11 +778,19 @@ export async function runVariantSourcingCommand(
     return updated;
   }
   if (command.action === "confirm_variant_selection") {
+    const requiredVariants = item.variants.filter(
+      (variant) => variant.requestQuote !== false && variant.origin === "admin",
+    );
     if (
       !command.selections ||
-      command.selections.length !== item.variants.length ||
       new Set(command.selections.map((selection) => selection.caseVariantId))
-        .size !== item.variants.length
+        .size !== command.selections.length ||
+      requiredVariants.some(
+        (variant) =>
+          !command.selections!.some(
+            (selection) => selection.caseVariantId === variant.id,
+          ),
+      )
     )
       throw new SourcingAccessError(
         "Choose or skip every requested variant",
@@ -477,7 +802,9 @@ export async function runVariantSourcingCommand(
     const variantIds = new Set(variantsById.keys());
     if (
       command.selections.some(
-        (selection) => !variantIds.has(selection.caseVariantId),
+        (selection) =>
+          !variantIds.has(selection.caseVariantId) ||
+          variantsById.get(selection.caseVariantId)!.requestQuote === false,
       )
     )
       throw new SourcingAccessError("Unknown variant selection", 400);
@@ -518,6 +845,16 @@ export async function runVariantSourcingCommand(
       if (viability.status === "needs_data" || viability.status === "fail")
         throw new SourcingAccessError("Selected offer is not viable", 409);
     }
+    const autoSkippedSelections = item.variants
+      .filter((variant) => variant.requestQuote === false)
+      .map((variant) => ({
+        caseVariantId: variant.id,
+        status: "skipped" as const,
+        skipReason: "Not sent for quoting",
+        marketPriceMyr: undefined,
+        marketPack: undefined,
+      }));
+    const finalSelections = [...command.selections, ...autoSkippedSelections];
     return prisma.$transaction(async (tx) => {
       const current = await tx.sourcingCase.findUnique({
         where: { id: caseId },
@@ -528,7 +865,7 @@ export async function runVariantSourcingCommand(
           409,
         );
       await Promise.all(
-        command.selections!.map((selection) =>
+        finalSelections.map((selection) =>
           tx.sourcingCaseVariant.update({
             where: { id: selection.caseVariantId },
             data: {
@@ -542,7 +879,7 @@ export async function runVariantSourcingCommand(
       );
       await tx.sourcingVariantSelection.deleteMany({ where: { caseId } });
       await tx.sourcingVariantSelection.createMany({
-        data: command.selections!.map((selection) => ({
+        data: finalSelections.map((selection) => ({
           workspaceId: item.workspaceId,
           caseId,
           caseVariantId: selection.caseVariantId,
@@ -688,7 +1025,10 @@ export async function runVariantSourcingCommand(
           productId: product.id,
           productName,
           sku,
-          quantity: Math.max(variant.requestedQuantity, line.moq ?? 0),
+          quantity: Math.max(
+            selection.orderQuantity ?? variant.requestedQuantity,
+            line.moq ?? 0,
+          ),
           unitCost: line.unitPriceRmb ?? 0,
           variantId: variant.id,
           quoteLineId: line.id,
@@ -700,14 +1040,13 @@ export async function runVariantSourcingCommand(
           supplierId: supplier.id,
           userId: actor.id,
           workspaceId: current.workspaceId,
-          status: "ordered",
+          status: "approved",
           currency: "CNY",
           totalAmount: poLines.reduce(
             (total, line) => total + line.quantity * line.unitCost,
             0,
           ),
           createdBy: actor.id,
-          orderedAt: new Date(),
           items: {
             create: poLines.map((line) => ({
               productId: line.productId,
@@ -736,7 +1075,7 @@ export async function runVariantSourcingCommand(
     const updated = await tx.sourcingCase.update({
       where: { id: caseId },
       data: {
-        stage: "ordered",
+        stage: "order_pending",
         version: { increment: 1 },
         updatedAt: new Date(),
       },

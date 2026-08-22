@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { usePurchaseOrder, useShipPurchaseOrder, useUpdateShippingInfo, useUpdatePONotes } from "@/hooks/queries/use-purchase-orders";
+import {
+  usePlacePurchaseOrder,
+  usePurchaseOrder,
+  useShipPurchaseOrder,
+  useUpdateShippingInfo,
+  useUpdatePONotes,
+} from "@/hooks/queries/use-purchase-orders";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,10 +51,13 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
   const [trackingUrl, setTrackingUrl] = useState("");
   const [estimatedDelivery, setEstimatedDelivery] = useState("");
   const [shippingNotes, setShippingNotes] = useState("");
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const { data: order, isLoading, error } = usePurchaseOrder(id);
   const shipMutation = useShipPurchaseOrder();
+  const placeMutation = usePlacePurchaseOrder();
   const updateShippingMutation = useUpdateShippingInfo();
   const updateNotesMutation = useUpdatePONotes();
 
@@ -58,20 +67,33 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
       setTrackingCarrier(order.trackingCarrier || "");
       setTrackingNumber(order.trackingNumber || "");
       setTrackingUrl(order.trackingUrl || "");
-      setEstimatedDelivery(order.estimatedDelivery ? new Date(order.estimatedDelivery).toISOString().slice(0, 10) : "");
+      setEstimatedDelivery(
+        order.estimatedDelivery
+          ? new Date(order.estimatedDelivery).toISOString().slice(0, 10)
+          : "",
+      );
       setShippingNotes(order.shippingNotes || "");
     }
   }, [order]);
 
   if (!mounted || isLoading) {
-    return <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6"><div className="h-64 animate-pulse rounded-xl bg-muted" /></main>;
+    return (
+      <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+        <div className="h-64 animate-pulse rounded-xl bg-muted" />
+      </main>
+    );
   }
 
   if (error || !order) {
-    return <main className="p-6 text-destructive">Unable to load this purchase order.</main>;
+    return (
+      <main className="p-6 text-destructive">
+        Unable to load this purchase order.
+      </main>
+    );
   }
 
-  const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : "—";
+  const formatDate = (value?: string) =>
+    value ? new Date(value).toLocaleDateString() : "—";
 
   const handleShip = async () => {
     await shipMutation.mutateAsync({
@@ -98,120 +120,273 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
   };
 
   const canShip = order.status === "ordered";
+  const canPlace = order.status === "approved";
   const canEditShipping = order.status === "shipping";
   const canEditNotes = ["ordered", "shipping"].includes(order.status);
   const showShippingForm = (canShip || canEditShipping) && editing;
-  const isPending = shipMutation.isPending || updateShippingMutation.isPending || updateNotesMutation.isPending;
+  const isPending =
+    shipMutation.isPending ||
+    placeMutation.isPending ||
+    updateShippingMutation.isPending ||
+    updateNotesMutation.isPending;
 
   const handleUpdateNotes = async () => {
-    await updateNotesMutation.mutateAsync({ id: order.id, notes: notes.trim() });
+    await updateNotesMutation.mutateAsync({
+      id: order.id,
+      notes: notes.trim(),
+    });
     setEditingNotes(false);
   };
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
-      <Link href={order.sourcingOrder?.sourcingCase ? `/sourcing/${order.sourcingOrder.caseId}` : "/sourcing"} className="inline-flex items-center gap-1 text-sm text-sky-600 hover:underline">
-        <ArrowLeft className="h-4 w-4" />Back to sourcing
+      <Link
+        href={
+          order.sourcingOrder?.sourcingCase
+            ? `/sourcing/${order.sourcingOrder.caseId}`
+            : "/sourcing"
+        }
+        className="inline-flex items-center gap-1 text-sm text-sky-600 hover:underline"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to sourcing
       </Link>
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">{order.poNumber}</h1>
-          <p className="text-muted-foreground">{order.supplierName || "Unknown supplier"}</p>
+          <p className="text-muted-foreground">
+            {order.supplierName || "Unknown supplier"}
+          </p>
         </div>
-        <Badge className={STATUS_COLORS[order.status] || ""}>{STATUS_LABELS[order.status] || order.status}</Badge>
+        <Badge className={STATUS_COLORS[order.status] || ""}>
+          {STATUS_LABELS[order.status] || order.status}
+        </Badge>
       </div>
 
       <Card>
-        <CardHeader><CardTitle>Details</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Details</CardTitle>
+        </CardHeader>
         <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-          <p><b>Supplier:</b> {order.supplierName || "—"}</p>
-           <p><b>Total:</b> {formatMoney(order.totalAmount, order.currency || "MYR")}</p>
-           {order.convertedTotalMyr != null && order.currency !== "MYR" && <p><b>MYR estimate:</b> {formatMoney(order.convertedTotalMyr, "MYR")}</p>}
-          <p><b>Created:</b> {formatDate(order.createdAt)}</p>
-          <p><b>Ordered:</b> {formatDate(order.orderedAt)}</p>
-          {order.shippedAt && <p><b>Shipped:</b> {formatDate(order.shippedAt)}</p>}
-          {order.receivedAt && <p><b>Received:</b> {formatDate(order.receivedAt)}</p>}
+          <p>
+            <b>Supplier:</b> {order.supplierName || "—"}
+          </p>
+          <p>
+            <b>Total:</b>{" "}
+            {formatMoney(order.totalAmount, order.currency || "MYR")}
+          </p>
+          {order.convertedTotalMyr != null && order.currency !== "MYR" && (
+            <p>
+              <b>MYR estimate:</b> {formatMoney(order.convertedTotalMyr, "MYR")}
+            </p>
+          )}
+          <p>
+            <b>Created:</b> {formatDate(order.createdAt)}
+          </p>
+          <p>
+            <b>Ordered:</b> {formatDate(order.orderedAt)}
+          </p>
+          {order.shippedAt && (
+            <p>
+              <b>Shipped:</b> {formatDate(order.shippedAt)}
+            </p>
+          )}
+          {order.receivedAt && (
+            <p>
+              <b>Received:</b> {formatDate(order.receivedAt)}
+            </p>
+          )}
         </CardContent>
       </Card>
 
       {canEditNotes && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" />Notes</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Notes
+            </CardTitle>
             {!editingNotes && (
-              <Button variant="outline" size="sm" onClick={() => setEditingNotes(true)}>Edit</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditingNotes(true)}
+              >
+                Edit
+              </Button>
             )}
           </CardHeader>
           <CardContent>
             {editingNotes ? (
               <div className="grid gap-4">
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Add notes about this order..." rows={3} />
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Add notes about this order..."
+                  rows={3}
+                />
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => { setEditingNotes(false); setNotes(order.notes || ""); }} disabled={isPending}>Cancel</Button>
-                  <Button onClick={handleUpdateNotes} isLoading={isPending}>Save Notes</Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingNotes(false);
+                      setNotes(order.notes || "");
+                    }}
+                    disabled={isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={handleUpdateNotes} isLoading={isPending}>
+                    Save Notes
+                  </Button>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">{order.notes || "No notes yet."}</p>
+              <p className="text-sm text-muted-foreground">
+                {order.notes || "No notes yet."}
+              </p>
             )}
           </CardContent>
         </Card>
       )}
 
-      {((order.trackingNumber || order.trackingCarrier || order.shippedAt) && !editing) && (
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Truck className="h-5 w-5" />Shipping Info</CardTitle></CardHeader>
-          <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-            {order.trackingCarrier && <p><b>Carrier:</b> {order.trackingCarrier}</p>}
-            {order.trackingNumber && <p><b>Tracking #:</b> {order.trackingNumber}</p>}
-            {order.trackingUrl && (
-              <p><b>Tracking URL:</b> <a className="text-sky-600 underline" href={order.trackingUrl} target="_blank" rel="noopener noreferrer">Open</a></p>
-            )}
-            {order.estimatedDelivery && <p><b>Est. delivery:</b> {formatDate(order.estimatedDelivery)}</p>}
-            {order.shippingNotes && <p className="sm:col-span-2"><b>Shipping notes:</b> {order.shippingNotes}</p>}
-          </CardContent>
-        </Card>
-      )}
+      {(order.trackingNumber || order.trackingCarrier || order.shippedAt) &&
+        !editing && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Shipping Info
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
+              {order.trackingCarrier && (
+                <p>
+                  <b>Carrier:</b> {order.trackingCarrier}
+                </p>
+              )}
+              {order.trackingNumber && (
+                <p>
+                  <b>Tracking #:</b> {order.trackingNumber}
+                </p>
+              )}
+              {order.trackingUrl && (
+                <p>
+                  <b>Tracking URL:</b>{" "}
+                  <a
+                    className="text-sky-600 underline"
+                    href={order.trackingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open
+                  </a>
+                </p>
+              )}
+              {order.estimatedDelivery && (
+                <p>
+                  <b>Est. delivery:</b> {formatDate(order.estimatedDelivery)}
+                </p>
+              )}
+              {order.shippingNotes && (
+                <p className="sm:col-span-2">
+                  <b>Shipping notes:</b> {order.shippingNotes}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-      {(canShip || canEditShipping) && !editing && (
+      {(canPlace || canShip || canEditShipping) && !editing && (
         <Card>
-          <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Actions</CardTitle>
+          </CardHeader>
           <CardContent>
-            <Button onClick={() => setEditing(true)}>
-              <Truck className="h-4 w-4 mr-2" />{canShip ? "Mark as Shipped" : "Update Tracking"}
-            </Button>
+            {canPlace ? (
+              <Button
+                onClick={() => {
+                  const reference = window.prompt(
+                    "Supplier order reference (optional)",
+                  );
+                  if (reference !== null)
+                    placeMutation.mutate({ id: order.id, reference });
+                }}
+                isLoading={placeMutation.isPending}
+              >
+                Mark supplier order placed
+              </Button>
+            ) : (
+              <Button onClick={() => setEditing(true)}>
+                <Truck className="h-4 w-4 mr-2" />
+                {canShip ? "Mark as Shipped" : "Update Tracking"}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
 
       {showShippingForm && (
         <Card>
-          <CardHeader><CardTitle>{canShip ? "Mark as Shipped" : "Update Shipping Info"}</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>
+              {canShip ? "Mark as Shipped" : "Update Shipping Info"}
+            </CardTitle>
+          </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-1 text-sm font-medium">
               Carrier
-              <Input value={trackingCarrier} onChange={(e) => setTrackingCarrier(e.target.value)} placeholder="e.g. DHL, FedEx, SF Express" />
+              <Input
+                value={trackingCarrier}
+                onChange={(e) => setTrackingCarrier(e.target.value)}
+                placeholder="e.g. DHL, FedEx, SF Express"
+              />
             </label>
             <label className="grid gap-1 text-sm font-medium">
               Tracking Number
-              <Input value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="Tracking number" />
+              <Input
+                value={trackingNumber}
+                onChange={(e) => setTrackingNumber(e.target.value)}
+                placeholder="Tracking number"
+              />
             </label>
             <label className="grid gap-1 text-sm font-medium">
               Tracking URL
-              <Input value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} placeholder="https://..." />
+              <Input
+                value={trackingUrl}
+                onChange={(e) => setTrackingUrl(e.target.value)}
+                placeholder="https://..."
+              />
             </label>
             <label className="grid gap-1 text-sm font-medium">
               Estimated Delivery
-              <Input type="date" value={estimatedDelivery} onChange={(e) => setEstimatedDelivery(e.target.value)} />
+              <Input
+                type="date"
+                value={estimatedDelivery}
+                onChange={(e) => setEstimatedDelivery(e.target.value)}
+              />
             </label>
             <label className="grid gap-1 text-sm font-medium sm:col-span-2">
               Shipping Notes
-              <Textarea value={shippingNotes} onChange={(e) => setShippingNotes(e.target.value)} placeholder="Additional notes about the shipment" />
+              <Textarea
+                value={shippingNotes}
+                onChange={(e) => setShippingNotes(e.target.value)}
+                placeholder="Additional notes about the shipment"
+              />
             </label>
             <div className="flex justify-end gap-2 sm:col-span-2">
-              <Button variant="outline" onClick={() => setEditing(false)} disabled={isPending}>Cancel</Button>
-              <Button onClick={canShip ? handleShip : handleUpdateShipping} isLoading={isPending}>
+              <Button
+                variant="outline"
+                onClick={() => setEditing(false)}
+                disabled={isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={canShip ? handleShip : handleUpdateShipping}
+                isLoading={isPending}
+              >
                 {canShip ? "Mark as Shipped" : "Update Tracking"}
               </Button>
             </div>
@@ -220,7 +395,9 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
       )}
 
       <Card>
-        <CardHeader><CardTitle>Items</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Items</CardTitle>
+        </CardHeader>
         <CardContent>
           {order.items.length === 0 ? (
             <p className="text-sm text-muted-foreground">No items.</p>
@@ -234,12 +411,21 @@ export default function SourcingPurchaseOrderDetail({ id }: { id: string }) {
                 <span className="text-right">Subtotal</span>
               </div>
               {order.items.map((item: PurchaseOrderItem) => (
-                <div key={item.id} className="grid gap-2 border-b px-4 py-3 last:border-0 md:grid-cols-[2fr_1fr_1fr_1fr_1fr]">
+                <div
+                  key={item.id}
+                  className="grid gap-2 border-b px-4 py-3 last:border-0 md:grid-cols-[2fr_1fr_1fr_1fr_1fr]"
+                >
                   <span className="font-medium">{item.productName}</span>
-                  <span className="text-muted-foreground">{item.sku || "—"}</span>
+                  <span className="text-muted-foreground">
+                    {item.sku || "—"}
+                  </span>
                   <span className="text-right">{item.quantity}</span>
-                   <span className="text-right">{formatMoney(item.unitCost, order.currency || "MYR")}</span>
-                   <span className="text-right font-medium">{formatMoney(item.subtotal, order.currency || "MYR")}</span>
+                  <span className="text-right">
+                    {formatMoney(item.unitCost, order.currency || "MYR")}
+                  </span>
+                  <span className="text-right font-medium">
+                    {formatMoney(item.subtotal, order.currency || "MYR")}
+                  </span>
                 </div>
               ))}
             </div>

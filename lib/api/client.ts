@@ -984,8 +984,14 @@ class ApiClient {
   productPerformance = {
     get: async (params: { dateFrom: string; dateTo: string }) => {
       const query = new URLSearchParams(params).toString();
-      const response = await this.client.get(`${API_ENDPOINTS.inventory.productPerformance}?${query}`);
-      return { data: response.data, status: response.status, statusText: response.statusText };
+      const response = await this.client.get(
+        `${API_ENDPOINTS.inventory.productPerformance}?${query}`,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
     },
   };
 
@@ -1117,6 +1123,18 @@ class ApiClient {
       };
     },
 
+    place: async (id: string, data: Record<string, unknown>) => {
+      const response = await this.client.post(
+        API_ENDPOINTS.purchaseOrders.place(id),
+        data,
+      );
+      return {
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      };
+    },
+
     updateShipping: async (id: string, data: Record<string, unknown>) => {
       const response = await this.client.put(
         API_ENDPOINTS.purchaseOrders.ship(id),
@@ -1144,13 +1162,11 @@ class ApiClient {
 
   sourcing = {
     workspaces: async () =>
-      this.client
-        .get(API_ENDPOINTS.sourcing.workspaces)
-        .then((response) => ({
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        })),
+      this.client.get(API_ENDPOINTS.sourcing.workspaces).then((response) => ({
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      })),
     members: async (workspaceId: string) =>
       this.client
         .get(API_ENDPOINTS.sourcing.members(workspaceId))
@@ -1180,21 +1196,17 @@ class ApiClient {
           statusText: response.statusText,
         })),
     case: async (id: string) =>
-      this.client
-        .get(API_ENDPOINTS.sourcing.case(id))
-        .then((response) => ({
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        })),
+      this.client.get(API_ENDPOINTS.sourcing.case(id)).then((response) => ({
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      })),
     comments: async (id: string) =>
-      this.client
-        .get(API_ENDPOINTS.sourcing.comments(id))
-        .then((response) => ({
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        })),
+      this.client.get(API_ENDPOINTS.sourcing.comments(id)).then((response) => ({
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      })),
     addComment: async (
       id: string,
       data: { body: string; mentionedUserIds?: string[] },
@@ -1207,13 +1219,11 @@ class ApiClient {
           statusText: response.statusText,
         })),
     create: async (data: Record<string, unknown>) =>
-      this.client
-        .post(API_ENDPOINTS.sourcing.cases, data)
-        .then((response) => ({
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        })),
+      this.client.post(API_ENDPOINTS.sourcing.cases, data).then((response) => ({
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      })),
     updateNextAction: async (id: string, data: Record<string, unknown>) =>
       this.client
         .patch(API_ENDPOINTS.sourcing.case(id), data)
@@ -1231,13 +1241,11 @@ class ApiClient {
           statusText: response.statusText,
         })),
     deleteCase: async (id: string) =>
-      this.client
-        .delete(API_ENDPOINTS.sourcing.case(id))
-        .then((response) => ({
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        })),
+      this.client.delete(API_ENDPOINTS.sourcing.case(id)).then((response) => ({
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      })),
     updateRequest: async (id: string, request: Record<string, unknown>) =>
       this.client
         .patch(API_ENDPOINTS.sourcing.case(id), { request })
@@ -1254,10 +1262,16 @@ class ApiClient {
           status: response.status,
           statusText: response.statusText,
         })),
-    uploadAttachment: async (id: string, file: File, quoteId?: string) => {
+    uploadAttachment: async (
+      id: string,
+      file: File,
+      quoteId?: string,
+      caseVariantId?: string,
+    ) => {
       const formData = new FormData();
       formData.append("file", file);
       if (quoteId) formData.append("quoteId", quoteId);
+      if (caseVariantId) formData.append("caseVariantId", caseVariantId);
       return this.client
         .post(API_ENDPOINTS.sourcing.attachments(id), formData, {
           headers: { "Content-Type": "multipart/form-data" },
@@ -1441,13 +1455,11 @@ class ApiClient {
           statusText: response.statusText,
         })),
     bulk: async (data: Record<string, unknown>) =>
-      this.client
-        .patch(API_ENDPOINTS.sourcing.bulk, data)
-        .then((response) => ({
-          data: response.data,
-          status: response.status,
-          statusText: response.statusText,
-        })),
+      this.client.patch(API_ENDPOINTS.sourcing.bulk, data).then((response) => ({
+        data: response.data,
+        status: response.status,
+        statusText: response.statusText,
+      })),
   };
 
   /**

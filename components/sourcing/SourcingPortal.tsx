@@ -162,7 +162,9 @@ export default function SourcingPortal({
     error,
   } = useSourcingCases(activeWorkspace);
   const [search, setSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState<SourcingPresentationGroup | "all">("needs_action");
+  const [groupFilter, setGroupFilter] = useState<
+    SourcingPresentationGroup | "all"
+  >("needs_action");
   const [pendingAction, setPendingAction] = useState<{
     type: "cancel" | "delete";
     item: any;
@@ -179,13 +181,25 @@ export default function SourcingPortal({
   const isAdminView = basePath.startsWith("/admin");
   const viewer: SourcingViewer = isAdminView ? "admin" : "sourcer";
   const filterGroups: SourcingPresentationGroup[] = isAdminView
-    ? ["needs_action", "changes_requested", "waiting", "shipped", "completed", "closed"]
+    ? [
+        "needs_action",
+        "changes_requested",
+        "waiting",
+        "shipped",
+        "completed",
+        "closed",
+      ]
     : ["needs_action", "waiting", "to_ship", "shipped", "completed"];
   const groupOf = (stage: string) => getSourcingGroup(stage, viewer);
+  const stageOf = (item: any) =>
+    item.stage === "quoted" &&
+    item.quotes?.some((quote: any) => quote.status === "changes_requested")
+      ? "changes_requested"
+      : item.stage;
 
   const counts = cases.reduce(
     (acc: Record<string, number>, item: any) => {
-      const g = groupOf(item.stage);
+      const g = groupOf(stageOf(item));
       acc[g] = (acc[g] || 0) + 1;
       acc.all = (acc.all || 0) + 1;
       return acc;
@@ -195,7 +209,7 @@ export default function SourcingPortal({
 
   const filtered = cases.filter((item: any) => {
     const matchesGroup =
-      groupFilter === "all" || groupOf(item.stage) === groupFilter;
+      groupFilter === "all" || groupOf(stageOf(item)) === groupFilter;
     const matchesSearch = item.title
       .toLowerCase()
       .includes(search.toLowerCase());
@@ -339,7 +353,8 @@ export default function SourcingPortal({
           ) : (
             <div className="space-y-2">
               {filtered.map((item: any) => {
-                const group = groupOf(item.stage);
+                const stage = stageOf(item);
+                const group = groupOf(stage);
                 const meta = GROUP_META[group];
                 const isDue =
                   item.slaDueAt || item.nextActionAt
@@ -361,9 +376,10 @@ export default function SourcingPortal({
                   ["draft", "cancelled"].includes(item.stage) &&
                   !item.orders?.length;
                 const purchaseOrderId = item.orders?.[0]?.purchaseOrderId;
-                const canShip = !isAdminView && item.stage === "ordered" && !!purchaseOrderId;
+                const canShip =
+                  !isAdminView && item.stage === "ordered" && !!purchaseOrderId;
                 const statusMessage = getSourcingStatusMessage(
-                  item.stage,
+                  stage,
                   viewer,
                   item.assignee?.name || item.assignee?.email,
                 );
@@ -373,70 +389,75 @@ export default function SourcingPortal({
                     className={`rounded-lg border border-l-4 ${meta.accent} bg-card p-4`}
                   >
                     <div className="flex items-start gap-3">
-                        {item.thumbnail && (
-                          <>
-                            {/* The file endpoint requires the browser session cookie. */}
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={item.thumbnail.url}
-                              alt={item.thumbnail.fileName || "Case reference"}
-                              className="h-14 w-14 shrink-0 rounded-md border object-cover"
-                            />
-                          </>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-semibold truncate">
-                              <Link
-                                href={`${basePath}/${item.id}`}
-                                className="hover:text-sky-600 hover:underline"
-                              >
-                                {item.title}
-                              </Link>
-                            </h3>
-                            <Badge variant={getSourcingStageBadgeVariant(item.stage)} className="shrink-0">
-                              {stageLabel(item.stage)}
-                            </Badge>
-                          </div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.assignee?.name ||
-                              item.assignee?.email ||
-                              "Unassigned"}
-                          </p>
+                      {item.thumbnail && (
+                        <>
+                          {/* The file endpoint requires the browser session cookie. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={item.thumbnail.url}
+                            alt={item.thumbnail.fileName || "Case reference"}
+                            className="h-14 w-14 shrink-0 rounded-md border object-cover"
+                          />
+                        </>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold truncate">
+                            <Link
+                              href={`${basePath}/${item.id}`}
+                              className="hover:text-sky-600 hover:underline"
+                            >
+                              {item.title}
+                            </Link>
+                          </h3>
+                          <Badge
+                            variant={getSourcingStageBadgeVariant(stage)}
+                            className="shrink-0"
+                          >
+                            {stageLabel(stage)}
+                          </Badge>
                         </div>
-                        <div className="shrink-0 text-right">
-                          <p className="text-xs text-muted-foreground">
-                            {item.updatedAt
-                              ? new Date(item.updatedAt).toLocaleDateString()
-                              : new Date(item.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {item.assignee?.name ||
+                            item.assignee?.email ||
+                            "Unassigned"}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs text-muted-foreground">
+                          {item.updatedAt
+                            ? new Date(item.updatedAt).toLocaleDateString()
+                            : new Date(item.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
                     {(statusMessage || item.nextAction || isDue) && (
-                        <p
-                          className={`mt-2 text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}
-                        >
-                          {statusMessage || "Follow up"}
-                          {item.nextAction && (
-                            <span className="ml-1 text-muted-foreground">
-                              · {item.nextAction}
-                            </span>
-                          )}
-                          {(item.slaDueAt || item.nextActionAt) && (
-                            <span className="ml-1">
-                              ·{" "}
-                              {new Date(
-                                item.slaDueAt || item.nextActionAt,
-                              ).toLocaleDateString()}
-                              {isDue ? " (overdue)" : ""}
-                            </span>
-                          )}
-                        </p>
+                      <p
+                        className={`mt-2 text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}
+                      >
+                        {statusMessage || "Follow up"}
+                        {item.nextAction && (
+                          <span className="ml-1 text-muted-foreground">
+                            · {item.nextAction}
+                          </span>
+                        )}
+                        {(item.slaDueAt || item.nextActionAt) && (
+                          <span className="ml-1">
+                            ·{" "}
+                            {new Date(
+                              item.slaDueAt || item.nextActionAt,
+                            ).toLocaleDateString()}
+                            {isDue ? " (overdue)" : ""}
+                          </span>
+                        )}
+                      </p>
                     )}
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
                       <Button size="sm" asChild>
                         <Link href={`${basePath}/${item.id}`}>
-                          {isAdminView ? adminActionLabel(item.stage) : "Open request"}
+                          {isAdminView
+                            ? adminActionLabel(stage)
+                            : "Open request"}
                         </Link>
                       </Button>
                       <div className="flex items-center gap-1">
@@ -447,7 +468,10 @@ export default function SourcingPortal({
                             onClick={() => {
                               setTrackingCarrier("");
                               setTrackingNumber("");
-                              setPendingShipment({ purchaseOrderId, title: item.title });
+                              setPendingShipment({
+                                purchaseOrderId,
+                                title: item.title,
+                              });
                             }}
                           >
                             Ship
@@ -519,7 +543,9 @@ export default function SourcingPortal({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Mark {pendingShipment?.title || "order"} as shipped</DialogTitle>
+            <DialogTitle>
+              Mark {pendingShipment?.title || "order"} as shipped
+            </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
             <label className="grid gap-1 text-sm font-medium">

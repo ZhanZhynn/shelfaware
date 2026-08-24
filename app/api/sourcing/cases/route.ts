@@ -10,7 +10,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { ZodError } from "zod";
 
 export const sourcingListInclude = {
-  quotes: { orderBy: { revision: "desc" as const }, take: 1 },
+  quotes: { select: { status: true } },
   orders: true,
   variants: { orderBy: { position: "asc" as const } },
   attachments: {

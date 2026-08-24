@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- sourcing attachments require authenticated URLs. */
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronsUpDown,
@@ -158,6 +158,7 @@ export default function VariantSourcingCaseDetail({
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [activeSheetId, setActiveSheetId] = useState<string | null>(null);
+  const sheetSelectionInitialized = useRef(false);
   const [paymentTerms, setPaymentTerms] = useState("");
   const [sheetNotes, setSheetNotes] = useState("");
   const [lines, setLines] = useState<Record<string, SheetLine>>({});
@@ -285,6 +286,13 @@ export default function VariantSourcingCaseDetail({
     (variant: any) =>
       variant.origin === "admin" && variant.requestQuote !== false,
   );
+  const sheetsNeedingChanges = supplierSheets.filter(
+    (sheet: any) => sheet.status === "changes_requested",
+  );
+  const displayStage =
+    item.stage === "quoted" && sheetsNeedingChanges.length
+      ? "changes_requested"
+      : item.stage;
   const activeCorrection = item.events?.find(
     (event: any) =>
       event.type === "variant_quote_changes_requested" &&
@@ -331,9 +339,10 @@ export default function VariantSourcingCaseDetail({
   );
   const viewer = admin ? "admin" : "sourcer";
   const timelineSteps = getSourcingTimeline(viewer);
-  const timelineIndex = getSourcingTimelineIndex(item.stage, viewer);
+  const timelineIndex = getSourcingTimelineIndex(displayStage, viewer);
   const currentTimelineLabel =
-    timelineSteps.find((step) => step.id === item.stage)?.label || item.stage;
+    timelineSteps.find((step) => step.id === displayStage)?.label ||
+    displayStage;
   const updateCaseVariant = (variant: any, patch: Record<string, unknown>) =>
     command.mutate({
       id: item.id,
@@ -342,19 +351,19 @@ export default function VariantSourcingCaseDetail({
       variant: { caseVariantId: variant.id, ...patch },
     });
   const action = admin
-    ? item.stage === "quoted"
+    ? displayStage === "quoted"
       ? [
           "Your next step",
           "Review variant offers",
           "Choose one passed offer or explicitly skip each requested variant.",
         ]
-      : item.stage === "approved"
+      : displayStage === "approved"
         ? [
             "Your next step",
             "Create supplier orders",
             "Review the supplier groups and create the purchase orders.",
           ]
-        : item.stage === "sourcing"
+        : displayStage === "sourcing"
           ? [
               "Current progress",
               "Sourcer is collecting offers",
@@ -365,29 +374,37 @@ export default function VariantSourcingCaseDetail({
               currentTimelineLabel,
               "Track the sourcing request and its supplier orders.",
             ]
-    : item.stage === "sourcing" || item.stage === "changes_requested"
+    : displayStage === "changes_requested"
       ? [
-          "Your next step",
-          "Complete a supplier quote sheet",
-          "Record every requested variant for this supplier, then submit before moving on.",
+          "Changes required",
+          sheetsNeedingChanges.length === 1
+            ? "Fix and resubmit 1 quote sheet"
+            : `Fix and resubmit ${sheetsNeedingChanges.length} quote sheets`,
+          "Open the supplier sheet marked Needs correction to review the requested changes.",
         ]
-      : item.stage === "quoted"
+      : displayStage === "sourcing"
         ? [
-            "Current progress",
-            "Waiting for admin review",
-            "The admin will choose viable variant offers or request changes.",
+            "Your next step",
+            "Complete a supplier quote sheet",
+            "Record every requested variant for this supplier, then submit before moving on.",
           ]
-        : item.stage === "ordered"
+        : displayStage === "quoted"
           ? [
-              "Your next step",
-              "Arrange shipment",
-              "Open each supplier purchase order to add tracking and mark it shipped.",
-            ]
-          : [
               "Current progress",
-              currentTimelineLabel,
-              "Follow the sourcing request progress here.",
-            ];
+              "Waiting for admin review",
+              "The admin will choose viable variant offers or request changes.",
+            ]
+          : displayStage === "ordered"
+            ? [
+                "Your next step",
+                "Arrange shipment",
+                "Open each supplier purchase order to add tracking and mark it shipped.",
+              ]
+            : [
+                "Current progress",
+                currentTimelineLabel,
+                "Follow the sourcing request progress here.",
+              ];
   const sheetPayload = () => ({
     supplierId: supplierId || null,
     supplierName,
@@ -570,6 +587,14 @@ export default function VariantSourcingCaseDetail({
         }),
     );
   };
+  const defaultQuoteSheet =
+    supplierSheets.find((sheet: any) => sheet.status === "changes_requested") ||
+    supplierSheets.find((sheet: any) => sheet.status === "submitted");
+  useEffect(() => {
+    if (sheetSelectionInitialized.current || !defaultQuoteSheet) return;
+    sheetSelectionInitialized.current = true;
+    selectSheet(defaultQuoteSheet);
+  }, [defaultQuoteSheet?.id]);
   const startNewQuoteSheet = () => {
     setActiveSheetId(null);
     setSupplierId("");
@@ -721,13 +746,15 @@ export default function VariantSourcingCaseDetail({
             {item.specifications || "Variant sourcing request"}
           </p>
         </div>
-        <Badge>{item.stage.replaceAll("_", " ")}</Badge>
+        <Badge>{displayStage.replaceAll("_", " ")}</Badge>
       </div>
       <Card
         className={
-          item.stage === "quoted" || item.stage === "approved"
-            ? "border-sky-300 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20"
-            : ""
+          !admin && displayStage === "changes_requested"
+            ? "border-amber-400 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"
+            : displayStage === "quoted" || displayStage === "approved"
+              ? "border-sky-300 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20"
+              : ""
         }
       >
         <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
@@ -738,11 +765,23 @@ export default function VariantSourcingCaseDetail({
             <p className="mt-1 text-lg font-semibold">{action[1]}</p>
             <p className="mt-1 text-sm text-muted-foreground">{action[2]}</p>
           </div>
-          {admin && item.stage === "quoted" && (
+          {admin && displayStage === "quoted" && (
             <Button asChild>
               <a href="#variant-offers">Review variant offers</a>
             </Button>
           )}
+          {!admin &&
+            displayStage === "changes_requested" &&
+            sheetsNeedingChanges[0] && (
+              <Button asChild variant="destructive">
+                <a
+                  href="#supplier-quote-sheets"
+                  onClick={() => selectSheet(sheetsNeedingChanges[0])}
+                >
+                  Fix quote sheet
+                </a>
+              </Button>
+            )}
         </CardContent>
       </Card>
       <Card>
@@ -868,7 +907,7 @@ export default function VariantSourcingCaseDetail({
         </CardContent>
       </Card>
       {!admin && (
-        <Card>
+        <Card id="supplier-quote-sheets">
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -2417,11 +2456,21 @@ export default function VariantSourcingCaseDetail({
                   Number.isFinite(orderQuantity) &&
                   orderQuantity < selectedOffer.moq;
                 return (
-                  <tbody key={variant.id} className="border-b">
-                    <tr className="bg-muted/30">
+                  <tbody key={variant.id} className="border-b-8 border-white">
+                    <tr className="border-t border-slate-200 bg-white">
                       <td className="p-3" colSpan={7}>
                         <div className="flex items-center justify-between gap-4">
                           <div className="flex items-center gap-3">
+                            {selected[variant.id] && (
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+                                <Check className="h-3.5 w-3.5" />
+                              </span>
+                            )}
+                            {!selected[variant.id] && skipped[variant.id] && (
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-500 text-white">
+                                <CircleAlert className="h-3.5 w-3.5" />
+                              </span>
+                            )}
                             {image && (
                               <img
                                 className="h-10 w-10 rounded border object-cover"
@@ -2437,7 +2486,7 @@ export default function VariantSourcingCaseDetail({
                                 {selected[variant.id]
                                   ? "Offer selected"
                                   : skipped[variant.id]
-                                    ? "Skipped"
+                                    ? `Skipped: ${skipped[variant.id]}`
                                     : "Needs decision"}
                               </p>
                             </div>
@@ -2489,14 +2538,42 @@ export default function VariantSourcingCaseDetail({
                           market,
                         );
                         const result = evaluation.result;
+                        const failureReason =
+                          result?.marketPerPiece != null &&
+                          result.minViablePrice != null
+                            ? result.marketPerPiece < result.landed
+                              ? `Landed cost RM ${result.landed.toFixed(2)} is higher than the market price RM ${result.marketPerPiece.toFixed(2)}.`
+                              : `Market price RM ${result.marketPerPiece.toFixed(2)} is below the minimum viable price RM ${result.minViablePrice.toFixed(2)}.`
+                            : null;
                         const correctionPending =
                           offer.quote.status === "changes_requested";
                         const offerRejected = offer.reviewStatus === "rejected";
                         const chosen = selected[variant.id] === offer.id;
+                        const statusBadge = (
+                          <Badge
+                            className={
+                              correctionPending
+                                ? "bg-sky-100 text-sky-800"
+                                : offerRejected
+                                  ? "bg-red-100 text-red-800"
+                                  : statusStyle[evaluation.status]
+                            }
+                          >
+                            {correctionPending
+                              ? "info requested"
+                              : offerRejected
+                                ? "rejected"
+                                : evaluation.status.replaceAll("_", " ")}
+                          </Badge>
+                        );
                         return (
                           <tr
                             key={offer.id}
-                            className={chosen ? "bg-sky-50" : ""}
+                            className={
+                              chosen
+                                ? "border-y border-sky-200 bg-sky-50/60"
+                                : "bg-slate-50/70"
+                            }
                           >
                             <td className="p-3 font-medium">
                               {offer.quote.supplierName}
@@ -2533,21 +2610,29 @@ export default function VariantSourcingCaseDetail({
                               </span>
                             </td>
                             <td className="p-3">
-                              <Badge
-                                className={
-                                  correctionPending
-                                    ? "bg-sky-100 text-sky-800"
-                                    : offerRejected
-                                      ? "bg-red-100 text-red-800"
-                                      : statusStyle[evaluation.status]
-                                }
-                              >
-                                {correctionPending
-                                  ? "info requested"
-                                  : offerRejected
-                                    ? "rejected"
-                                    : evaluation.status.replaceAll("_", " ")}
-                              </Badge>
+                              {evaluation.status === "fail" &&
+                              !offerRejected ? (
+                                <TooltipProvider delayDuration={0}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="inline-flex">
+                                        {statusBadge}
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent
+                                      side="top"
+                                      className="max-w-xs"
+                                    >
+                                      {result?.flags.length
+                                        ? result.flags.join(", ")
+                                        : failureReason ||
+                                          "This offer does not meet the viability requirements."}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ) : (
+                                statusBadge
+                              )}
                               {result?.flags.length ? (
                                 <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
                                   <CircleAlert className="h-3 w-3" />

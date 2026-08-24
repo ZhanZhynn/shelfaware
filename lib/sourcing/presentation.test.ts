@@ -18,7 +18,7 @@ describe("sourcing presentation", () => {
       "needs_action",
     );
     expect(getSourcingGroup("ordered", "admin")).toBe("shipped");
-    expect(getSourcingGroup("ordered", "sourcer")).toBe("needs_action");
+    expect(getSourcingGroup("ordered", "sourcer")).toBe("to_ship");
   });
 
   it("preserves the shipment and receipt handoff", () => {

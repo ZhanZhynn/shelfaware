@@ -33,6 +33,28 @@ export function useSourcingCases(workspaceId: string) {
     refetchInterval: 5_000,
   });
 }
+export function useSupplierOrders(workspaceId: string) {
+  return useQuery({
+    queryKey: queryKeys.sourcing.supplierOrders(workspaceId),
+    queryFn: async () => (await apiClient.sourcing.supplierOrders(workspaceId)).data,
+    enabled: !!workspaceId,
+    staleTime: 0,
+  });
+}
+export function useBatchPlaceSupplierOrders() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: apiClient.sourcing.batchPlaceSupplierOrders,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.purchaseOrders.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
+      toast({ title: "Supplier orders marked as placed" });
+    },
+    onError: (error: unknown) =>
+      toast({ title: "Error", description: getErrorMessage(error), variant: "destructive" }),
+  });
+}
 export function useSourcingCase(id: string) {
   return useQuery({
     queryKey: queryKeys.sourcing.case(id),

@@ -1195,6 +1195,28 @@ class ApiClient {
           status: response.status,
           statusText: response.statusText,
         })),
+    supplierOrders: async (workspaceId: string) =>
+      this.client
+        .get(
+          `${API_ENDPOINTS.sourcing.supplierOrders}?workspaceId=${encodeURIComponent(workspaceId)}`,
+        )
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
+    batchPlaceSupplierOrders: async (data: {
+      purchaseOrderIds: string[];
+      reference?: string;
+      notes?: string;
+    }) =>
+      this.client
+        .post(API_ENDPOINTS.sourcing.batchPlaceSupplierOrders, data)
+        .then((response) => ({
+          data: response.data,
+          status: response.status,
+          statusText: response.statusText,
+        })),
     case: async (id: string) =>
       this.client.get(API_ENDPOINTS.sourcing.case(id)).then((response) => ({
         data: response.data,

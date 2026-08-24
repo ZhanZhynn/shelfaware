@@ -37,7 +37,7 @@ const SOURCER_STAGE_TO_GROUP: Record<string, SourcingPresentationGroup> = {
   quoted: "waiting",
   approved: "waiting",
   order_pending: "needs_action",
-  ordered: "needs_action",
+  ordered: "to_ship",
   shipping: "shipped",
   received: "completed",
   rejected: "closed",

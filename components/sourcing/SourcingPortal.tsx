@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Ban, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,7 @@ import {
   useDeleteSourcingCase,
   useSourcingCases,
   useSourcingCommand,
+  useSupplierOrders,
   useSourcingWorkspaces,
 } from "@/hooks/queries";
 import { useShipPurchaseOrder } from "@/hooks/queries/use-purchase-orders";
@@ -54,6 +56,7 @@ import {
 } from "@/lib/sourcing/presentation";
 import { SourcingSlaSettings } from "./SourcingSlaSettings";
 import { SourcingCostSettings } from "./SourcingCostSettings";
+import { SupplierOrderQueue } from "./SupplierOrderQueue";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
@@ -126,10 +129,10 @@ const GROUP_META: Record<
 };
 
 const ADMIN_GROUP_LABELS: Partial<Record<SourcingPresentationGroup, string>> = {
-  needs_action: "Needs your attention",
+  needs_action: "Needs action",
   changes_requested: "Changes requested",
-  waiting: "Being sourced",
-  shipped: "Order in progress",
+  waiting: "Sourcing",
+  shipped: "Ordering",
   completed: "Completed",
   closed: "Closed",
 };
@@ -149,6 +152,7 @@ export default function SourcingPortal({
   manageMembers?: boolean;
 }) {
   const isRestoring = useIsRestoring();
+  const router = useRouter();
   const {
     data: workspaces = [],
     isLoading: loadingWorkspaces,
@@ -161,7 +165,9 @@ export default function SourcingPortal({
     isLoading,
     error,
   } = useSourcingCases(activeWorkspace);
+  const { data: supplierOrders = [] } = useSupplierOrders(activeWorkspace);
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"requests" | "supplier-orders">("requests");
   const [groupFilter, setGroupFilter] = useState<
     SourcingPresentationGroup | "all"
   >("needs_action");
@@ -182,18 +188,18 @@ export default function SourcingPortal({
   const viewer: SourcingViewer = isAdminView ? "admin" : "sourcer";
   const filterGroups: SourcingPresentationGroup[] = isAdminView
     ? [
-        "needs_action",
-        "changes_requested",
-        "waiting",
-        "shipped",
-        "completed",
-        "closed",
-      ]
+      "needs_action",
+      "changes_requested",
+      "waiting",
+      "shipped",
+      "completed",
+      // "closed",
+    ]
     : ["needs_action", "waiting", "to_ship", "shipped", "completed"];
   const groupOf = (stage: string) => getSourcingGroup(stage, viewer);
   const stageOf = (item: any) =>
     item.stage === "quoted" &&
-    item.quotes?.some((quote: any) => quote.status === "changes_requested")
+      item.quotes?.some((quote: any) => quote.status === "changes_requested")
       ? "changes_requested"
       : item.stage;
 
@@ -293,248 +299,251 @@ export default function SourcingPortal({
               />
             </div>
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            {(["all", ...filterGroups] as const).map((key) => {
-              const isActive = groupFilter === key;
-              const meta = key === "all" ? null : GROUP_META[key];
-              const count = counts[key] || 0;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setGroupFilter(key)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    isActive
-                      ? meta
-                        ? meta.activeFilter
-                        : "border-foreground bg-foreground/10 text-foreground"
-                      : meta
-                        ? meta.inactiveFilter
-                        : "border-transparent bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {key === "all"
-                    ? "All requests"
-                    : isAdminView
-                      ? ADMIN_GROUP_LABELS[key] || meta!.label
-                      : meta!.label}
-                  <span
-                    className={`rounded-full px-1.5 text-xs ${isActive ? "bg-background/50" : "bg-muted-foreground/15"}`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {error ? (
-            <Card>
-              <CardContent className="p-6 text-destructive">
-                Unable to load sourcing cases.
-              </CardContent>
-            </Card>
-          ) : isLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((key) => (
-                <div
-                  key={key}
-                  className="h-20 animate-pulse rounded-xl bg-muted"
-                />
-              ))}
-            </div>
-          ) : filtered.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">
-                No cases found.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-2">
-              {filtered.map((item: any) => {
-                const stage = stageOf(item);
-                const group = groupOf(stage);
-                const meta = GROUP_META[group];
-                const isDue =
-                  item.slaDueAt || item.nextActionAt
-                    ? new Date(item.slaDueAt || item.nextActionAt) < new Date()
-                    : false;
-                const canCancel =
-                  isAdminView &&
-                  ![
-                    "cancelled",
-                    "ordered",
-                    "shipping",
-                    "received",
-                    "rejected",
-                    "cannot_source",
-                    "archived",
-                  ].includes(item.stage);
-                const canDelete =
-                  isAdminView &&
-                  ["draft", "cancelled"].includes(item.stage) &&
-                  !item.orders?.length;
-                const purchaseOrderId = item.orders?.[0]?.purchaseOrderId;
-                const canShip =
-                  !isAdminView && item.stage === "ordered" && !!purchaseOrderId;
-                const statusMessage = getSourcingStatusMessage(
-                  stage,
-                  viewer,
-                  item.assignee?.name || item.assignee?.email,
-                );
-                return (
-                  <div
-                    key={item.id}
-                    className={`rounded-lg border border-l-4 ${meta.accent} bg-card p-4`}
-                  >
-                    <div className="flex items-start gap-3">
-                      {item.thumbnail && (
-                        <>
-                          {/* The file endpoint requires the browser session cookie. */}
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={item.thumbnail.url}
-                            alt={item.thumbnail.fileName || "Case reference"}
-                            className="h-14 w-14 shrink-0 rounded-md border object-cover"
-                          />
-                        </>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold truncate">
-                            <Link
-                              href={`${basePath}/${item.id}`}
-                              className="hover:text-sky-600 hover:underline"
-                            >
-                              {item.title}
-                            </Link>
-                          </h3>
-                          <Badge
-                            variant={getSourcingStageBadgeVariant(stage)}
-                            className="shrink-0"
-                          >
-                            {stageLabel(stage)}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {item.assignee?.name ||
-                            item.assignee?.email ||
-                            "Unassigned"}
-                        </p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-xs text-muted-foreground">
-                          {item.updatedAt
-                            ? new Date(item.updatedAt).toLocaleDateString()
-                            : new Date(item.createdAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                    {(statusMessage || item.nextAction || isDue) && (
-                      <p
-                        className={`mt-2 text-sm ${isDue ? "font-medium text-destructive" : "text-muted-foreground"}`}
-                      >
-                        {statusMessage || "Follow up"}
-                        {item.nextAction && (
-                          <span className="ml-1 text-muted-foreground">
-                            · {item.nextAction}
-                          </span>
-                        )}
-                        {(item.slaDueAt || item.nextActionAt) && (
-                          <span className="ml-1">
-                            ·{" "}
-                            {new Date(
-                              item.slaDueAt || item.nextActionAt,
-                            ).toLocaleDateString()}
-                            {isDue ? " (overdue)" : ""}
-                          </span>
-                        )}
-                      </p>
-                    )}
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-                      <Button size="sm" asChild>
-                        <Link href={`${basePath}/${item.id}`}>
-                          {isAdminView
-                            ? adminActionLabel(stage)
-                            : "Open request"}
-                        </Link>
-                      </Button>
-                      <div className="flex items-center gap-1">
-                        {canShip && (
-                          <Button
-                            size="sm"
-                            className="bg-emerald-600 text-white hover:bg-emerald-700"
-                            onClick={() => {
-                              setTrackingCarrier("");
-                              setTrackingNumber("");
-                              setPendingShipment({
-                                purchaseOrderId,
-                                title: item.title,
-                              });
-                            }}
-                          >
-                            Ship
-                          </Button>
-                        )}
-                        {(canCancel || canDelete) && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button size="sm" variant="ghost">
-                                <MoreHorizontal className="h-4 w-4" />
-                                More
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {canCancel && (
-                                <DropdownMenuItem
-                                  onSelect={() =>
-                                    setPendingAction({ type: "cancel", item })
-                                  }
-                                >
-                                  <Ban className="h-4 w-4" />
-                                  Cancel request
-                                </DropdownMenuItem>
-                              )}
-                              {canDelete && (
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  onSelect={() =>
-                                    setPendingAction({ type: "delete", item })
-                                  }
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  Delete request
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+          {!isAdminView && (
+            <div className="flex gap-7 border-b">
+              <button type="button" onClick={() => setView("requests")} className={`border-b-2 px-1 pb-3 text-sm font-medium ${view === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Requests <span className="ml-1">{cases.length}</span></button>
+              <button type="button" onClick={() => setView("supplier-orders")} className={`border-b-2 px-1 pb-3 text-sm font-medium ${view === "supplier-orders" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Supplier Orders <span className="ml-1">{supplierOrders.length}</span></button>
             </div>
           )}
-          {canAssign && (
-            <details className="rounded-lg border bg-card px-4 py-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                Workspace settings
-              </summary>
-              <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
-                <SourcingSlaSettings
-                  key={activeWorkspace}
-                  workspaceId={activeWorkspace}
-                  members={[]}
-                />
-                <SourcingCostSettings
-                  key={`cost-${activeWorkspace}`}
-                  workspaceId={activeWorkspace}
-                />
+
+          {view === "supplier-orders" && !isAdminView ? (
+            <SupplierOrderQueue workspaceId={activeWorkspace} basePath={basePath} />
+          ) : <div className="space-y-4 rounded-lg border bg-card p-4 sm:p-5">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b">
+              <h2 className="text-lg font-semibold">Requests</h2>
+              <div className="ml-auto flex flex-wrap gap-x-6">
+                {(["all", ...filterGroups] as const).map((key) => {
+                  const isActive = groupFilter === key;
+                  const meta = key === "all" ? null : GROUP_META[key];
+                  const count = counts[key] || 0;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setGroupFilter(key)}
+                      className={`border-b-2 px-1 pb-3 text-sm font-medium transition-colors ${isActive
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                    >
+                      {key === "all"
+                        ? "All"
+                        : isAdminView
+                          ? ADMIN_GROUP_LABELS[key] || meta!.label
+                          : meta!.label}
+                      <span className="ml-1">({count})</span>
+                    </button>
+                  );
+                })}
               </div>
-            </details>
-          )}
+            </div>
+
+            <div className="grid grid-cols-[minmax(260px,1fr)_140px_130px_110px] gap-3 bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
+              <span>Request</span>
+              <span>Assigned to</span>
+              <span>Status</span>
+              <span>Actions</span>
+            </div>
+
+            {error ? (
+              <Card>
+                <CardContent className="p-6 text-destructive">
+                  Unable to load sourcing cases.
+                </CardContent>
+              </Card>
+            ) : isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((key) => (
+                  <div
+                    key={key}
+                    className="h-20 animate-pulse rounded-xl bg-muted"
+                  />
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center text-muted-foreground">
+                  No cases found.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {filtered.map((item: any) => {
+                  const stage = stageOf(item);
+                  const group = groupOf(stage);
+                  const meta = GROUP_META[group];
+                  const isDue =
+                    item.slaDueAt || item.nextActionAt
+                      ? new Date(item.slaDueAt || item.nextActionAt) < new Date()
+                      : false;
+                  const canCancel =
+                    isAdminView &&
+                    ![
+                      "cancelled",
+                      "ordered",
+                      "shipping",
+                      "received",
+                      "rejected",
+                      "cannot_source",
+                      "archived",
+                    ].includes(item.stage);
+                  const canDelete =
+                    isAdminView &&
+                    ["draft", "cancelled"].includes(item.stage) &&
+                    !item.orders?.length;
+                  const purchaseOrderId = item.orders?.[0]?.purchaseOrderId;
+                  const canShip =
+                    !isAdminView && item.stage === "ordered" && !!purchaseOrderId;
+                  const statusMessage = getSourcingStatusMessage(
+                    stage,
+                    viewer,
+                    item.assignee?.name || item.assignee?.email,
+                  );
+                  return (
+                    <div
+                      key={item.id}
+                      className={`grid cursor-pointer grid-cols-[minmax(260px,1fr)_140px_130px_110px] gap-3 rounded-md border border-l-4 ${meta.accent} bg-card p-3 transition-colors hover:bg-muted/40`}
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => router.push(`${basePath}/${item.id}`)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          router.push(`${basePath}/${item.id}`);
+                        }
+                      }}
+                    >
+                        <div className="flex min-w-0 items-start gap-3">
+                          {item.thumbnail && (
+                            <>
+                              {/* The file endpoint requires the browser session cookie. */}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={item.thumbnail.url}
+                                alt={item.thumbnail.fileName || "Case reference"}
+                                className="h-14 w-14 shrink-0 rounded-md border object-cover"
+                              />
+                            </>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-semibold truncate">
+                                <Link
+                                  href={`${basePath}/${item.id}`}
+                                  className="hover:text-sky-600 hover:underline"
+                                >
+                                  {item.title}
+                                </Link>
+                              </h3>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {item.updatedAt
+                                ? new Date(item.updatedAt).toLocaleDateString()
+                                : new Date(item.createdAt).toLocaleDateString()}
+                              {statusMessage && <span className={isDue ? "font-medium text-destructive" : "text-muted-foreground"}> · {statusMessage}</span>}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="pt-1 text-sm text-muted-foreground">{item.assignee?.name || item.assignee?.email || "Unassigned"}</div>
+                        <div className="pt-1"><Badge variant={getSourcingStageBadgeVariant(stage)} className="capitalize">{stageLabel(stage)}</Badge></div>
+                        <div
+                          className="flex flex-col items-start gap-1"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          {/* <Button size="sm" variant="link" className="h-auto px-0" asChild> */}
+                          {/*   <Link href={`${basePath}/${item.id}`}> */}
+                          {/*     {isAdminView */}
+                          {/*       ? adminActionLabel(stage) */}
+                          {/*       : "Open request"} */}
+                           {/*   </Link> */}
+                           {/* </Button> */}
+                           {!isAdminView && item.stage === "order_pending" && (
+                             <Button
+                               size="sm"
+                               variant="link"
+                               className="h-auto px-0 py-2"
+                               onClick={() => setView("supplier-orders")}
+                             >
+                               Place order
+                             </Button>
+                           )}
+                           {canShip && (
+                            <Button
+                              size="sm"
+                              variant="link"
+                              // className="bg-emerald-600 text-white hover:bg-emerald-700"
+                              className="h-auto px-0 py-2"
+                              onClick={() => {
+                                setTrackingCarrier("");
+                                setTrackingNumber("");
+                                setPendingShipment({
+                                  purchaseOrderId,
+                                  title: item.title,
+                                });
+                              }}
+                            >
+                              Ship
+                            </Button>
+                          )}
+                          {(canCancel || canDelete) && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="sm" variant="ghost">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                  More
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {canCancel && (
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      setPendingAction({ type: "cancel", item })
+                                    }
+                                  >
+                                    <Ban className="h-4 w-4" />
+                                    Cancel request
+                                  </DropdownMenuItem>
+                                )}
+                                {canDelete && (
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onSelect={() =>
+                                      setPendingAction({ type: "delete", item })
+                                    }
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    Delete request
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {canAssign && (
+              <details className="rounded-lg border bg-card px-4 py-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Workspace settings
+                </summary>
+                <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+                  <SourcingSlaSettings
+                    key={activeWorkspace}
+                    workspaceId={activeWorkspace}
+                    members={[]}
+                  />
+                  <SourcingCostSettings
+                    key={`cost-${activeWorkspace}`}
+                    workspaceId={activeWorkspace}
+                  />
+                </div>
+              </details>
+            )}
+          </div>}
         </>
       )}
       <Dialog

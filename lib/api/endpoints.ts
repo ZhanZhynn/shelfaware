@@ -151,6 +151,8 @@ export const API_ENDPOINTS = {
     supplierScorecard: "/sourcing/supplier-scorecard",
     landedCost: "/sourcing/landed-cost",
     supplierEvaluations: "/sourcing/supplier-evaluations",
+    supplierOrders: "/sourcing/supplier-orders",
+    batchPlaceSupplierOrders: "/sourcing/supplier-orders/batch-place",
     import: "/sourcing/import",
     bulk: "/sourcing/cases/bulk",
   },

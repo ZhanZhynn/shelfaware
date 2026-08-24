@@ -353,58 +353,85 @@ export default function VariantSourcingCaseDetail({
   const action = admin
     ? displayStage === "quoted"
       ? [
-          "Your next step",
-          "Review variant offers",
-          "Choose one passed offer or explicitly skip each requested variant.",
-        ]
+        "Your next step",
+        "Review variant offers",
+        "Choose one passed offer or explicitly skip each requested variant.",
+      ]
       : displayStage === "approved"
         ? [
-            "Your next step",
-            "Create supplier orders",
-            "Review the supplier groups and create the purchase orders.",
-          ]
+          "Your next step",
+          "Create supplier orders",
+          "Review the supplier groups and create the purchase orders.",
+        ]
         : displayStage === "sourcing"
           ? [
-              "Current progress",
-              "Sourcer is collecting offers",
-              "Wait for supplier quote sheets to be submitted.",
-            ]
+            "Current progress",
+            "Sourcer is collecting offers",
+            "Wait for supplier quote sheets to be submitted.",
+          ]
           : [
-              "Current progress",
-              currentTimelineLabel,
-              "Track the sourcing request and its supplier orders.",
-            ]
+            "Current progress",
+            currentTimelineLabel,
+            "Track the sourcing request and its supplier orders.",
+          ]
     : displayStage === "changes_requested"
       ? [
-          "Changes required",
-          sheetsNeedingChanges.length === 1
-            ? "Fix and resubmit 1 quote sheet"
-            : `Fix and resubmit ${sheetsNeedingChanges.length} quote sheets`,
-          "Open the supplier sheet marked Needs correction to review the requested changes.",
-        ]
+        "Changes required",
+        sheetsNeedingChanges.length === 1
+          ? "Fix and resubmit 1 quote sheet"
+          : `Fix and resubmit ${sheetsNeedingChanges.length} quote sheets`,
+        "Open the supplier sheet marked Needs correction to review the requested changes.",
+      ]
       : displayStage === "sourcing"
         ? [
-            "Your next step",
-            "Complete a supplier quote sheet",
-            "Record every requested variant for this supplier, then submit before moving on.",
-          ]
+          "Your next step",
+          "Complete a supplier quote sheet",
+          "Record every requested variant for this supplier, then submit before moving on.",
+        ]
         : displayStage === "quoted"
           ? [
-              "Current progress",
-              "Waiting for admin review",
-              "The admin will choose viable variant offers or request changes.",
-            ]
+            "Current progress",
+            "Waiting for admin review",
+            "The admin will choose viable variant offers or request changes.",
+          ]
           : displayStage === "ordered"
             ? [
-                "Your next step",
-                "Arrange shipment",
-                "Open each supplier purchase order to add tracking and mark it shipped.",
-              ]
+              "Your next step",
+              "Arrange shipment",
+              "Open each supplier purchase order to add tracking and mark it shipped.",
+            ]
             : [
-                "Current progress",
-                currentTimelineLabel,
-                "Follow the sourcing request progress here.",
-              ];
+              "Current progress",
+              currentTimelineLabel,
+              "Follow the sourcing request progress here.",
+            ];
+  const sourcerAction = !admin
+    ? ["sourcing", "changes_requested", "quoted", "approved"].includes(
+      displayStage,
+    )
+      ? {
+        href: "#supplier-quote-sheets",
+        label:
+          displayStage === "changes_requested"
+            ? "Fix quote sheet"
+            : displayStage === "quoted"
+              ? "View quote sheets"
+              : "Open quote sheets",
+      }
+      : ["order_pending", "ordered", "shipping", "received"].includes(
+        displayStage,
+      )
+        ? {
+          href: "#purchase-orders",
+          label:
+            displayStage === "order_pending"
+              ? "Place supplier orders"
+              : displayStage === "ordered"
+                ? "Arrange shipment"
+                : "View purchase orders",
+        }
+        : null
+    : null;
   const sheetPayload = () => ({
     supplierId: supplierId || null,
     supplierName,
@@ -482,8 +509,8 @@ export default function VariantSourcingCaseDetail({
     field: keyof SheetLine,
   ) =>
     submitAttempted &&
-    incompleteQuoteVariantIds.includes(variantId) &&
-    missingQuoteFields(line).includes(field)
+      incompleteQuoteVariantIds.includes(variantId) &&
+      missingQuoteFields(line).includes(field)
       ? "border-destructive focus-visible:ring-destructive"
       : "";
   const uploadProposalImages = async (result: any) => {
@@ -536,19 +563,19 @@ export default function VariantSourcingCaseDetail({
             variant.id,
             line
               ? {
-                  availability: line.availability,
-                  unitPriceRmb: line.unitPriceRmb?.toString() || "",
-                  piecesPerSellingUnit:
-                    line.piecesPerSellingUnit?.toString() || "1",
-                  cartonLengthCm: line.cartonLengthCm?.toString() || "",
-                  cartonWidthCm: line.cartonWidthCm?.toString() || "",
-                  cartonHeightCm: line.cartonHeightCm?.toString() || "",
-                  cartonWeightKg: line.cartonWeightKg?.toString() || "",
-                  piecesPerCarton: line.piecesPerCarton?.toString() || "",
-                  moq: line.moq?.toString() || "",
-                  leadTimeDays: line.leadTimeDays?.toString() || "",
-                  notes: line.notes || "",
-                }
+                availability: line.availability,
+                unitPriceRmb: line.unitPriceRmb?.toString() || "",
+                piecesPerSellingUnit:
+                  line.piecesPerSellingUnit?.toString() || "1",
+                cartonLengthCm: line.cartonLengthCm?.toString() || "",
+                cartonWidthCm: line.cartonWidthCm?.toString() || "",
+                cartonHeightCm: line.cartonHeightCm?.toString() || "",
+                cartonWeightKg: line.cartonWeightKg?.toString() || "",
+                piecesPerCarton: line.piecesPerCarton?.toString() || "",
+                moq: line.moq?.toString() || "",
+                leadTimeDays: line.leadTimeDays?.toString() || "",
+                notes: line.notes || "",
+              }
               : emptyLine(),
           ];
         }),
@@ -666,17 +693,17 @@ export default function VariantSourcingCaseDetail({
       selections: item.variants.map((variant: any) =>
         selected[variant.id]
           ? {
-              caseVariantId: variant.id,
-              quoteLineId: selected[variant.id],
-              status: "selected",
-              ...marketBenchmarks[variant.id],
-            }
+            caseVariantId: variant.id,
+            quoteLineId: selected[variant.id],
+            status: "selected",
+            ...marketBenchmarks[variant.id],
+          }
           : {
-              caseVariantId: variant.id,
-              status: "skipped",
-              skipReason: skipped[variant.id] || "No viable offer selected",
-              ...marketBenchmarks[variant.id],
-            },
+            caseVariantId: variant.id,
+            status: "skipped",
+            skipReason: skipped[variant.id] || "No viable offer selected",
+            ...marketBenchmarks[variant.id],
+          },
       ),
     });
   const undecidedVariants = item.variants.filter(
@@ -768,6 +795,22 @@ export default function VariantSourcingCaseDetail({
           {admin && displayStage === "quoted" && (
             <Button asChild>
               <a href="#variant-offers">Review variant offers</a>
+            </Button>
+          )}
+          {sourcerAction && (
+            <Button asChild>
+              <a
+                href={sourcerAction.href}
+                onClick={() => {
+                  if (
+                    displayStage === "changes_requested" &&
+                    sheetsNeedingChanges[0]
+                  )
+                    selectSheet(sheetsNeedingChanges[0]);
+                }}
+              >
+                {sourcerAction.label}
+              </a>
             </Button>
           )}
           {!admin &&
@@ -1113,17 +1156,17 @@ export default function VariantSourcingCaseDetail({
                               setBatchVariantIds(
                                 checked
                                   ? [
-                                      ...item.variants
-                                        .filter(
-                                          (variant: any) =>
-                                            variant.requestQuote !== false &&
-                                            variant.origin === "admin",
-                                        )
-                                        .map((variant: any) => variant.id),
-                                      ...proposals.map(
-                                        (proposal) => proposal.clientKey,
-                                      ),
-                                    ]
+                                    ...item.variants
+                                      .filter(
+                                        (variant: any) =>
+                                          variant.requestQuote !== false &&
+                                          variant.origin === "admin",
+                                      )
+                                      .map((variant: any) => variant.id),
+                                    ...proposals.map(
+                                      (proposal) => proposal.clientKey,
+                                    ),
+                                  ]
                                   : [],
                               )
                             }
@@ -1322,8 +1365,8 @@ export default function VariantSourcingCaseDetail({
                                       checked
                                         ? [...new Set([...current, variant.id])]
                                         : current.filter(
-                                            (id) => id !== variant.id,
-                                          ),
+                                          (id) => id !== variant.id,
+                                        ),
                                     )
                                   }
                                   aria-label={`Select ${label(variant)}`}
@@ -1339,37 +1382,37 @@ export default function VariantSourcingCaseDetail({
                                     attachment.caseVariantId === variant.id &&
                                     attachment.mimeType?.startsWith("image/"),
                                 ) && (
-                                  <a
-                                    href={
-                                      variantAttachments.find(
-                                        (attachment: any) =>
-                                          attachment.caseVariantId ===
-                                            variant.id &&
-                                          attachment.mimeType?.startsWith(
-                                            "image/",
-                                          ),
-                                      )!.url
-                                    }
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    title="Open image"
-                                  >
-                                    <img
-                                      className="mt-2 h-12 w-12 rounded border object-cover"
-                                      src={
+                                    <a
+                                      href={
                                         variantAttachments.find(
                                           (attachment: any) =>
                                             attachment.caseVariantId ===
-                                              variant.id &&
+                                            variant.id &&
                                             attachment.mimeType?.startsWith(
                                               "image/",
                                             ),
                                         )!.url
                                       }
-                                      alt={label(variant)}
-                                    />
-                                  </a>
-                                )}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title="Open image"
+                                    >
+                                      <img
+                                        className="mt-2 h-12 w-12 rounded border object-cover"
+                                        src={
+                                          variantAttachments.find(
+                                            (attachment: any) =>
+                                              attachment.caseVariantId ===
+                                              variant.id &&
+                                              attachment.mimeType?.startsWith(
+                                                "image/",
+                                              ),
+                                          )!.url
+                                        }
+                                        alt={label(variant)}
+                                      />
+                                    </a>
+                                  )}
                               </td>
                               <td className="p-2">
                                 {variant.productUrl ? (
@@ -1562,7 +1605,7 @@ export default function VariantSourcingCaseDetail({
                       {proposals.map((proposal, index) => (
                         <tr
                           key={proposal.clientKey}
-                          className="border-b bg-sky-50/40 align-top"
+                          className="border-b align-top"
                         >
                           <td className="p-2">
                             <Checkbox
@@ -1573,14 +1616,14 @@ export default function VariantSourcingCaseDetail({
                                 setBatchVariantIds((current) =>
                                   checked
                                     ? [
-                                        ...new Set([
-                                          ...current,
-                                          proposal.clientKey,
-                                        ]),
-                                      ]
+                                      ...new Set([
+                                        ...current,
+                                        proposal.clientKey,
+                                      ]),
+                                    ]
                                     : current.filter(
-                                        (id) => id !== proposal.clientKey,
-                                      ),
+                                      (id) => id !== proposal.clientKey,
+                                    ),
                                 )
                               }
                               aria-label={`Select ${proposal.customLabel || "supplier proposal"}`}
@@ -1626,7 +1669,7 @@ export default function VariantSourcingCaseDetail({
                                 variantAttachments.find(
                                   (attachment: any) =>
                                     attachment.caseVariantId ===
-                                      proposal.caseVariantId &&
+                                    proposal.caseVariantId &&
                                     attachment.mimeType?.startsWith("image/"),
                                 ) ? (
                                 <img
@@ -1635,7 +1678,7 @@ export default function VariantSourcingCaseDetail({
                                     variantAttachments.find(
                                       (attachment: any) =>
                                         attachment.caseVariantId ===
-                                          proposal.caseVariantId &&
+                                        proposal.caseVariantId &&
                                         attachment.mimeType?.startsWith(
                                           "image/",
                                         ),
@@ -1904,9 +1947,9 @@ export default function VariantSourcingCaseDetail({
                               current.map((entry, position) =>
                                 position === index
                                   ? {
-                                      ...entry,
-                                      customLabel: event.target.value,
-                                    }
+                                    ...entry,
+                                    customLabel: event.target.value,
+                                  }
                                   : entry,
                               ),
                             )
@@ -1921,9 +1964,9 @@ export default function VariantSourcingCaseDetail({
                               current.map((entry, position) =>
                                 position === index
                                   ? {
-                                      ...entry,
-                                      unitPriceRmb: event.target.value,
-                                    }
+                                    ...entry,
+                                    unitPriceRmb: event.target.value,
+                                  }
                                   : entry,
                               ),
                             )
@@ -1938,9 +1981,9 @@ export default function VariantSourcingCaseDetail({
                               current.map((entry, position) =>
                                 position === index
                                   ? {
-                                      ...entry,
-                                      cartonWeightKg: event.target.value,
-                                    }
+                                    ...entry,
+                                    cartonWeightKg: event.target.value,
+                                  }
                                   : entry,
                               ),
                             )
@@ -1955,9 +1998,9 @@ export default function VariantSourcingCaseDetail({
                               current.map((entry, position) =>
                                 position === index
                                   ? {
-                                      ...entry,
-                                      piecesPerCarton: event.target.value,
-                                    }
+                                    ...entry,
+                                    piecesPerCarton: event.target.value,
+                                  }
                                   : entry,
                               ),
                             )
@@ -2540,7 +2583,7 @@ export default function VariantSourcingCaseDetail({
                         const result = evaluation.result;
                         const failureReason =
                           result?.marketPerPiece != null &&
-                          result.minViablePrice != null
+                            result.minViablePrice != null
                             ? result.marketPerPiece < result.landed
                               ? `Landed cost RM ${result.landed.toFixed(2)} is higher than the market price RM ${result.marketPerPiece.toFixed(2)}.`
                               : `Market price RM ${result.marketPerPiece.toFixed(2)} is below the minimum viable price RM ${result.minViablePrice.toFixed(2)}.`
@@ -2611,7 +2654,7 @@ export default function VariantSourcingCaseDetail({
                             </td>
                             <td className="p-3">
                               {evaluation.status === "fail" &&
-                              !offerRejected ? (
+                                !offerRejected ? (
                                 <TooltipProvider delayDuration={0}>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
@@ -2626,7 +2669,7 @@ export default function VariantSourcingCaseDetail({
                                       {result?.flags.length
                                         ? result.flags.join(", ")
                                         : failureReason ||
-                                          "This offer does not meet the viability requirements."}
+                                        "This offer does not meet the viability requirements."}
                                     </TooltipContent>
                                   </Tooltip>
                                 </TooltipProvider>
@@ -2703,7 +2746,7 @@ export default function VariantSourcingCaseDetail({
                                   });
                                   setSelectionQuantity(
                                     orderQuantities[variant.id] ||
-                                      variant.requestedQuantity.toString(),
+                                    variant.requestedQuantity.toString(),
                                   );
                                 }}
                               >
@@ -3032,15 +3075,15 @@ export default function VariantSourcingCaseDetail({
             {item.variants.filter(
               (variant: any) => variant.selection?.status === "skipped",
             ).length > 0 && (
-              <p className="text-sm text-muted-foreground">
-                {
-                  item.variants.filter(
-                    (variant: any) => variant.selection?.status === "skipped",
-                  ).length
-                }{" "}
-                variant(s) deliberately skipped.
-              </p>
-            )}
+                <p className="text-sm text-muted-foreground">
+                  {
+                    item.variants.filter(
+                      (variant: any) => variant.selection?.status === "skipped",
+                    ).length
+                  }{" "}
+                  variant(s) deliberately skipped.
+                </p>
+              )}
             <Button
               onClick={() =>
                 command.mutate({
@@ -3057,7 +3100,7 @@ export default function VariantSourcingCaseDetail({
         </Card>
       )}
       {item.orders.length > 0 && (
-        <Card>
+        <Card id="purchase-orders">
           <CardHeader>
             <CardTitle>Purchase orders</CardTitle>
           </CardHeader>

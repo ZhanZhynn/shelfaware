@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ImagePlus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ const key = (variant: { size?: string | null; material?: string | null; colour?:
   [variant.size || "", variant.material || "", variant.colour || ""].join("|");
 
 export default function SourcingVariantEditPage({ caseId }: { caseId: string }) {
+  const router = useRouter();
   const { data: item, isLoading, error } = useSourcingCase(caseId);
   const command = useSourcingCommand();
   const updateRequest = useUpdateSourcingRequest();
@@ -107,6 +109,7 @@ export default function SourcingVariantEditPage({ caseId }: { caseId: string }) 
       );
       version = updated.version;
     }
+    router.push(`/admin/sourcing/${item.id}`);
   };
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">

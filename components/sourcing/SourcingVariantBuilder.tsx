@@ -81,14 +81,16 @@ export function SourcingVariantBuilder({
     )
       return;
     const fields = ["size", "material", "colour"] as const;
-    const next = fields
+    const hydratedAxes = fields
       .map((field, index) => {
         const values = [
           ...new Set(variants.map((variant) => variant[field]).filter(Boolean)),
         ];
         return values.length
           ? {
-              ...defaultAxis(
+              field,
+              axis: {
+                ...defaultAxis(
                 index === 0
                   ? "Colour"
                   : index === 1
@@ -100,11 +102,38 @@ export function SourcingVariantBuilder({
                 value,
                 explanation: "",
               })),
+              },
             }
           : null;
       })
-      .filter(Boolean) as Axis[];
-    if (next.length) setAxes(next);
+      .filter(Boolean) as { field: "size" | "material" | "colour"; axis: Axis }[];
+    if (hydratedAxes.length) {
+      const next = hydratedAxes.map((entry) => entry.axis);
+      const previewMoves: Record<string, string> = {};
+      const hydratedVariants = variants.map((variant) => {
+        const options = hydratedAxes
+          .map(({ field, axis }) =>
+            axis.options.find((option) => option.value === variant[field]),
+          )
+          .filter((option): option is Option => Boolean(option));
+        const imageKey = options[0]?.id;
+        if (variant.imageKey && imageKey) previewMoves[variant.imageKey] = imageKey;
+        return {
+          ...variant,
+          clientKey: keyFor(options),
+          imageKey,
+        };
+      });
+      setAxes(next);
+      onChange(hydratedVariants);
+      setImagePreviews((current) => {
+        const moved = { ...current };
+        for (const [from, to] of Object.entries(previewMoves)) {
+          if (current[from]) moved[to] = current[from];
+        }
+        return moved;
+      });
+    }
     setInitialized(true);
   }, [initialized, variants]);
 

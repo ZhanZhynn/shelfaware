@@ -27,7 +27,8 @@ export async function POST(
     const id = (await params).id;
     const command = sourcingCommandSchema.parse(await request.json());
     const variantCase = await prisma.sourcingCaseVariant.count({ where: { caseId: id } });
-    const result = variantCase
+    const genericActions = new Set(["assign", "cancel", "archive", "revive", "repeat"]);
+    const result = variantCase && !genericActions.has(command.action)
       ? await runVariantSourcingCommand(user, id, command)
       : await runSourcingCommand(user, id, command as Parameters<typeof runSourcingCommand>[2]);
     void invalidateAllServerCaches();

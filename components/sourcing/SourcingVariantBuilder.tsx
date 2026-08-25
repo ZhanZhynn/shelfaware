@@ -51,11 +51,13 @@ const keyFor = (options: Option[]) =>
 export function SourcingVariantBuilder({
   variants,
   images,
+  initialImageUrls = {},
   onChange,
   onImageChange,
 }: {
   variants: VariantDraft[];
   images: Record<string, File | undefined>;
+  initialImageUrls?: Record<string, string>;
   onChange: (variants: VariantDraft[]) => void;
   onImageChange: (clientKey: string, file?: File) => void;
 }) {
@@ -66,7 +68,7 @@ export function SourcingVariantBuilder({
   const [bulkMarketplaceLink, setBulkMarketplaceLink] = useState("");
   const [bulkQuoteScope, setBulkQuoteScope] = useState(true);
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>(
-    {},
+    initialImageUrls,
   );
   const [optionErrors, setOptionErrors] = useState<Record<string, boolean>>({});
 

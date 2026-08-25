@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- sourcing attachments require authenticated URLs. */
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
@@ -10,7 +11,6 @@ import {
   FileText,
   ImagePlus,
   MoreHorizontal,
-  PackagePlus,
   Send,
   Trash2,
 } from "lucide-react";
@@ -145,6 +145,7 @@ export default function VariantSourcingCaseDetail({
   basePath: string;
 }) {
   const { data: item, isLoading, error } = useSourcingCase(caseId);
+  const router = useRouter();
   const command = useSourcingCommand();
   const comment = useCreateSourcingComment();
   const uploadAttachment = useUploadSourcingAttachment();
@@ -343,13 +344,6 @@ export default function VariantSourcingCaseDetail({
   const currentTimelineLabel =
     timelineSteps.find((step) => step.id === displayStage)?.label ||
     displayStage;
-  const updateCaseVariant = (variant: any, patch: Record<string, unknown>) =>
-    command.mutate({
-      id: item.id,
-      action: "update_case_variant",
-      version: item.version,
-      variant: { caseVariantId: variant.id, ...patch },
-    });
   const action = admin
     ? displayStage === "quoted"
       ? [
@@ -686,26 +680,33 @@ export default function VariantSourcingCaseDetail({
     );
   };
   const confirmSelections = () =>
-    command.mutate({
-      id: item.id,
-      action: "confirm_variant_selection",
-      version: item.version,
-      selections: item.variants.map((variant: any) =>
-        selected[variant.id]
-          ? {
-            caseVariantId: variant.id,
-            quoteLineId: selected[variant.id],
-            status: "selected",
-            ...marketBenchmarks[variant.id],
-          }
-          : {
-            caseVariantId: variant.id,
-            status: "skipped",
-            skipReason: skipped[variant.id] || "No viable offer selected",
-            ...marketBenchmarks[variant.id],
-          },
-      ),
-    });
+    command.mutate(
+      {
+        id: item.id,
+        action: "confirm_variant_selection",
+        version: item.version,
+        selections: item.variants.map((variant: any) =>
+          selected[variant.id]
+            ? {
+              caseVariantId: variant.id,
+              quoteLineId: selected[variant.id],
+              status: "selected",
+              ...marketBenchmarks[variant.id],
+            }
+            : {
+              caseVariantId: variant.id,
+              status: "skipped",
+              skipReason: skipped[variant.id] || "No viable offer selected",
+              ...marketBenchmarks[variant.id],
+            },
+        ),
+      },
+      {
+        onSuccess: () => {
+          router.push(`${basePath}/${item.id}/review`);
+        },
+      },
+    );
   const undecidedVariants = item.variants.filter(
     (variant: any) =>
       variant.requestQuote !== false &&
@@ -797,6 +798,13 @@ export default function VariantSourcingCaseDetail({
               <a href="#variant-offers">Review variant offers</a>
             </Button>
           )}
+          {admin && ["approved", "order_pending"].includes(item.stage) && (
+            <Button asChild>
+              <Link href={`${basePath}/${item.id}/review`}>
+                Create supplier orders
+              </Link>
+            </Button>
+          )}
           {sourcerAction && (
             <Button asChild>
               <a
@@ -827,45 +835,45 @@ export default function VariantSourcingCaseDetail({
             )}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Request summary</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
-          <p>
-            <b>Variants:</b> {item.variants.length}
-          </p>
-          <p>
-            <b>Requested units:</b> {totalUnits}
-          </p>
-          <p>
-            <b>Assignee:</b>{" "}
-            {item.assignee?.name || item.assignee?.email || "Unassigned"}
-          </p>
-          <p>
-            <b>Reference:</b>{" "}
-            {item.referenceUrl ? (
-              <a
-                className="text-sky-600 underline"
-                href={item.referenceUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open link
-              </a>
-            ) : (
-              "None"
-            )}
-          </p>
-          <p className="sm:col-span-2">
-            <b>Specifications:</b>{" "}
-            {item.specifications || item.description || "None"}
-          </p>
-          <p className="sm:col-span-2">
-            <b>Notes:</b> {item.notes || "None"}
-          </p>
-        </CardContent>
-      </Card>
+      {/* <Card> */}
+      {/*   <CardHeader> */}
+      {/*     <CardTitle>Request summary</CardTitle> */}
+      {/*   </CardHeader> */}
+      {/*   <CardContent className="grid gap-3 text-sm sm:grid-cols-2"> */}
+      {/*     <p> */}
+      {/*       <b>Variants:</b> {item.variants.length} */}
+      {/*     </p> */}
+      {/*     <p> */}
+      {/*       <b>Requested units:</b> {totalUnits} */}
+      {/*     </p> */}
+      {/*     <p> */}
+      {/*       <b>Assignee:</b>{" "} */}
+      {/*       {item.assignee?.name || item.assignee?.email || "Unassigned"} */}
+      {/*     </p> */}
+      {/*     <p> */}
+      {/*       <b>Reference:</b>{" "} */}
+      {/*       {item.referenceUrl ? ( */}
+      {/*         <a */}
+      {/*           className="text-sky-600 underline" */}
+      {/*           href={item.referenceUrl} */}
+      {/*           target="_blank" */}
+      {/*           rel="noreferrer" */}
+      {/*         > */}
+      {/*           Open link */}
+      {/*         </a> */}
+      {/*       ) : ( */}
+      {/*         "None" */}
+      {/*       )} */}
+      {/*     </p> */}
+      {/*     <p className="sm:col-span-2"> */}
+      {/*       <b>Specifications:</b>{" "} */}
+      {/*       {item.specifications || item.description || "None"} */}
+      {/*     </p> */}
+      {/*     <p className="sm:col-span-2"> */}
+      {/*       <b>Notes:</b> {item.notes || "None"} */}
+      {/*     </p> */}
+      {/*   </CardContent> */}
+      {/* </Card> */}
       {caseAttachments.length > 0 && (
         <Card>
           <CardHeader>
@@ -2213,6 +2221,115 @@ export default function VariantSourcingCaseDetail({
             </Button>
           </div>
         )}
+      {admin &&
+        ["draft", "sourcing", "changes_requested", "quoted"].includes(
+          item.stage,
+        ) && (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>Items being sourced</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Requested variants and quantities sent to suppliers for quotes.
+                  </p>
+                </div>
+                <Button size="sm" asChild>
+                  <Link href={`${basePath}/${item.id}/edit`}>Edit items</Link>
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="overflow-x-auto p-0">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="bg-muted/50 text-left text-muted-foreground">
+                  <tr>
+                    <th className="p-3">Item</th>
+                    <th className="p-3">Quote scope</th>
+                    <th className="p-3">Quantity</th>
+                    <th className="p-3">Market price</th>
+                    <th className="p-3">Marketplace link</th>
+                    <th className="p-3">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {item.variants
+                    .filter(
+                      (variant: any) => variant.proposalStatus !== "dismissed",
+                    )
+                    .map((variant: any) => {
+                      const image = variantAttachments.find(
+                        (attachment: any) =>
+                          attachment.caseVariantId === variant.id &&
+                          attachment.mimeType?.startsWith("image/"),
+                      );
+                      return (
+                        <tr key={variant.id} className="align-top">
+                          <td className="p-3">
+                            <div className="flex min-w-[220px] items-center gap-3">
+                              {image ? (
+                                <a
+                                  href={image.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title="Open image"
+                                >
+                                  <img
+                                    src={image.url}
+                                    alt={label(variant)}
+                                    className="h-12 w-12 rounded border object-cover transition-opacity hover:opacity-75"
+                                  />
+                                </a>
+                              ) : (
+                                <div className="h-12 w-12 rounded border bg-muted" />
+                              )}
+                              <div>
+                                <p className="font-medium">{label(variant)}</p>
+                                {variant.origin === "sourcer" && (
+                                  <Badge className="mt-1">Sourcer added</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <Badge variant={variant.requestQuote !== false ? "info" : "secondary"}>
+                              {variant.requestQuote !== false ? "Requested" : "Not requested"}
+                            </Badge>
+                          </td>
+                          <td className="p-3 font-medium">
+                            {variant.requestedQuantity.toLocaleString()} units
+                          </td>
+                          <td className="p-3">
+                            {variant.marketPriceMyr != null ? (
+                              `RM ${variant.marketPriceMyr.toFixed(2)}`
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {variant.productUrl ? (
+                              <a
+                                className="text-sky-600 hover:underline"
+                                href={variant.productUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open link
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="max-w-64 p-3 text-muted-foreground">
+                            {variant.remarks || "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
       {/* {admin && */}
       {/*   ["draft", "sourcing", "changes_requested", "quoted"].includes( */}
       {/*     item.stage, */}
@@ -2403,7 +2520,7 @@ export default function VariantSourcingCaseDetail({
       {/*       </CardContent> */}
       {/*     </Card> */}
       {/*   )} */}
-      {admin && (
+      {admin && !decisionsLocked && (
         <Card id="variant-offers" className="scroll-mt-4">
           <CardHeader>
             <div className="flex w-full flex-wrap items-end justify-between gap-3">
@@ -2413,12 +2530,6 @@ export default function VariantSourcingCaseDetail({
                   Compare supplier offers under each requested variant, then
                   select the offer to order.
                 </p>
-                {decisionsLocked && (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Decisions are locked because supplier purchase orders have
-                    been created.
-                  </p>
-                )}
               </div>
               <div className="ml-auto flex items-end gap-2">
                 <label className="grid gap-1 text-sm font-medium">
@@ -2618,8 +2729,79 @@ export default function VariantSourcingCaseDetail({
                                 : "bg-slate-50/70"
                             }
                           >
-                            <td className="p-3 font-medium">
-                              {offer.quote.supplierName}
+                            <td className="p-3">
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  checked={chosen}
+                                  disabled={
+                                    decisionsLocked ||
+                                    (evaluation.status !== "pass" &&
+                                      evaluation.status !==
+                                        "market_unchecked") ||
+                                    correctionPending ||
+                                    offerRejected
+                                  }
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      const quantity = Number(
+                                        orderQuantities[variant.id],
+                                      );
+                                      if (
+                                        Number.isInteger(quantity) &&
+                                        quantity > 0
+                                      ) {
+                                        setSelected((current) => ({
+                                          ...current,
+                                          [variant.id]: offer.id,
+                                        }));
+                                        setSkipped((current) => {
+                                          const next = { ...current };
+                                          delete next[variant.id];
+                                          return next;
+                                        });
+                                        command.mutate({
+                                          id: item.id,
+                                          action: "save_variant_selection",
+                                          version: item.version,
+                                          selection: {
+                                            caseVariantId: variant.id,
+                                            quoteLineId: offer.id,
+                                            status: "selected",
+                                            orderQuantity: quantity,
+                                            ...market,
+                                          },
+                                        });
+                                        return;
+                                      }
+                                      setSelectionDialog({
+                                        offer,
+                                        variant,
+                                        market,
+                                      });
+                                      setSelectionQuantity(
+                                        orderQuantities[variant.id] ||
+                                          variant.requestedQuantity.toString(),
+                                      );
+                                      return;
+                                    }
+                                    setSelected((current) => {
+                                      const next = { ...current };
+                                      delete next[variant.id];
+                                      return next;
+                                    });
+                                    command.mutate({
+                                      id: item.id,
+                                      action: "clear_variant_selection",
+                                      version: item.version,
+                                      caseVariantId: variant.id,
+                                    });
+                                  }}
+                                  aria-label={`Select offer from ${offer.quote.supplierName}`}
+                                />
+                                <span className="font-medium">
+                                  {offer.quote.supplierName}
+                                </span>
+                              </div>
                             </td>
                             <td className="p-3">
                               CNY {offer.unitPriceRmb ?? "-"} / unit
@@ -2684,83 +2866,9 @@ export default function VariantSourcingCaseDetail({
                               ) : null}
                             </td>
                             <td className="p-3">
-                              <Button
-                                size="sm"
-                                disabled={
-                                  decisionsLocked ||
-                                  (evaluation.status !== "pass" &&
-                                    evaluation.status !== "market_unchecked") ||
-                                  correctionPending ||
-                                  offerRejected
-                                }
-                                variant={chosen ? "default" : "outline"}
-                                onClick={() => {
-                                  if (chosen) {
-                                    setSelected((current) => {
-                                      const next = { ...current };
-                                      delete next[variant.id];
-                                      return next;
-                                    });
-                                    command.mutate({
-                                      id: item.id,
-                                      action: "clear_variant_selection",
-                                      version: item.version,
-                                      caseVariantId: variant.id,
-                                    });
-                                    return;
-                                  }
-                                  const quantity = Number(
-                                    orderQuantities[variant.id],
-                                  );
-                                  if (
-                                    Number.isInteger(quantity) &&
-                                    quantity > 0
-                                  ) {
-                                    setSelected((current) => ({
-                                      ...current,
-                                      [variant.id]: offer.id,
-                                    }));
-                                    setSkipped((current) => {
-                                      const next = { ...current };
-                                      delete next[variant.id];
-                                      return next;
-                                    });
-                                    command.mutate({
-                                      id: item.id,
-                                      action: "save_variant_selection",
-                                      version: item.version,
-                                      selection: {
-                                        caseVariantId: variant.id,
-                                        quoteLineId: offer.id,
-                                        status: "selected",
-                                        orderQuantity: quantity,
-                                        ...market,
-                                      },
-                                    });
-                                    return;
-                                  }
-                                  setSelectionDialog({
-                                    offer,
-                                    variant,
-                                    market,
-                                  });
-                                  setSelectionQuantity(
-                                    orderQuantities[variant.id] ||
-                                    variant.requestedQuantity.toString(),
-                                  );
-                                }}
-                              >
-                                <Check className="h-4 w-4" />{" "}
-                                {chosen
-                                  ? "Selected"
-                                  : evaluation.status === "market_unchecked"
-                                    ? "Select with warning"
-                                    : "Select"}
-                              </Button>
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button
-                                    className="ml-2"
                                     size="sm"
                                     variant="ghost"
                                     disabled={decisionsLocked}
@@ -2814,7 +2922,7 @@ export default function VariantSourcingCaseDetail({
                                   >
                                     Skip this variant
                                   </DropdownMenuItem>
-                                </DropdownMenuContent>
+                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </td>
                           </tr>
@@ -3008,18 +3116,6 @@ export default function VariantSourcingCaseDetail({
           </DialogContent>
         </Dialog>
       )}
-      {admin && item.stage === "quoted" && (
-        <Button
-          onClick={() =>
-            undecidedVariants.length
-              ? setConfirmDecisionsOpen(true)
-              : confirmSelections()
-          }
-          isLoading={command.isPending}
-        >
-          <Check className="h-4 w-4" /> Confirm variant decisions
-        </Button>
-      )}
       {admin && (
         <AlertDialog
           open={confirmDecisionsOpen}
@@ -3045,59 +3141,6 @@ export default function VariantSourcingCaseDetail({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      )}
-      {admin && item.stage === "approved" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Final supplier order review</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              One multi-line purchase order will be created for each supplier
-              below.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {Object.entries(selectedBySupplier).map(
-              ([supplier, supplierLines]) => (
-                <div key={supplier} className="rounded-lg border p-3">
-                  <p className="font-medium">{supplier}</p>
-                  <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                    {(supplierLines as any[]).map((line: any) => (
-                      <li key={line.id}>
-                        {label(line)} ·{" "}
-                        {Math.max(line.requestedQuantity, line.moq || 0)} units
-                        · CNY {line.unitPriceRmb}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ),
-            )}
-            {item.variants.filter(
-              (variant: any) => variant.selection?.status === "skipped",
-            ).length > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {
-                    item.variants.filter(
-                      (variant: any) => variant.selection?.status === "skipped",
-                    ).length
-                  }{" "}
-                  variant(s) deliberately skipped.
-                </p>
-              )}
-            <Button
-              onClick={() =>
-                command.mutate({
-                  id: item.id,
-                  action: "create_variant_orders",
-                  version: item.version,
-                })
-              }
-              isLoading={command.isPending}
-            >
-              <PackagePlus className="h-4 w-4" /> Create supplier orders
-            </Button>
-          </CardContent>
-        </Card>
       )}
       {item.orders.length > 0 && (
         <Card id="purchase-orders">
@@ -3168,6 +3211,46 @@ export default function VariantSourcingCaseDetail({
           </div>
         </CardContent>
       </Card>
+      {admin && item.stage === "quoted" && (
+        <div className="sticky bottom-0 z-40 mb-4 rounded-lg border bg-background/95 shadow-[0_-4px_16px_rgba(0,0,0,0.12)] backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-sm text-muted-foreground">
+                  {selectedOfferLines.length} item
+                  {selectedOfferLines.length === 1 ? "" : "s"} selected
+                </span>
+                <span className="text-sm text-muted-foreground">Order value</span>
+                <span className="text-lg font-bold text-orange-600">
+                  CNY{" "}
+                  {selectedOfferLines
+                    .reduce(
+                      (sum: number, line: any) =>
+                        sum +
+                        Number(
+                          orderQuantities[line.caseVariantId] ||
+                            line.requestedQuantity,
+                        ) *
+                          (line.unitPriceRmb || 0),
+                      0,
+                    )
+                    .toLocaleString()}
+                </span>
+              </div>
+              <Button
+                className="bg-orange-500 font-semibold text-white hover:bg-orange-600"
+                disabled={!selectedOfferLines.length}
+                isLoading={command.isPending}
+                onClick={() =>
+                  undecidedVariants.length
+                    ? setConfirmDecisionsOpen(true)
+                    : confirmSelections()
+                }
+              >
+                <Check className="h-4 w-4" /> Checkout ({selectedOfferLines.length})
+              </Button>
+            </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -60,6 +60,13 @@ import { SupplierOrderQueue } from "./SupplierOrderQueue";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
+const variantLabel = (variant: any) =>
+  variant.customLabel ||
+  [variant.size, variant.material, variant.colour]
+    .filter(Boolean)
+    .join(" / ") ||
+  "Standard";
+
 const GROUP_META: Record<
   SourcingPresentationGroup,
   {
@@ -442,6 +449,44 @@ export default function SourcingPortal({
                                 : new Date(item.createdAt).toLocaleDateString()}
                               {statusMessage && <span className={isDue ? "font-medium text-destructive" : "text-muted-foreground"}> · {statusMessage}</span>}
                             </p>
+                            {isAdminView &&
+                              !item.orders?.length &&
+                              item.variants?.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                  {item.variants
+                                    .filter(
+                                      (variant: any) =>
+                                        variant.requestQuote !== false &&
+                                        variant.origin === "admin",
+                                    )
+                                    .slice(0, 4)
+                                    .map((variant: any) => (
+                                      <span
+                                        key={variant.id}
+                                        className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                                        title={`${variantLabel(variant)} · ${variant.requestedQuantity} units`}
+                                      >
+                                        {variantLabel(variant)} ·{" "}
+                                        {variant.requestedQuantity}
+                                      </span>
+                                    ))}
+                                  {item.variants.filter(
+                                    (variant: any) =>
+                                      variant.requestQuote !== false &&
+                                      variant.origin === "admin",
+                                  ).length > 4 && (
+                                    <span className="px-1 text-xs text-muted-foreground">
+                                      +
+                                      {item.variants.filter(
+                                        (variant: any) =>
+                                          variant.requestQuote !== false &&
+                                          variant.origin === "admin",
+                                      ).length - 4}{" "}
+                                      more
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                           </div>
                         </div>
                         <div className="pt-1 text-sm text-muted-foreground">{item.assignee?.name || item.assignee?.email || "Unassigned"}</div>

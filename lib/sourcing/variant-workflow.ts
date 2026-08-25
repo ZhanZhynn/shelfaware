@@ -813,8 +813,15 @@ export async function runVariantSourcingCommand(
       select: { sourcingCostConfig: true },
     });
     const selectedLineIds = command.selections.flatMap((selection) =>
-      selection.quoteLineId ? [selection.quoteLineId] : [],
+      selection.status === "selected" && selection.quoteLineId
+        ? [selection.quoteLineId]
+        : [],
     );
+    if (new Set(selectedLineIds).size !== selectedLineIds.length)
+      throw new SourcingAccessError(
+        "A supplier offer can only be selected for one variant",
+        400,
+      );
     const lines = await prisma.sourcingQuoteLine.findMany({
       where: { id: { in: selectedLineIds }, workspaceId: item.workspaceId },
       include: { quote: true },
@@ -855,6 +862,23 @@ export async function runVariantSourcingCommand(
         marketPack: undefined,
       }));
     const finalSelections = [...command.selections, ...autoSkippedSelections];
+    if (item.version !== command.version)
+      throw new SourcingAccessError(
+        "This case has changed. Refresh and try again.",
+        409,
+      );
+    // MongoDB does not release a unique index value until a transaction
+    // commits. Remove prior selections before the creation transaction.
+    await prisma.sourcingVariantSelection.deleteMany({
+      where: {
+        OR: [
+          { caseId },
+          ...(selectedLineIds.length
+            ? [{ quoteLineId: { in: selectedLineIds } }]
+            : []),
+        ],
+      },
+    });
     return prisma.$transaction(async (tx) => {
       const current = await tx.sourcingCase.findUnique({
         where: { id: caseId },
@@ -877,14 +901,14 @@ export async function runVariantSourcingCommand(
           }),
         ),
       );
-      await tx.sourcingVariantSelection.deleteMany({ where: { caseId } });
       await tx.sourcingVariantSelection.createMany({
         data: finalSelections.map((selection) => ({
           workspaceId: item.workspaceId,
           caseId,
           caseVariantId: selection.caseVariantId,
-          quoteLineId:
-            selection.status === "selected" ? selection.quoteLineId : null,
+          ...(selection.status === "selected" && selection.quoteLineId
+            ? { quoteLineId: selection.quoteLineId }
+            : {}),
           status: selection.status,
           skipReason:
             selection.status === "skipped"
@@ -893,6 +917,7 @@ export async function runVariantSourcingCommand(
           marketValidationWaived:
             selection.status === "selected" && !selection.marketPriceMyr,
           decidedById: actor.id,
+          decidedAt: new Date(),
         })),
       });
       const updated = await tx.sourcingCase.update({
@@ -916,7 +941,7 @@ export async function runVariantSourcingCommand(
   }
   if (command.action !== "create_variant_orders")
     throw new SourcingAccessError("Unknown variant sourcing command", 400);
-  if (item.stage !== "approved")
+  if (!["approved", "order_pending"].includes(item.stage))
     throw new SourcingAccessError(
       "Confirm selections before creating purchase orders",
       409,
@@ -930,6 +955,7 @@ export async function runVariantSourcingCommand(
             quoteLine: { include: { quote: true, caseVariant: true } },
           },
         },
+        orders: { select: { quoteId: true } },
       },
     });
     if (!current || current.version !== command.version)
@@ -937,6 +963,7 @@ export async function runVariantSourcingCommand(
         "This case has changed. Refresh and try again.",
         409,
       );
+    const existingQuoteIds = new Set(current.orders.map((order) => order.quoteId));
     const selected = current.selections.filter(
       (selection) => selection.status === "selected" && selection.quoteLine,
     );
@@ -948,8 +975,17 @@ export async function runVariantSourcingCommand(
     const byQuote = new Map<string, typeof selected>();
     for (const selection of selected) {
       const quoteId = selection.quoteLine!.quoteId;
+      if (existingQuoteIds.has(quoteId)) continue;
+      if (command.quoteId && quoteId !== command.quoteId) continue;
       byQuote.set(quoteId, [...(byQuote.get(quoteId) || []), selection]);
     }
+    if (!byQuote.size)
+      throw new SourcingAccessError(
+        command.quoteId
+          ? "This supplier order has already been created"
+          : "All supplier orders have already been created",
+        409,
+      );
     const purchaseOrderIds: string[] = [];
     for (const [quoteId, selections] of byQuote) {
       const header = selections[0]!.quoteLine!.quote;

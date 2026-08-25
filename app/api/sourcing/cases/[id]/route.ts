@@ -74,7 +74,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (!item) return NextResponse.json({ error: "Sourcing case not found" }, { status: 404 });
       const access = await requireWorkspaceRole(user, item.workspaceId, ["admin"]);
       if (!access.globalAdmin && access.role !== "admin") throw new SourcingAccessError("Only workspace admins can edit requests", 403);
-      if (item.stage !== "draft") return NextResponse.json({ error: "Only draft requests can be edited" }, { status: 409 });
+       if (!["draft", "sourcing", "changes_requested", "quoted"].includes(item.stage)) return NextResponse.json({ error: "Requests cannot be edited at this stage" }, { status: 409 });
       if (item.version !== input.version) return NextResponse.json({ error: "This request has changed. Refresh and try again." }, { status: 409 });
       const updated = await prisma.sourcingCase.update({
         where: { id },

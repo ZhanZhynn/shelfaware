@@ -2,7 +2,6 @@
 /* eslint-disable @next/next/no-img-element -- sourcing attachments require authenticated URLs. */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
@@ -145,7 +144,6 @@ export default function VariantSourcingCaseDetail({
   basePath: string;
 }) {
   const { data: item, isLoading, error } = useSourcingCase(caseId);
-  const router = useRouter();
   const command = useSourcingCommand();
   const comment = useCreateSourcingComment();
   const uploadAttachment = useUploadSourcingAttachment();
@@ -703,7 +701,9 @@ export default function VariantSourcingCaseDetail({
       },
       {
         onSuccess: () => {
-          router.push(`${basePath}/${item.id}/review`);
+          // The case stage changes as part of this mutation. Use a full navigation
+          // so the approved detail never flashes before the order review loads.
+          window.location.assign(`${basePath}/${item.id}/review`);
         },
       },
     );
@@ -2942,6 +2942,69 @@ export default function VariantSourcingCaseDetail({
           </CardContent>
         </Card>
       )}
+      {admin && decisionsLocked && submittedLines.length > 0 && (
+        <Card id="historical-variant-offers">
+          <details>
+            <summary className="cursor-pointer list-none px-6 py-5 font-semibold">
+              Historical offer comparison
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                Read-only record of supplier offers and selections
+              </span>
+            </summary>
+            <CardContent className="overflow-x-auto border-t p-0">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="bg-muted/50 text-left text-muted-foreground">
+                  <tr>
+                    <th className="p-3">Variant / supplier</th>
+                    <th className="p-3">Quote</th>
+                    <th className="p-3">Landed cost</th>
+                    <th className="p-3">Market / margin</th>
+                    <th className="p-3">MOQ / lead time</th>
+                    <th className="p-3">Decision</th>
+                  </tr>
+                </thead>
+                {item.variants.map((variant: any) => {
+                  const variantOffers = submittedLines.filter(
+                    (line: any) => line.caseVariantId === variant.id,
+                  );
+                  const image = variantAttachments.find(
+                    (attachment: any) =>
+                      attachment.caseVariantId === variant.id &&
+                      attachment.mimeType?.startsWith("image/"),
+                  );
+                  return (
+                    <tbody key={variant.id} className="border-b-8 border-white">
+                      <tr className="bg-muted/20">
+                        <td className="p-3" colSpan={6}>
+                          <div className="flex items-center gap-3">
+                            {image && <img className="h-9 w-9 rounded border object-cover" src={image.url} alt={label(variant)} />}
+                            <div><p className="font-semibold">{label(variant)}</p><p className="text-xs text-muted-foreground">Requested {variant.requestedQuantity} · {selected[variant.id] ? "Offer selected" : skipped[variant.id] ? `Skipped: ${skipped[variant.id]}` : "No decision recorded"}</p></div>
+                          </div>
+                        </td>
+                      </tr>
+                      {variantOffers.map((offer: any) => {
+                        const result = variantViability(offer, costConfig, {
+                          marketPriceMyr: variant.marketPriceMyr ?? undefined,
+                          marketPack: variant.marketPack ?? 1,
+                        }).result;
+                        const chosen = selected[variant.id] === offer.id;
+                        return <tr key={offer.id} className={chosen ? "bg-sky-50/60" : ""}>
+                          <td className="p-3 font-medium">{offer.quote.supplierName}</td>
+                          <td className="p-3">CNY {offer.unitPriceRmb ?? "-"} / unit<span className="block text-xs text-muted-foreground">{offer.piecesPerSellingUnit ?? "-"} pcs / unit</span></td>
+                          <td className="p-3">{result ? `RM ${result.landed.toFixed(2)}` : "-"}</td>
+                          <td className="p-3">{result?.marketPerPiece ? `RM ${result.marketPerPiece.toFixed(2)} · ${result.marginPercent?.toFixed(1)}%` : "Market unchecked"}</td>
+                          <td className="p-3">MOQ {offer.moq || "-"}<span className="block text-xs text-muted-foreground">{offer.leadTimeDays || offer.quote.leadTimeDays || "-"} days</span></td>
+                          <td className="p-3">{chosen ? <Badge className="bg-emerald-100 text-emerald-800">Selected</Badge> : offer.reviewStatus === "rejected" ? <Badge variant="destructive">Rejected</Badge> : <span className="text-muted-foreground">Not selected</span>}</td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  );
+                })}
+              </table>
+            </CardContent>
+          </details>
+        </Card>
+      )}
       {admin && (
         <Dialog
           open={!!skipDialogVariantId}
@@ -3147,18 +3210,46 @@ export default function VariantSourcingCaseDetail({
           <CardHeader>
             <CardTitle>Purchase orders</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {item.orders.map((order: any) => (
-              <Link
-                key={order.id}
-                className="block rounded border p-3 hover:bg-muted/50"
-                href={`${basePath.includes("/admin") ? "/admin/purchase-orders" : "/sourcing/purchase-orders"}/${order.purchaseOrderId}`}
-              >
-                {order.purchaseOrder?.poNumber} ·{" "}
-                {order.purchaseOrder?.supplier?.name} ·{" "}
-                {order.purchaseOrder?.items?.length} variant lines
-              </Link>
-            ))}
+          <CardContent className="space-y-3">
+            {Object.values(
+              item.orders.reduce((groups: Record<string, any[]>, order: any) => {
+                const supplier = order.purchaseOrder?.supplier;
+                const key = supplier?.id || supplier?.name || "unknown";
+                (groups[key] ||= []).push(order);
+                return groups;
+              }, {}),
+            ).map((supplierOrders: any) => {
+              const supplier = supplierOrders[0]?.purchaseOrder?.supplier;
+              const orders = supplierOrders.map((order: any) => order.purchaseOrder).filter(Boolean);
+              const items = orders.flatMap((order: any) => order.items || []);
+              const units = items.reduce((sum: number, entry: any) => sum + Number(entry.quantity || 0), 0);
+              const total = orders.reduce((sum: number, order: any) => sum + Number(order.totalAmount || 0), 0);
+              const currency = orders[0]?.currency || "CNY";
+              return (
+                <div key={supplier?.id || supplier?.name} className="overflow-hidden rounded-md border">
+                  <div className="flex flex-wrap items-center gap-3 bg-muted/50 px-4 py-3 text-sm">
+                    <div className="min-w-0 flex-1"><p className="font-semibold">{supplier?.name || "Unknown supplier"} <span className="ml-2 font-normal text-muted-foreground">{orders.length} PO{orders.length === 1 ? "" : "s"} · {items.length} product{items.length === 1 ? "" : "s"} · {units.toLocaleString()} units</span></p></div>
+                    <p className="font-medium">{currency} {total.toLocaleString()}</p>
+                  </div>
+                  <div className="divide-y">
+                    {orders.map((order: any) => (
+                      <div key={order.id}>
+                        <div className="flex items-center justify-between gap-3 bg-muted/20 px-4 py-2 text-xs text-muted-foreground"><span>{order.poNumber}</span><Link className="text-sky-600 hover:underline" href={`${basePath.includes("/admin") ? "/admin/purchase-orders" : "/sourcing/purchase-orders"}/${order.id}`}>View purchase order</Link></div>
+                        {(order.items || []).map((entry: any, index: number) => {
+                          const image = variantAttachments.find((attachment: any) => attachment.caseVariantId === entry.sourcingCaseVariantId && attachment.mimeType?.startsWith("image/"));
+                          return <div key={entry.id} className="grid grid-cols-[minmax(220px,1fr)_90px_100px_120px] gap-3 px-4 py-3 text-sm">
+                            <div className="flex min-w-0 gap-3">{image ? <img src={image.url} alt={entry.productName} className="h-12 w-12 shrink-0 rounded border object-cover" /> : <div className="h-12 w-12 shrink-0 rounded border bg-muted" />}<div className="min-w-0"><p className="line-clamp-2 font-medium">{entry.productName}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{entry.sku || "No SKU"} · {currency} {Number(entry.unitCost || 0).toLocaleString()} each</p></div></div>
+                            <span className="pt-1">x{Number(entry.quantity || 0).toLocaleString()}</span>
+                            {index === 0 ? <Badge variant="secondary" className="h-fit w-fit capitalize">{order.status}</Badge> : <span />}
+                            {index === 0 ? <span className="pt-1 font-medium">{currency} {Number(order.totalAmount || 0).toLocaleString()}</span> : <span />}
+                          </div>;
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

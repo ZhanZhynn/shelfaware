@@ -923,7 +923,8 @@ export async function runVariantSourcingCommand(
       const updated = await tx.sourcingCase.update({
         where: { id: caseId },
         data: {
-          stage: "approved",
+          // Selections remain in review until an actual supplier PO is created.
+          // This preserves the offer comparison and its checkout state on failure.
           version: { increment: 1 },
           updatedAt: new Date(),
         },
@@ -941,9 +942,9 @@ export async function runVariantSourcingCommand(
   }
   if (command.action !== "create_variant_orders")
     throw new SourcingAccessError("Unknown variant sourcing command", 400);
-  if (!["approved", "order_pending"].includes(item.stage))
+  if (!["quoted", "order_pending"].includes(item.stage))
     throw new SourcingAccessError(
-      "Confirm selections before creating purchase orders",
+      "Select offers before creating purchase orders",
       409,
     );
   return prisma.$transaction(async (tx) => {

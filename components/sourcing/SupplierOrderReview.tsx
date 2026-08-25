@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { ArrowLeft, Check, PackagePlus } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,8 +23,12 @@ export default function SupplierOrderReview({
 }) {
   const { data: item, isLoading, error } = useSourcingCase(caseId);
   const command = useSourcingCommand();
+  const [mounted, setMounted] = useState(false);
 
-  if (isLoading)
+  useEffect(() => setMounted(true), []);
+
+  // Keep the SSR and hydration shells stable while the browser query starts.
+  if (!mounted || isLoading)
     return (
       <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
         <div className="h-64 animate-pulse rounded-xl bg-muted" />
@@ -36,7 +41,7 @@ export default function SupplierOrderReview({
       </main>
     );
 
-  const reviewable = ["approved", "order_pending"].includes(item.stage);
+  const reviewable = ["quoted", "order_pending"].includes(item.stage);
   const submittedLines = item.quotes.flatMap((quote: any) =>
     ["submitted", "changes_requested"].includes(quote.status)
       ? quote.lines.map((line: any) => ({ ...line, quote }))

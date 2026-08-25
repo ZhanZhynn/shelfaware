@@ -28,6 +28,9 @@ export default function SourcingVariantEditPage({ caseId }: { caseId: string }) 
   const [title, setTitle] = useState("");
   const [requestedQuantity, setRequestedQuantity] = useState("");
   const [specifications, setSpecifications] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!item?.variants) return;
@@ -52,7 +55,9 @@ export default function SourcingVariantEditPage({ caseId }: { caseId: string }) 
     setSpecifications(item.specifications || "");
   }, [item?.id]);
 
-  if (isLoading) return <main className="mx-auto max-w-3xl p-6"><div className="h-64 animate-pulse rounded-xl bg-muted" /></main>;
+  // The query can briefly report an error on the client's first render while its
+  // browser request starts; keep the SSR and hydration shells identical.
+  if (!mounted || isLoading) return <main className="mx-auto max-w-3xl p-6"><div className="h-64 animate-pulse rounded-xl bg-muted" /></main>;
   if (error || !item) return <main className="p-6 text-destructive">Unable to load sourcing request.</main>;
   const editable = ["draft", "sourcing", "changes_requested", "quoted"].includes(item.stage);
   const save = async () => {

@@ -63,28 +63,31 @@ export async function GET(request: NextRequest) {
       include: sourcingListInclude,
       orderBy: { updatedAt: "desc" },
     });
-    const assigneeIds = [
+    const userIds = [
       ...new Set(
-        cases.flatMap((item) => (item.assignedToId ? [item.assignedToId] : [])),
+        cases.flatMap((item) =>
+          [item.assignedToId, item.createdById].filter(
+            (id): id is string => Boolean(id),
+          ),
+        ),
       ),
     ];
-    const assignees = assigneeIds.length
+    const users = userIds.length
       ? await prisma.user.findMany({
-          where: { id: { in: assigneeIds } },
-          select: { id: true, name: true, email: true },
+          where: { id: { in: userIds } },
+          select: { id: true, name: true, email: true, image: true },
         })
       : [];
-    const assigneeById = new Map(
-      assignees.map((assignee) => [assignee.id, assignee]),
-    );
+    const userById = new Map(users.map((entry) => [entry.id, entry]));
     const canOrder = access.globalAdmin || access.role === "admin";
     return NextResponse.json(
       cases.map((item) =>
         normalizeSourcingListCase({
           ...item,
           assignee: item.assignedToId
-            ? (assigneeById.get(item.assignedToId) ?? null)
+            ? (userById.get(item.assignedToId) ?? null)
             : null,
+          requester: userById.get(item.createdById) ?? null,
           capabilities: { canOrder: canOrder && item.stage === "approved" },
         }),
       ),

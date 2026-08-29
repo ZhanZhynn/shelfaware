@@ -126,7 +126,7 @@ export function SupplierOrderQueue({
             </div>
             <div className="divide-y">
               {group.orders.map((order) => <div key={order.id}>
-                <div className="flex items-center justify-between bg-muted/30 px-4 py-2 text-xs text-muted-foreground"><span>{order.poNumber} · <Link className="hover:underline" href={`${basePath}/${order.sourcingCase.id}`}>{order.sourcingCase.title}</Link></span><span>{order.supplierOrderReference ? `Ref: ${order.supplierOrderReference}` : ""}</span></div>
+                <div className="flex items-center justify-between bg-muted/30 px-4 py-2 text-xs text-muted-foreground"><span>Order ID: <Link className="hover:underline" href={`${basePath}/${order.sourcingCase.id}`}>{order.poNumber} · {order.sourcingCase.title}</Link></span><span>{order.supplierOrderReference ? `Ref: ${order.supplierOrderReference}` : ""}</span></div>
                 {order.items.map((item, index) => <div key={item.id} className="grid grid-cols-[minmax(280px,1fr)_100px_100px_120px_115px] gap-3 px-4 py-3 text-sm">
                   <div className="flex min-w-0 gap-3">
                     {order.sourcingCase.attachments[0] ? <img src={order.sourcingCase.attachments[0].url} alt={order.sourcingCase.attachments[0].fileName || item.productName} className="h-12 w-12 shrink-0 rounded border object-cover" /> : <div className="h-12 w-12 shrink-0 rounded border bg-muted" />}

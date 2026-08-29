@@ -116,12 +116,12 @@ export function SourcingVariantBuilder({
             axis.options.find((option) => option.value === variant[field]),
           )
           .filter((option): option is Option => Boolean(option));
-        const imageKey = options[0]?.id;
-        if (variant.imageKey && imageKey) previewMoves[variant.imageKey] = imageKey;
+        const clientKey = keyFor(options);
+        if (variant.imageKey && clientKey) previewMoves[variant.imageKey] = clientKey;
         return {
           ...variant,
-          clientKey: keyFor(options),
-          imageKey,
+          clientKey,
+          imageKey: clientKey,
         };
       });
       setAxes(next);
@@ -154,7 +154,7 @@ export function SourcingVariantBuilder({
       return {
         ...(existing || newVariantDraft()),
         clientKey,
-        imageKey: options[0]?.id,
+        imageKey: clientKey,
         size: options[0]?.value || "",
         material: options[1]?.value || "",
         colour: options[2]?.value || "",
@@ -180,29 +180,86 @@ export function SourcingVariantBuilder({
             .some((optionId) => blankOptionIds.has(optionId)),
         )
       : [];
-    const nextByKey = new Map(
-      nextVariants.map((variant) => [variant.clientKey, variant]),
-    );
+    // No axis has produced combinations yet, so every existing row still belongs.
+    if (nextVariants.length === 0) {
+      if (variants.length) onChange(variants);
+      return;
+    }
     const retainedKeys = new Set(
       retainedRows.map((variant) => variant.clientKey),
     );
-    const mergedRows = [
-      ...variants
-        .map(
-          (variant) =>
-            nextByKey.get(variant.clientKey) ||
-            (retainedKeys.has(variant.clientKey) ? variant : null),
+    const merged = [...nextVariants];
+    const comboKeys = new Set(merged.map((variant) => variant.clientKey));
+    const claimed = new Set<string>();
+    const moves: Record<string, string> = {};
+    // Rows that do not match a new combination exactly (an axis was added or
+    // removed) inherit their data and image into the combination they best
+    // overlap, so collapsing variations never wipes entered inputs.
+    const unmatched = variants.filter(
+      (variant) =>
+        !comboKeys.has(variant.clientKey) &&
+        !retainedKeys.has(variant.clientKey),
+    );
+    for (const variant of unmatched) {
+      const ids = variant.clientKey.split(":");
+      const target = merged
+        .map((candidate) => {
+          const candidateIds = candidate.clientKey.split(":");
+          return {
+            candidate,
+            overlap: candidateIds.filter((id) => ids.includes(id)).length,
+            subset: ids.every((id) => candidateIds.includes(id)),
+          };
+        })
+        .filter(
+          (entry) =>
+            entry.overlap > 0 && !claimed.has(entry.candidate.clientKey),
         )
-        .filter((variant): variant is VariantDraft => variant !== null),
-      ...nextVariants.filter(
-        (variant) =>
-          !variants.some(
-            (existing) => existing.clientKey === variant.clientKey,
-          ),
+        .sort(
+          (a, b) =>
+            b.overlap - a.overlap ||
+            Number(b.subset) - Number(a.subset),
+        )[0];
+      if (!target) continue;
+      const index = merged.findIndex(
+        (candidate) => candidate.clientKey === target.candidate.clientKey,
+      );
+      if (index === -1) continue;
+      merged[index] = {
+        ...variant,
+        clientKey: target.candidate.clientKey,
+        imageKey: target.candidate.clientKey,
+        size: target.candidate.size,
+        material: target.candidate.material,
+        colour: target.candidate.colour,
+      };
+      claimed.add(target.candidate.clientKey);
+      if (variant.clientKey !== target.candidate.clientKey)
+        moves[variant.clientKey] = target.candidate.clientKey;
+    }
+    const mergedRows = [
+      ...retainedRows.filter(
+        (variant) => !comboKeys.has(variant.clientKey),
       ),
+      ...merged,
     ];
     // A temporarily blank option is validation state, not an instruction to discard its row data.
     if (mergedRows.length) onChange(mergedRows);
+    for (const [from, to] of Object.entries(moves)) {
+      const file = images[from];
+      if (file) {
+        onImageChange(to, file);
+        onImageChange(from, undefined);
+      }
+      const preview = imagePreviews[from];
+      if (preview)
+        setImagePreviews((current) => {
+          const nextPreviews = { ...current };
+          delete nextPreviews[from];
+          nextPreviews[to] = preview;
+          return nextPreviews;
+        });
+    }
   };
   const updateVariant = (clientKey: string, patch: Partial<VariantDraft>) =>
     onChange(
@@ -210,8 +267,17 @@ export function SourcingVariantBuilder({
         variant.clientKey === clientKey ? { ...variant, ...patch } : variant,
       ),
     );
+  // Images belong to individual variant rows, so an option "has an image" only
+  // when some row containing it carries one.
+  const optionHasImage = (optionId: string) =>
+    variants.some(
+      (variant) =>
+        variant.imageKey &&
+        variant.clientKey.split(":").includes(optionId) &&
+        (!!images[variant.imageKey] || !!imagePreviews[variant.imageKey]),
+    );
   const updateOption = (axisId: string, optionId: string, value: string) => {
-    const hasImage = !!images[optionId] || !!imagePreviews[optionId];
+    const hasImage = optionHasImage(optionId);
     setOptionErrors((current) => ({
       ...current,
       [optionId]: hasImage && !value.trim(),
@@ -246,8 +312,13 @@ export function SourcingVariantBuilder({
         ...current,
         [imageKey]: URL.createObjectURL(file),
       }));
+    // Single-axis rows key images by their option id; combination rows key by
+    // row, so the blank-option guard only applies to the former.
     if (
       file &&
+      axes.some((axis) =>
+        axis.options.some((option) => option.id === imageKey),
+      ) &&
       !axes.some((axis) =>
         axis.options.some(
           (option) => option.id === imageKey && option.value.trim(),
@@ -258,7 +329,7 @@ export function SourcingVariantBuilder({
     onImageChange(imageKey, file);
   };
   const removeOption = (axisId: string, optionId: string) => {
-    if (images[optionId] || imagePreviews[optionId]) {
+    if (optionHasImage(optionId)) {
       setOptionErrors((current) => ({ ...current, [optionId]: true }));
       return;
     }
@@ -285,7 +356,9 @@ export function SourcingVariantBuilder({
           imageKey: firstOption.id,
         }
       : null;
-  const displayVariants = hasCombinations
+  // Rows keyed to the filled axes still render while another variation is
+  // awaiting its first option; the single-axis placeholder covers the empty start.
+  const displayVariants = hasCombinations || variants.length
     ? variants
     : placeholderVariant
       ? [placeholderVariant]
@@ -298,8 +371,9 @@ export function SourcingVariantBuilder({
           !!variant.productUrl ||
           !!variant.remarks ||
           variant.requestedQuantity !== 1 ||
-          !!images[optionId] ||
-          !!imagePreviews[optionId]),
+          (!!variant.imageKey &&
+            (!!images[variant.imageKey] ||
+              !!imagePreviews[variant.imageKey]))),
     );
 
   return (

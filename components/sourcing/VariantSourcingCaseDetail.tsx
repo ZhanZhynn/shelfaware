@@ -653,12 +653,21 @@ export default function VariantSourcingCaseDetail({
     setSupplierSearch("");
     setSupplierPickerOpen(false);
   };
-  const applyBatch = () => {
+  const allQuoteLineIds = [
+    ...item.variants
+      .filter(
+        (variant: any) =>
+          variant.requestQuote !== false && variant.origin === "admin",
+      )
+      .map((variant: any) => variant.id),
+    ...proposals.map((proposal) => proposal.clientKey),
+  ];
+  const applyBatch = (targetIds: string[] = batchVariantIds) => {
     setLines((current) => ({
       ...current,
       ...Object.fromEntries(
         item.variants
-          .filter((variant: any) => batchVariantIds.includes(variant.id))
+          .filter((variant: any) => targetIds.includes(variant.id))
           .map((variant: any) => {
             const line = { ...(current[variant.id] || emptyLine()) };
             for (const [field, value] of Object.entries(batch))
@@ -669,7 +678,7 @@ export default function VariantSourcingCaseDetail({
     }));
     setProposals((current) =>
       current.map((proposal) => {
-        if (!batchVariantIds.includes(proposal.clientKey)) return proposal;
+        if (!targetIds.includes(proposal.clientKey)) return proposal;
         const next = { ...proposal };
         for (const [field, value] of Object.entries(batch))
           if (value !== "") (next as any)[field] = value;
@@ -1075,7 +1084,11 @@ export default function VariantSourcingCaseDetail({
                         variant="outline"
                         role="combobox"
                         aria-expanded={supplierPickerOpen}
-                        className="justify-between font-normal"
+                        className={`justify-between font-normal ${
+                          !supplierName.trim()
+                            ? "border-red-400 bg-red-50 text-amber-950 hover:bg-red-50"
+                            : ""
+                        }`}
                       >
                         {supplierName || "Search or add a supplier"}
                         <ChevronsUpDown className="h-4 w-4 opacity-50" />
@@ -1142,40 +1155,31 @@ export default function VariantSourcingCaseDetail({
                     placeholder="Payment terms (optional)"
                   />
                 </div>
+                {submitBlocker && !quoteSheetLocked && (
+                  <div
+                    className={`rounded-md border px-3 py-2 text-sm ${
+                      !supplierName.trim()
+                        ? "border-amber-300 bg-amber-50 text-amber-900"
+                        : "border-sky-300 bg-sky-50 text-sky-900"
+                    }`}
+                    role="status"
+                  >
+                    <span className="font-medium">Before submitting:</span>{" "}
+                    {submitBlocker}
+                  </div>
+                )}
                 <div className="w-full max-w-full overflow-x-auto">
                   <table className="w-full min-w-[1300px] text-sm">
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
                         <th className="w-10 p-2">
                           <Checkbox
-                            checked={[
-                              ...item.variants
-                                .filter(
-                                  (variant: any) =>
-                                    variant.requestQuote !== false &&
-                                    variant.origin === "admin",
-                                )
-                                .map((variant: any) => variant.id),
-                              ...proposals.map(
-                                (proposal) => proposal.clientKey,
-                              ),
-                            ].every((id) => batchVariantIds.includes(id))}
+                            checked={allQuoteLineIds.every((id) =>
+                              batchVariantIds.includes(id),
+                            )}
                             onCheckedChange={(checked) =>
                               setBatchVariantIds(
-                                checked
-                                  ? [
-                                    ...item.variants
-                                      .filter(
-                                        (variant: any) =>
-                                          variant.requestQuote !== false &&
-                                          variant.origin === "admin",
-                                      )
-                                      .map((variant: any) => variant.id),
-                                    ...proposals.map(
-                                      (proposal) => proposal.clientKey,
-                                    ),
-                                  ]
-                                  : [],
+                                checked ? [...allQuoteLineIds] : [],
                               )
                             }
                             aria-label="Select all variants"
@@ -1208,9 +1212,19 @@ export default function VariantSourcingCaseDetail({
                               variant="outline"
                               className="h-8"
                               disabled={!batchVariantIds.length}
-                              onClick={applyBatch}
+                              onClick={() => applyBatch()}
                             >
                               Apply
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8"
+                              disabled={!allQuoteLineIds.length}
+                              onClick={() => applyBatch(allQuoteLineIds)}
+                            >
+                              Apply to all
                             </Button>
                           </div>
                         </td>
@@ -2199,7 +2213,7 @@ export default function VariantSourcingCaseDetail({
                   type="button"
                   variant="outline"
                   disabled={!batchVariantIds.length}
-                  onClick={applyBatch}
+                  onClick={() => applyBatch()}
                 >
                   Apply to selected variants
                 </Button>

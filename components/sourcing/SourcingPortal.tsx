@@ -60,6 +60,19 @@ import { SupplierOrderQueue } from "./SupplierOrderQueue";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
+const stageFilterOrder = [
+  "draft",
+  "sourcing",
+  "changes_requested",
+  "quoted",
+  "approved",
+  "order_pending",
+  "ordered",
+  "shipping",
+  "received",
+  "cancelled",
+];
+
 const variantLabel = (variant: any) =>
   variant.customLabel ||
   [variant.size, variant.material, variant.colour]
@@ -178,6 +191,7 @@ export default function SourcingPortal({
   const [groupFilter, setGroupFilter] = useState<
     SourcingPresentationGroup | "all"
   >("needs_action");
+  const [stageFilter, setStageFilter] = useState("all");
   const [pendingAction, setPendingAction] = useState<{
     type: "cancel" | "delete";
     item: any;
@@ -219,14 +233,31 @@ export default function SourcingPortal({
     },
     {} as Record<string, number>,
   );
+  const groupCases = cases.filter(
+    (item: any) =>
+      groupFilter === "all" || groupOf(stageOf(item)) === groupFilter,
+  );
+  const stageCounts = groupCases.reduce(
+    (acc: Record<string, number>, item: any) => {
+      const stage = stageOf(item);
+      acc[stage] = (acc[stage] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+  const availableStageFilters = stageFilterOrder.filter(
+    (stage) => stageCounts[stage],
+  );
 
   const filtered = cases.filter((item: any) => {
     const matchesGroup =
       groupFilter === "all" || groupOf(stageOf(item)) === groupFilter;
+    const matchesStage =
+      stageFilter === "all" || stageOf(item) === stageFilter;
     const matchesSearch = item.title
       .toLowerCase()
       .includes(search.toLowerCase());
-    return matchesGroup && matchesSearch;
+    return matchesGroup && matchesStage && matchesSearch;
   });
 
   const canAssign =
@@ -327,7 +358,10 @@ export default function SourcingPortal({
                     <button
                       key={key}
                       type="button"
-                      onClick={() => setGroupFilter(key)}
+                  onClick={() => {
+                    setGroupFilter(key);
+                    setStageFilter("all");
+                  }}
                       className={`border-b-2 px-1 pb-3 text-sm font-medium transition-colors ${isActive
                         ? "border-primary text-primary"
                         : "border-transparent text-muted-foreground hover:text-foreground"
@@ -343,6 +377,30 @@ export default function SourcingPortal({
                   );
                 })}
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-b pb-3 text-sm">
+              <span className="mr-1 font-medium text-muted-foreground">
+                Request status
+              </span>
+              {(["all", ...availableStageFilters] as const).map((stage) => {
+                const active = stageFilter === stage;
+                const count =
+                  stage === "all" ? groupCases.length : stageCounts[stage] || 0;
+                return (
+                  <button
+                    key={stage}
+                    type="button"
+                    onClick={() => setStageFilter(stage)}
+                    className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+                      active
+                        ? "border-primary text-primary"
+                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                    }`}
+                  >
+                    {stage === "all" ? "All" : stageLabel(stage)} ({count})
+                  </button>
+                );
+              })}
             </div>
 
             <div className="grid grid-cols-[minmax(260px,1fr)_140px_130px_110px] gap-3 bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
@@ -409,7 +467,7 @@ export default function SourcingPortal({
                   return (
                     <div
                       key={item.id}
-                      className={`grid cursor-pointer grid-cols-[minmax(260px,1fr)_140px_130px_110px] gap-3 rounded-md border border-l-4 ${meta.accent} bg-card p-3 transition-colors hover:bg-muted/40`}
+                      className={`cursor-pointer overflow-hidden rounded-md border border-l-4 ${meta.accent} bg-card transition-colors hover:bg-muted/40`}
                       role="link"
                       tabIndex={0}
                       onClick={() => router.push(`${basePath}/${item.id}`)}
@@ -420,6 +478,20 @@ export default function SourcingPortal({
                         }
                       }}
                     >
+                      <div className="flex items-center justify-between gap-3 bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                        <div className="flex min-w-0 items-center gap-2">
+                          {item.requester?.image ? (
+                            <img src={item.requester.image} alt="" className="h-5 w-5 rounded-full object-cover" />
+                          ) : (
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background text-[10px] font-medium text-foreground">
+                              {(item.requester?.name || item.requester?.email || "?").slice(0, 1).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="truncate">{item.requester?.name || item.requester?.email || "Unknown requester"}</span>
+                        </div>
+                        <span className="shrink-0" title={item.id}>Request ID {item.id}</span>
+                      </div>
+                      <div className="grid grid-cols-[minmax(260px,1fr)_140px_130px_110px] gap-3 p-3">
                         <div className="flex min-w-0 items-start gap-3">
                           {item.thumbnail && (
                             <>
@@ -565,6 +637,7 @@ export default function SourcingPortal({
                             </DropdownMenu>
                           )}
                         </div>
+                    </div>
                     </div>
                   );
                 })}

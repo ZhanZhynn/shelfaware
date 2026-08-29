@@ -39,6 +39,8 @@ export function useSupplierOrders(workspaceId: string) {
     queryFn: async () => (await apiClient.sourcing.supplierOrders(workspaceId)).data,
     enabled: !!workspaceId,
     staleTime: 0,
+    // Supplier actions are shared work; keep My Work current across users.
+    refetchInterval: 5_000,
   });
 }
 export function useBatchPlaceSupplierOrders() {

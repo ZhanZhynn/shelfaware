@@ -10,7 +10,7 @@ import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { ZodError } from "zod";
 
 export const sourcingListInclude = {
-  quotes: { select: { status: true } },
+  quotes: { select: { id: true, quoteGroupId: true, status: true } },
   // PO statuses let the portal show per-request shipping progress and target
   // the supplier order that still needs an action.
   orders: { include: { purchaseOrder: { select: { status: true } } } },

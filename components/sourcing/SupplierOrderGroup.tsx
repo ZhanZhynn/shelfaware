@@ -21,6 +21,7 @@ export type SupplierOrder = {
   totalAmount: number;
   supplierOrderReference?: string | null;
   supplier: { id: string; name: string };
+  sourcingCase?: { id: string; title: string };
   items: SupplierOrderItem[];
 };
 
@@ -32,13 +33,15 @@ const statusVariant = (status: string) =>
 
 export function SupplierOrderGroup({
   orders,
-  detailHref,
+  purchaseOrderHref,
+  requestHref,
   imageForItem,
   onArrangeOrder,
   onShipOrder,
 }: {
   orders: SupplierOrder[];
-  detailHref: (order: SupplierOrder) => string;
+  purchaseOrderHref: (order: SupplierOrder) => string;
+  requestHref?: (order: SupplierOrder) => string;
   imageForItem?: (order: SupplierOrder, item: SupplierOrderItem) => OrderImage;
   onArrangeOrder?: (order: SupplierOrder) => void;
   onShipOrder?: (order: SupplierOrder) => void;
@@ -77,9 +80,16 @@ export function SupplierOrderGroup({
                   ? ` · Ref: ${order.supplierOrderReference}`
                   : ""}
               </span>
-              <Link className="text-sky-600 hover:underline" href={detailHref(order)}>
-                View purchase order
-              </Link>
+              <span className="flex items-center gap-3">
+                {requestHref && order.sourcingCase && (
+                  <Link className="text-sky-600 hover:underline" href={requestHref(order)}>
+                    View request
+                  </Link>
+                )}
+                <Link className="text-sky-600 hover:underline" href={purchaseOrderHref(order)}>
+                  View purchase order
+                </Link>
+              </span>
             </div>
             {order.items.map((item, index) => {
               const image = imageForItem?.(order, item);
@@ -120,11 +130,11 @@ export function SupplierOrderGroup({
                   ) : <span />}
                   {index === 0 ? (
                     order.status === "approved" && onArrangeOrder ? (
-                      <Button size="sm" variant="link" className="h-auto justify-start px-0" onClick={() => onArrangeOrder(order)}>
+                      <Button size="default" variant="link" className="h-auto justify-start px-0" onClick={() => onArrangeOrder(order)}>
                         Arrange order
                       </Button>
                     ) : order.status === "ordered" && onShipOrder ? (
-                      <Button size="sm" variant="link" className="h-auto justify-start px-0" onClick={() => onShipOrder(order)}>
+                      <Button size="default" variant="link" className="h-auto justify-start px-0" onClick={() => onShipOrder(order)}>
                         Ship order
                       </Button>
                     ) : <span />

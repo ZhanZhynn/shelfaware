@@ -334,10 +334,21 @@ export default function VariantSourcingCaseDetail({
     item.stage === "quoted" && sheetsNeedingChanges.length
       ? "changes_requested"
       : item.stage;
-  const activeCorrection = item.events?.find(
-    (event: any) =>
-      event.type === "variant_quote_changes_requested" &&
-      event.payload?.quoteId === activeSheetId,
+  const activeSheet = supplierSheets.find(
+    (sheet: any) => sheet.id === activeSheetId,
+  );
+  const activeCorrection =
+    activeSheet?.status === "changes_requested"
+      ? item.events?.find(
+          (event: any) =>
+            event.type === "variant_quote_changes_requested" &&
+            event.payload?.quoteId === activeSheetId,
+        )
+      : undefined;
+  const correctionIssuesByVariantId = new Map<string, any>(
+    ((activeCorrection?.payload?.issues || []) as any[]).map(
+      (issue: any) => [issue.variantId, issue],
+    ),
   );
   const activeVariant = item.variants.find(
     (variant: any) => variant.id === activeVariantId,
@@ -479,7 +490,7 @@ export default function VariantSourcingCaseDetail({
       displayStage,
     )
       ? {
-        href: "#supplier-quote-sheets",
+        href: `${displayStage === "changes_requested" && sheetsNeedingChanges[0] ? `?sheet=${sheetsNeedingChanges[0].quoteGroupId || sheetsNeedingChanges[0].id}` : ""}#supplier-quote-sheets`,
         label:
           displayStage === "changes_requested"
             ? "Fix quote sheet"
@@ -582,9 +593,6 @@ export default function VariantSourcingCaseDetail({
       missingQuoteFields(line).includes(field)
       ? "border-destructive focus-visible:ring-destructive"
       : "";
-  const activeSheet = supplierSheets.find(
-    (sheet: any) => sheet.id === activeSheetId,
-  );
   const canWithdrawSheet =
     !admin && item.stage === "quoted" && activeSheet?.status === "submitted";
   const uploadProposalImages = async (result: any) => {
@@ -609,6 +617,7 @@ export default function VariantSourcingCaseDetail({
       quoteId: activeSheetId || undefined,
       quoteSheet: sheetPayload(),
     });
+    if (result?.id) setActiveSheetId(result.id);
     await uploadProposalImages(result);
   };
   const saveSheet = async () => {
@@ -694,7 +703,16 @@ export default function VariantSourcingCaseDetail({
   useEffect(() => {
     if (sheetSelectionInitialized.current || !defaultQuoteSheet) return;
     sheetSelectionInitialized.current = true;
-    selectSheet(defaultQuoteSheet);
+    const requestedGroupId = new URLSearchParams(
+      window.location.search,
+    ).get("sheet");
+    const requestedSheet = requestedGroupId
+      ? supplierSheets.find(
+          (sheet: any) =>
+            (sheet.quoteGroupId || sheet.id) === requestedGroupId,
+        )
+      : null;
+    selectSheet(requestedSheet || defaultQuoteSheet);
   }, [defaultQuoteSheet?.id]);
   const startNewQuoteSheet = () => {
     setActiveSheetId(null);
@@ -952,18 +970,6 @@ export default function VariantSourcingCaseDetail({
               </a>
             </Button>
           )}
-          {!admin &&
-            displayStage === "changes_requested" &&
-            sheetsNeedingChanges[0] && (
-              <Button asChild variant="destructive">
-                <a
-                  href="#supplier-quote-sheets"
-                  onClick={() => selectSheet(sheetsNeedingChanges[0])}
-                >
-                  Fix quote sheet
-                </a>
-              </Button>
-            )}
         </CardContent>
       </Card>
       {/* <Card> */}
@@ -1529,10 +1535,12 @@ export default function VariantSourcingCaseDetail({
                         )
                         .map((variant: any) => {
                           const line = lines[variant.id] || emptyLine();
+                          const correctionIssue =
+                            correctionIssuesByVariantId.get(variant.id);
                           return (
                             <tr
                               key={variant.id}
-                              className={`border-b align-top ${line.availability === "unavailable" ? "bg-muted/20 text-muted-foreground" : ""}`}
+                              className={`border-b align-top ${correctionIssue ? "bg-red-50/60 outline outline-1 -outline-offset-1 outline-red-500" : line.availability === "unavailable" ? "bg-muted/20 text-muted-foreground" : ""}`}
                             >
                               <td className="p-2">
                                 <Checkbox
@@ -1554,6 +1562,12 @@ export default function VariantSourcingCaseDetail({
                                 <div className="text-xs text-muted-foreground">
                                   Need {variant.requestedQuantity}
                                 </div>
+                                {correctionIssue && (
+                                  <div className="mt-1 text-xs font-medium text-red-600">
+                                    Changes requested:{" "}
+                                    {correctionIssue.fields.join(", ")}
+                                  </div>
+                                )}
                                 {variantAttachments.find(
                                   (attachment: any) =>
                                     attachment.caseVariantId === variant.id &&
@@ -3077,35 +3091,35 @@ export default function VariantSourcingCaseDetail({
                                   >
                                     Request changes
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={offerRejected}
-                                    className="text-destructive focus:text-destructive"
-                                    onClick={() => {
-                                      setSelected((current) => {
-                                        if (current[variant.id] !== offer.id)
-                                          return current;
-                                        const next = { ...current };
-                                        delete next[variant.id];
-                                        return next;
-                                      });
-                                      command.mutate({
-                                        id: item.id,
-                                        action: "reject_variant_offer",
-                                        version: item.version,
-                                        quoteLineId: offer.id,
-                                      });
-                                    }}
-                                  >
-                                    Reject offer
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSkipDialogVariantId(variant.id);
-                                      setSkipReason(skipped[variant.id] || "");
-                                    }}
-                                  >
-                                    Skip this variant
-                                  </DropdownMenuItem>
+                                  {/* <DropdownMenuItem */}
+                                  {/*   disabled={offerRejected} */}
+                                  {/*   className="text-destructive focus:text-destructive" */}
+                                  {/*   onClick={() => { */}
+                                  {/*     setSelected((current) => { */}
+                                  {/*       if (current[variant.id] !== offer.id) */}
+                                  {/*         return current; */}
+                                  {/*       const next = { ...current }; */}
+                                  {/*       delete next[variant.id]; */}
+                                  {/*       return next; */}
+                                  {/*     }); */}
+                                  {/*     command.mutate({ */}
+                                  {/*       id: item.id, */}
+                                  {/*       action: "reject_variant_offer", */}
+                                  {/*       version: item.version, */}
+                                  {/*       quoteLineId: offer.id, */}
+                                  {/*     }); */}
+                                  {/*   }} */}
+                                  {/* > */}
+                                  {/*   Reject offer */}
+                                  {/* </DropdownMenuItem> */}
+                                  {/* <DropdownMenuItem */}
+                                  {/*   onClick={() => { */}
+                                  {/*     setSkipDialogVariantId(variant.id); */}
+                                  {/*     setSkipReason(skipped[variant.id] || ""); */}
+                                  {/*   }} */}
+                                  {/* > */}
+                                  {/*   Skip this variant */}
+                                  {/* </DropdownMenuItem> */}
                                  </DropdownMenuContent>
                               </DropdownMenu>
                             </td>
@@ -3406,7 +3420,7 @@ export default function VariantSourcingCaseDetail({
               <SupplierOrderGroup
                 key={supplierOrders[0]?.purchaseOrder?.supplier?.id || supplierOrders[0]?.purchaseOrder?.supplier?.name}
                 orders={supplierOrders.map((order: any) => order.purchaseOrder).filter(Boolean)}
-                detailHref={(order) => `${basePath.includes("/admin") ? "/admin/purchase-orders" : "/sourcing/purchase-orders"}/${order.id}`}
+                purchaseOrderHref={(order) => `${basePath.includes("/admin") ? "/admin/purchase-orders" : "/sourcing/purchase-orders"}/${order.id}`}
                 imageForItem={(_, entry) =>
                   variantAttachments.find(
                     (attachment: any) =>

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { SupplierOrderQueue } from "./SupplierOrderQueue";
 import { SourcingRequestQueue } from "./SourcingRequestQueue";
 
-type Task = "quotes" | "to-order" | "to-ship";
+type Task = "quotes" | "to-order" | "to-ship" | "fulfillment";
 
 export function SourcingWorkQueue({
   workspaceId,
@@ -23,10 +23,19 @@ export function SourcingWorkQueue({
   );
   const toOrder = supplierOrders.filter((order) => order.status === "approved");
   const toShip = supplierOrders.filter((order) => order.status === "ordered");
+  const fulfilling = supplierOrders.filter((order) =>
+    ["shipping", "received"].includes(order.status),
+  );
   const tabs: Array<{ id: Task; label: string; count: number; unit: string }> = [
     { id: "quotes", label: "Quotes", count: quoteCases.length, unit: "request" },
     { id: "to-order", label: "To Order", count: toOrder.length, unit: "PO" },
     { id: "to-ship", label: "To Ship", count: toShip.length, unit: "PO" },
+    {
+      id: "fulfillment",
+      label: "Fulfillment",
+      count: fulfilling.length,
+      unit: "PO",
+    },
   ];
 
   return (
@@ -56,7 +65,16 @@ export function SourcingWorkQueue({
         <SupplierOrderQueue
           workspaceId={workspaceId}
           basePath={basePath}
-          taskStatus={task === "to-order" ? "approved" : "ordered"}
+          title={
+            task === "to-order" ? "To Order" : task === "to-ship" ? "To Ship" : "Fulfillment"
+          }
+          taskStatuses={
+            task === "to-order"
+              ? ["approved"]
+              : task === "to-ship"
+                ? ["ordered"]
+                : ["shipping", "received"]
+          }
         />
       )}
     </section>

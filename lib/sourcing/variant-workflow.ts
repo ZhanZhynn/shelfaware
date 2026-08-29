@@ -622,7 +622,7 @@ export async function runVariantSourcingCommand(
       command.action,
     )
   ) {
-    if (item.stage !== "quoted")
+    if (!["quoted", "changes_requested"].includes(item.stage))
       throw new SourcingAccessError(
         "Variant decisions can only be changed during review",
         409,
@@ -662,7 +662,7 @@ export async function runVariantSourcingCommand(
         });
         if (
           !line ||
-          line.quote.status !== "submitted" ||
+          !["submitted", "changes_requested"].includes(line.quote.status) ||
           line.availability !== "available" ||
           line.reviewStatus === "rejected"
         )
@@ -735,7 +735,7 @@ export async function runVariantSourcingCommand(
     return updated;
   }
   if (command.action === "reject_variant_offer") {
-    if (item.stage !== "quoted")
+    if (!["quoted", "changes_requested"].includes(item.stage))
       throw new SourcingAccessError(
         "Supplier offers can only be rejected during review",
         409,
@@ -775,7 +775,7 @@ export async function runVariantSourcingCommand(
     return updated;
   }
   if (command.action === "request_variant_quote_changes") {
-    if (item.stage !== "quoted")
+    if (!["quoted", "changes_requested"].includes(item.stage))
       throw new SourcingAccessError(
         "Supplier corrections can only be requested during review",
         409,
@@ -785,7 +785,11 @@ export async function runVariantSourcingCommand(
       select: { sourcingCostConfig: true },
     });
     const quote = await prisma.sourcingQuote.findFirst({
-      where: { id: command.quoteId, caseId, status: "submitted" },
+      where: {
+        id: command.quoteId,
+        caseId,
+        status: { in: ["submitted", "changes_requested"] },
+      },
       include: { lines: { include: { caseVariant: true } } },
     });
     if (!quote)
@@ -941,7 +945,7 @@ export async function runVariantSourcingCommand(
       if (
         !line ||
         line.caseVariantId !== selection.caseVariantId ||
-        line.quote.status !== "submitted"
+        !["submitted", "changes_requested"].includes(line.quote.status)
       )
         throw new SourcingAccessError(
           "Selected offer is no longer available",

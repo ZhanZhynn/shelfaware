@@ -54,17 +54,18 @@ const tabLabels: Record<string, string> = {
 export function SupplierOrderQueue({
   workspaceId,
   basePath,
-  taskStatus,
+  taskStatuses,
+  title,
 }: {
   workspaceId: string;
   basePath: string;
-  taskStatus?: "approved" | "ordered";
+  taskStatuses?: string[];
+  title?: string;
 }) {
   const { data: orders = [], isLoading, error } = useSupplierOrders(workspaceId);
   const batchPlace = useBatchPlaceSupplierOrders();
   const shipOrder = useShipPurchaseOrder();
   const [status, setStatus] = useState("approved");
-  const activeStatus = taskStatus || status;
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [placingOrderId, setPlacingOrderId] = useState<string | null>(null);
@@ -81,8 +82,10 @@ export function SupplierOrderQueue({
     },
     {},
   );
-  const statusOrders = allOrders.filter(
-    (order) => activeStatus === "all" || order.status === activeStatus,
+  const statusOrders = allOrders.filter((order) =>
+    taskStatuses
+      ? taskStatuses.includes(order.status)
+      : status === "all" || order.status === status,
   );
   const supplierCounts = new Map(
     [...statusOrders.reduce((acc, order) => {
@@ -98,7 +101,9 @@ export function SupplierOrderQueue({
       ? supplierFilter
       : "all";
   const filtered = allOrders.filter((order) => {
-    const matchesStatus = activeStatus === "all" || order.status === activeStatus;
+    const matchesStatus = taskStatuses
+      ? taskStatuses.includes(order.status)
+      : status === "all" || order.status === status;
     const matchesSupplier =
       activeSupplierFilter === "all" ||
       order.supplier.id === activeSupplierFilter;
@@ -138,9 +143,9 @@ export function SupplierOrderQueue({
     <div className="space-y-3 rounded-lg border bg-card p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b">
         <h2 className="mr-auto text-lg font-semibold">
-          {taskStatus ? tabLabels[taskStatus] : "Supplier Orders"}
+          {title || "Supplier Orders"}
         </h2>
-        {!taskStatus && <div className="flex flex-wrap gap-x-6">
+        {!taskStatuses && <div className="flex flex-wrap gap-x-6">
           {["all", "approved", "ordered", "shipping", "received"].map((value) => (
             <button key={value} type="button" onClick={() => setStatus(value)} className={`border-b-2 px-1 pb-3 text-sm font-medium ${status === value ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
               {tabLabels[value] || statusLabel(value)} <span className="ml-1">({statusCounts[value] || 0})</span>

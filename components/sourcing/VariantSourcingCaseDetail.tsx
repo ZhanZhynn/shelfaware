@@ -307,7 +307,9 @@ export default function VariantSourcingCaseDetail({
       ? quote.lines.map((line: any) => ({ ...line, quote }))
       : [],
   );
-  const decisionsLocked = item.stage !== "quoted";
+  const decisionsLocked = !["quoted", "changes_requested"].includes(
+    item.stage,
+  );
   const quoteSheetLocked = ![
     "sourcing",
     "changes_requested",
@@ -337,18 +339,49 @@ export default function VariantSourcingCaseDetail({
   const activeSheet = supplierSheets.find(
     (sheet: any) => sheet.id === activeSheetId,
   );
-  const activeCorrection =
-    activeSheet?.status === "changes_requested"
-      ? item.events?.find(
-          (event: any) =>
-            event.type === "variant_quote_changes_requested" &&
-            event.payload?.quoteId === activeSheetId,
-        )
-      : undefined;
+  const correctionIssuesForQuote = (quoteId: string) => {
+    const issues: any[] = [];
+    for (const event of item.events || []) {
+      if (
+        event.type !== "variant_quote_changes_requested" ||
+        event.payload?.quoteId !== quoteId
+      )
+        continue;
+      for (const issue of event.payload.issues || []) {
+        const index = issues.findIndex(
+          (entry: any) => entry.variantId === issue.variantId,
+        );
+        if (index >= 0) issues[index] = issue;
+        else issues.push(issue);
+      }
+    }
+    return issues;
+  };
+  const activeCorrectionIssues =
+    activeSheet?.status === "changes_requested" && activeSheetId
+      ? correctionIssuesForQuote(activeSheetId)
+      : [];
+  const activeCorrection = activeCorrectionIssues.length
+    ? { payload: { issues: activeCorrectionIssues } }
+    : undefined;
   const correctionIssuesByVariantId = new Map<string, any>(
-    ((activeCorrection?.payload?.issues || []) as any[]).map(
-      (issue: any) => [issue.variantId, issue],
-    ),
+    activeCorrectionIssues.map((issue: any) => [issue.variantId, issue]),
+  );
+  const correctionsByQuoteId = new Map<string, any>(
+    Array.from(
+      new Set<string>(
+        (item.events || [])
+          .filter(
+            (event: any) =>
+              event.type === "variant_quote_changes_requested" &&
+              event.payload?.quoteId,
+          )
+          .map((event: any) => event.payload.quoteId as string),
+      ),
+    ).map((quoteId) => [
+      quoteId,
+      { issues: correctionIssuesForQuote(quoteId) },
+    ]),
   );
   const activeVariant = item.variants.find(
     (variant: any) => variant.id === activeVariantId,
@@ -2897,25 +2930,57 @@ export default function VariantSourcingCaseDetail({
                               ? `Landed cost RM ${result.landed.toFixed(2)} is higher than the market price RM ${result.marketPerPiece.toFixed(2)}.`
                               : `Market price RM ${result.marketPerPiece.toFixed(2)} is below the minimum viable price RM ${result.minViablePrice.toFixed(2)}.`
                             : null;
+                        const quoteIssues =
+                          offer.quote.status === "changes_requested"
+                            ? (correctionsByQuoteId.get(offer.quote.id)
+                                ?.issues || [])
+                            : [];
+                        const offerIssues = quoteIssues.filter(
+                          (issue: any) =>
+                            issue.variantId === offer.caseVariantId,
+                        );
                         const correctionPending =
-                          offer.quote.status === "changes_requested";
+                          offer.quote.status === "changes_requested" &&
+                          (!quoteIssues.length || offerIssues.length > 0);
                         const offerRejected = offer.reviewStatus === "rejected";
                         const chosen = selected[variant.id] === offer.id;
-                        const statusBadge = (
+                        const statusBadge = correctionPending ? (
+                          <TooltipProvider delayDuration={0}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge className="bg-amber-100 text-amber-800">
+                                  Changes requested
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-64">
+                                <p className="font-medium">
+                                  Missing information requested
+                                </p>
+                                <ul className="mt-1 list-disc pl-4">
+                                  {(offerIssues.length
+                                    ? offerIssues
+                                    : quoteIssues
+                                  ).map((issue: any) => (
+                                    <li key={issue.variantId}>
+                                      {issue.variant}:{" "}
+                                      {issue.fields.join(", ")}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
                           <Badge
                             className={
-                              correctionPending
-                                ? "bg-sky-100 text-sky-800"
-                                : offerRejected
-                                  ? "bg-red-100 text-red-800"
-                                  : statusStyle[evaluation.status]
+                              offerRejected
+                                ? "bg-red-100 text-red-800"
+                                : statusStyle[evaluation.status]
                             }
                           >
-                            {correctionPending
-                              ? "info requested"
-                              : offerRejected
-                                ? "rejected"
-                                : evaluation.status.replaceAll("_", " ")}
+                            {offerRejected
+                              ? "rejected"
+                              : evaluation.status.replaceAll("_", " ")}
                           </Badge>
                         );
                         return (
@@ -2936,7 +3001,6 @@ export default function VariantSourcingCaseDetail({
                                     (evaluation.status !== "pass" &&
                                       evaluation.status !==
                                         "market_unchecked") ||
-                                    correctionPending ||
                                     offerRejected
                                   }
                                   onCheckedChange={(checked) => {

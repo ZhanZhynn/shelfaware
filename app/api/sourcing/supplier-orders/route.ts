@@ -24,8 +24,7 @@ export async function GET(request: NextRequest) {
             attachments: {
               where: { mimeType: { startsWith: "image/" } },
               orderBy: { createdAt: "desc" },
-              take: 1,
-              select: { url: true, fileName: true },
+              select: { url: true, fileName: true, caseVariantId: true },
             },
           },
         },

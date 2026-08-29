@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Ban, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
+import { Ban, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -57,6 +57,7 @@ import {
 import { SourcingSlaSettings } from "./SourcingSlaSettings";
 import { SourcingCostSettings } from "./SourcingCostSettings";
 import { SupplierOrderQueue } from "./SupplierOrderQueue";
+import { ShipOrderDialog } from "./ShipOrderDialog";
 
 const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
@@ -200,8 +201,6 @@ export default function SourcingPortal({
     purchaseOrderId: string;
     title: string;
   } | null>(null);
-  const [trackingCarrier, setTrackingCarrier] = useState("");
-  const [trackingNumber, setTrackingNumber] = useState("");
   const command = useSourcingCommand();
   const deleteCase = useDeleteSourcingCase();
   const shipPurchaseOrder = useShipPurchaseOrder();
@@ -254,9 +253,17 @@ export default function SourcingPortal({
       groupFilter === "all" || groupOf(stageOf(item)) === groupFilter;
     const matchesStage =
       stageFilter === "all" || stageOf(item) === stageFilter;
-    const matchesSearch = item.title
-      .toLowerCase()
-      .includes(search.toLowerCase());
+    const query = search.toLowerCase();
+    const matchesSearch =
+      !query ||
+      item.title.toLowerCase().includes(query) ||
+      item.id.toLowerCase().includes(query) ||
+      `${item.requester?.name || ""} ${item.requester?.email || ""}`
+        .toLowerCase()
+        .includes(query) ||
+      `${item.assignee?.name || ""} ${item.assignee?.email || ""}`
+        .toLowerCase()
+        .includes(query);
     return matchesGroup && matchesStage && matchesSearch;
   });
 
@@ -327,15 +334,6 @@ export default function SourcingPortal({
                 ))}
               </SelectContent>
             </Select>
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search cases"
-              />
-            </div>
           </div>
           {!isAdminView && (
             <div className="flex gap-7 border-b">
@@ -403,6 +401,15 @@ export default function SourcingPortal({
               })}
             </div>
 
+            <div className="flex flex-wrap items-center border-b pb-3">
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="ml-auto min-w-[260px] max-w-md"
+                placeholder="Title, requester, assignee, or request ID"
+              />
+            </div>
+
             <div className="grid grid-cols-[minmax(260px,1fr)_140px_130px_110px] gap-3 bg-muted/60 px-4 py-3 text-xs text-muted-foreground">
               <span>Request</span>
               <span>Assigned to</span>
@@ -456,7 +463,24 @@ export default function SourcingPortal({
                     isAdminView &&
                     ["draft", "cancelled"].includes(item.stage) &&
                     !item.orders?.length;
-                  const purchaseOrderId = item.orders?.[0]?.purchaseOrderId;
+                  const poStatuses = (item.orders || [])
+                    .map((order: any) => order.purchaseOrder?.status)
+                    .filter(Boolean);
+                  const poTotal = poStatuses.length;
+                  const poShipped = poStatuses.filter((status: string) =>
+                    ["shipping", "received"].includes(status),
+                  ).length;
+                  const shipProgress =
+                    poTotal > 1 &&
+                    ["ordered", "shipping"].includes(item.stage)
+                      ? `${poShipped}/${poTotal} shipped`
+                      : null;
+                  const orderedPurchaseOrder = (item.orders || []).find(
+                    (order: any) => order.purchaseOrder?.status === "ordered",
+                  );
+                  const purchaseOrderId =
+                    orderedPurchaseOrder?.purchaseOrderId ||
+                    item.orders?.[0]?.purchaseOrderId;
                   const canShip =
                     !isAdminView && item.stage === "ordered" && !!purchaseOrderId;
                   const statusMessage = getSourcingStatusMessage(
@@ -562,7 +586,7 @@ export default function SourcingPortal({
                           </div>
                         </div>
                         <div className="pt-1 text-sm text-muted-foreground">{item.assignee?.name || item.assignee?.email || "Unassigned"}</div>
-                        <div className="pt-1"><Badge variant={getSourcingStageBadgeVariant(stage)} className="capitalize">{stageLabel(stage)}</Badge></div>
+                        <div className="pt-1"><Badge variant={getSourcingStageBadgeVariant(stage)} className="capitalize">{stageLabel(stage)}</Badge>{shipProgress && <p className="mt-1 text-xs text-muted-foreground">{shipProgress}</p>}</div>
                         <div
                           className="flex flex-col items-start gap-1"
                           onClick={(event) => event.stopPropagation()}
@@ -575,34 +599,44 @@ export default function SourcingPortal({
                           {/*       : "Open request"} */}
                            {/*   </Link> */}
                            {/* </Button> */}
-                           {!isAdminView && item.stage === "order_pending" && (
+                            {!isAdminView && item.stage === "order_pending" && (
+                              <Button
+                                size="sm"
+                                variant="link"
+                                className="h-auto px-0 py-2"
+                                onClick={() =>
+                                  router.push(
+                                    `${basePath}/${item.id}#purchase-orders`,
+                                  )
+                                }
+                              >
+                                Place order
+                              </Button>
+                            )}
+                            {canShip && (
                              <Button
                                size="sm"
                                variant="link"
+                               // className="bg-emerald-600 text-white hover:bg-emerald-700"
                                className="h-auto px-0 py-2"
-                               onClick={() => setView("supplier-orders")}
+                               onClick={() => {
+                                 // With several supplier orders the user must
+                                 // pick which PO to ship, so open the section.
+                                 if (poTotal > 1) {
+                                   router.push(
+                                     `${basePath}/${item.id}#purchase-orders`,
+                                   );
+                                   return;
+                                 }
+                                 setPendingShipment({
+                                   purchaseOrderId,
+                                   title: item.title,
+                                 });
+                               }}
                              >
-                               Place order
+                               Ship
                              </Button>
                            )}
-                           {canShip && (
-                            <Button
-                              size="sm"
-                              variant="link"
-                              // className="bg-emerald-600 text-white hover:bg-emerald-700"
-                              className="h-auto px-0 py-2"
-                              onClick={() => {
-                                setTrackingCarrier("");
-                                setTrackingNumber("");
-                                setPendingShipment({
-                                  purchaseOrderId,
-                                  title: item.title,
-                                });
-                              }}
-                            >
-                              Ship
-                            </Button>
-                          )}
                           {(canCancel || canDelete) && (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -664,60 +698,20 @@ export default function SourcingPortal({
           </div>}
         </>
       )}
-      <Dialog
+      <ShipOrderDialog
         open={!!pendingShipment}
         onOpenChange={(open) => !open && setPendingShipment(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Mark {pendingShipment?.title || "order"} as shipped
-            </DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <label className="grid gap-1 text-sm font-medium">
-              Carrier (optional)
-              <Input
-                value={trackingCarrier}
-                onChange={(event) => setTrackingCarrier(event.target.value)}
-                placeholder="e.g. DHL, SF Express"
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              Tracking number (optional)
-              <Input
-                value={trackingNumber}
-                onChange={(event) => setTrackingNumber(event.target.value)}
-                placeholder="Add it now or update it later"
-              />
-            </label>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setPendingShipment(null)}
-              disabled={shipPurchaseOrder.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-              isLoading={shipPurchaseOrder.isPending}
-              onClick={async () => {
-                if (!pendingShipment) return;
-                await shipPurchaseOrder.mutateAsync({
-                  id: pendingShipment.purchaseOrderId,
-                  trackingCarrier: trackingCarrier.trim() || undefined,
-                  trackingNumber: trackingNumber.trim() || undefined,
-                });
-                setPendingShipment(null);
-              }}
-            >
-              Mark as shipped
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        caseTitle={pendingShipment?.title}
+        isPending={shipPurchaseOrder.isPending}
+        onSubmit={async (input) => {
+          if (!pendingShipment) return;
+          await shipPurchaseOrder.mutateAsync({
+            id: pendingShipment.purchaseOrderId,
+            ...input,
+          });
+          setPendingShipment(null);
+        }}
+      />
       <AlertDialog
         open={!!pendingAction}
         onOpenChange={(open) => !open && setPendingAction(null)}

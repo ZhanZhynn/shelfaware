@@ -8,6 +8,7 @@ import { logger } from "@/lib/logger";
 import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 import { allocateLandedCost } from "@/lib/sourcing/landed-cost";
 import { completeSourcingSla } from "@/lib/sourcing/sla";
+import { reconcileSourcingCaseStage } from "@/lib/sourcing/case-stage";
 import type { ReceiveResult, ReceivedItemResult } from "@/types/receiving";
 import { getAdminDataScope } from "@/lib/admin/data-scope";
 
@@ -256,18 +257,15 @@ export async function POST(request: NextRequest) {
               },
             });
             if (po.sourcingOrder?.caseId) {
-              const linkedOrders = await tx.sourcingOrder.findMany({
-                where: { caseId: po.sourcingOrder.caseId },
-                include: { purchaseOrder: { select: { status: true } } },
-              });
-              // A variant case can create one PO per supplier. Keep it in progress
-              // until every selected supplier order has been fully received.
-              if (
-                linkedOrders.every(
-                  (order) => order.purchaseOrder?.status === "received",
-                )
-              ) {
-                const now = new Date();
+              const now = new Date();
+              // Weakest-link aggregation: the case reaches "received" only
+              // when every selected supplier order has been fully received.
+              const reconciliation = await reconcileSourcingCaseStage(
+                tx,
+                po.sourcingOrder.caseId,
+                now,
+              );
+              if (reconciliation?.stage === "received") {
                 await completeSourcingSla(
                   tx,
                   po.sourcingOrder.caseId,
@@ -276,13 +274,7 @@ export async function POST(request: NextRequest) {
                 );
                 await tx.sourcingCase.update({
                   where: { id: po.sourcingOrder.caseId },
-                  data: {
-                    stage: "received",
-                    slaDueAt: null,
-                    slaRule: null,
-                    version: { increment: 1 },
-                    updatedAt: now,
-                  },
+                  data: { slaDueAt: null, slaRule: null },
                 });
                 await tx.sourcingEvent.create({
                   data: {

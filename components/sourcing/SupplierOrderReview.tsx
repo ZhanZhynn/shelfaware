@@ -47,13 +47,28 @@ export default function SupplierOrderReview({
       ? quote.lines.map((line: any) => ({ ...line, quote }))
       : [],
   );
-  const selectedVariantIds = new Set(
+  // Only the chosen offer per variant belongs in the supplier order, not every
+  // supplier's submitted line, and quantities follow the confirmed selection.
+  type SelectionRef = { orderQuantity?: number | null };
+  const selectionByLineId = new Map<string, SelectionRef>(
     item.variants
-      .filter((variant: any) => variant.selection?.status === "selected")
-      .map((variant: any) => variant.id),
+      .filter(
+        (variant: any) =>
+          variant.selection?.status === "selected" &&
+          variant.selection?.quoteLineId,
+      )
+      .map((variant: any) => [
+        variant.selection.quoteLineId as string,
+        variant.selection as SelectionRef,
+      ]),
   );
+  const orderQuantity = (line: any) =>
+    Math.max(
+      selectionByLineId.get(line.id)?.orderQuantity ?? line.requestedQuantity,
+      line.moq || 0,
+    );
   const selectedOfferLines: any[] = submittedLines.filter((line: any) =>
-    selectedVariantIds.has(line.caseVariantId),
+    selectionByLineId.has(line.id),
   );
   const selectedBySupplier = selectedOfferLines.reduce<Record<string, any[]>>(
     (groups, line: any) => {
@@ -76,6 +91,22 @@ export default function SupplierOrderReview({
     Object.values(selectedBySupplier).every(
       (lines) => lines.length && createdQuoteIds.has(lines[0]?.quoteId),
     );
+  const pendingSupplierEntries = Object.entries(selectedBySupplier).filter(
+    ([, supplierLines]) => {
+      const lines = supplierLines as any[];
+      return lines.length && !createdQuoteIds.has(lines[0]?.quoteId);
+    },
+  );
+  const pendingOrderValue = pendingSupplierEntries.reduce(
+    (sum, [, supplierLines]) =>
+      sum +
+      (supplierLines as any[]).reduce(
+        (lineSum, line: any) =>
+          lineSum + orderQuantity(line) * (line.unitPriceRmb || 0),
+        0,
+      ),
+    0,
+  );
 
   return (
     <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
@@ -142,15 +173,12 @@ export default function SupplierOrderReview({
                 const quoteId = lines[0]?.quoteId;
                 const alreadyCreated = createdQuoteIds.has(quoteId);
                 const units = lines.reduce(
-                  (total, line) =>
-                    total + Math.max(line.requestedQuantity, line.moq || 0),
+                  (total, line) => total + orderQuantity(line),
                   0,
                 );
                 const total = lines.reduce(
                   (sum, line) =>
-                    sum +
-                    Math.max(line.requestedQuantity, line.moq || 0) *
-                      (line.unitPriceRmb || 0),
+                    sum + orderQuantity(line) * (line.unitPriceRmb || 0),
                   0,
                 );
                 return (
@@ -182,10 +210,7 @@ export default function SupplierOrderReview({
                           (attachment: any) =>
                             attachment.caseVariantId === line.caseVariantId,
                         );
-                        const quantity = Math.max(
-                          line.requestedQuantity,
-                          line.moq || 0,
-                        );
+                        const quantity = orderQuantity(line);
                         return (
                           <div
                             key={line.id}
@@ -250,7 +275,26 @@ export default function SupplierOrderReview({
                 deliberately skipped.
               </p>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {reviewable && !allCreated && pendingSupplierEntries.length > 0 && (
+        <div className="sticky bottom-0 z-40 rounded-lg border bg-background/95 shadow-[0_-4px_16px_rgba(0,0,0,0.12)] backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-sm text-muted-foreground">
+                {pendingSupplierEntries.length} supplier order
+                {pendingSupplierEntries.length === 1 ? "" : "s"} pending
+              </span>
+              <span className="text-sm text-muted-foreground">Order value</span>
+              <span className="text-lg font-bold text-orange-600">
+                CNY {pendingOrderValue.toLocaleString()}
+              </span>
+            </div>
             <Button
+              className="bg-orange-500 font-semibold text-white hover:bg-orange-600"
+              isLoading={command.isPending}
               onClick={() =>
                 command.mutate({
                   id: item.id,
@@ -258,12 +302,11 @@ export default function SupplierOrderReview({
                   version: item.version,
                 })
               }
-              isLoading={command.isPending}
             >
-              <PackagePlus className="h-4 w-4" /> Create all supplier orders
+              <PackagePlus className="h-4 w-4" /> Place Order
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {item.orders.length > 0 && (

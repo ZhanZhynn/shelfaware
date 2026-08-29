@@ -6,6 +6,7 @@ import { authorizePurchaseOrder } from "@/prisma/purchase-order";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { logger } from "@/lib/logger";
 import { completeSourcingSla } from "@/lib/sourcing/sla";
+import { reconcileSourcingCaseStage } from "@/lib/sourcing/case-stage";
 import { invalidateAllServerCaches } from "@/lib/cache";
 import { getAdminDataScope } from "@/lib/admin/data-scope";
 import {
@@ -69,11 +70,20 @@ export async function POST(
       });
       if (sourcingOrder) {
         const now = new Date();
-        await completeSourcingSla(tx, sourcingOrder.caseId, "shipment", now);
-        await tx.sourcingCase.update({
-          where: { id: sourcingOrder.caseId },
-          data: { stage: "shipping", slaDueAt: null, slaRule: null, version: { increment: 1 }, updatedAt: now },
-        });
+        // Weakest-link aggregation: the request only reaches "shipping" when
+        // every purchase order is on its way or received.
+        const reconciliation = await reconcileSourcingCaseStage(
+          tx,
+          sourcingOrder.caseId,
+          now,
+        );
+        if (reconciliation?.stage === "shipping") {
+          await completeSourcingSla(tx, sourcingOrder.caseId, "shipment", now);
+          await tx.sourcingCase.update({
+            where: { id: sourcingOrder.caseId },
+            data: { slaDueAt: null, slaRule: null },
+          });
+        }
         await tx.sourcingEvent.create({
           data: {
             caseId: sourcingOrder.caseId,

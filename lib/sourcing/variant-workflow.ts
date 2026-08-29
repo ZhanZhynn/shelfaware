@@ -2,9 +2,11 @@ import { Prisma } from "@prisma/client";
 import { ObjectId } from "mongodb";
 import { prisma } from "@/prisma/client";
 import { requireWorkspaceRole, SourcingAccessError } from "./auth";
-import { deliverSourcingNotification } from "./notifications";
+import { deliverSourcingNotification, sourcingAdmins } from "./notifications";
 import { logger } from "@/lib/logger";
 import { normalizeSourcingCostConfig } from "./landed-cost";
+import { dueAtForSourcingSla } from "./sla";
+import { normalizeSourcingSlaConfig } from "./sla";
 import { variantViability } from "./variant-viability";
 import type {
   SourcingVariantQuoteSheetInput,
@@ -380,6 +382,112 @@ export async function runVariantSourcingCommand(
       });
       return { ...quote, proposalVariantIds };
     });
+  }
+  if (command.action === "withdraw_quote") {
+    if (!canAdmin && item.assignedToId !== actor.id)
+      throw new SourcingAccessError(
+        "This sourcing case is not assigned to you",
+        403,
+      );
+    if (item.stage !== "quoted")
+      throw new SourcingAccessError(
+        "Offers can only be withdrawn while awaiting a decision",
+        409,
+      );
+    if (!command.quoteId)
+      throw new SourcingAccessError("An offer must be selected", 400);
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: item.workspaceId },
+      select: { sourcingSlaConfig: true },
+    });
+    const slaConfig = normalizeSourcingSlaConfig(workspace?.sourcingSlaConfig);
+    const updated = await prisma.$transaction(async (tx) => {
+      const current = await tx.sourcingCase.findUnique({ where: { id: caseId } });
+      if (!current || current.version !== command.version)
+        throw new SourcingAccessError(
+          "This case has changed. Refresh and try again.",
+          409,
+        );
+      const target = await tx.sourcingQuote.findFirst({
+        where: { id: command.quoteId, caseId, status: "submitted" },
+      });
+      if (!target)
+        throw new SourcingAccessError(
+          "Only unapproved submitted offers can be withdrawn",
+          409,
+        );
+      await tx.sourcingQuote.update({
+        where: { id: target.id },
+        data: { status: "withdrawn" },
+      });
+      const remainingOffers = await tx.sourcingQuote.count({
+        where: { caseId, status: "submitted" },
+      });
+      const now = new Date();
+      let workflowData: Prisma.SourcingCaseUpdateInput = {};
+      if (remainingOffers === 0) {
+        const quoteDueAt = dueAtForSourcingSla(
+          "quote_submission",
+          now,
+          slaConfig,
+        );
+        // End the inactive approval window without treating it as a decision.
+        await tx.sourcingSlaRecord.updateMany({
+          where: { caseId, rule: "approval", completedAt: null },
+          data: { completedAt: now, onTime: null },
+        });
+        await tx.sourcingSlaRecord.create({
+          data: {
+            workspaceId: item.workspaceId,
+            caseId,
+            rule: "quote_submission",
+            ownerId: item.assignedToId,
+            startedAt: now,
+            dueAt: quoteDueAt,
+          },
+        });
+        workflowData = {
+          stage: "sourcing",
+          slaDueAt: quoteDueAt,
+          slaRule: "quote_submission",
+        };
+      }
+      const next = await tx.sourcingCase.update({
+        where: { id: caseId },
+        data: {
+          ...workflowData,
+          version: { increment: 1 },
+          updatedAt: now,
+        },
+      });
+      await tx.sourcingEvent.create({
+        data: {
+          workspaceId: item.workspaceId,
+          caseId,
+          actorId: actor.id,
+          type: "offer_withdrawn",
+          payload: json({
+            quoteId: target.id,
+            supplierName: target.supplierName,
+            remainingOffers,
+          }),
+        },
+      });
+      return next;
+    });
+    void deliverSourcingNotification({
+      workspaceId: item.workspaceId,
+      caseId,
+      recipientIds: await sourcingAdmins(item.workspaceId),
+      excludeUserId: actor.id,
+      kind: "quote",
+      title: "Supplier offer withdrawn",
+      message: `${actor.name} withdrew a supplier offer for ${item.title}.`,
+      dedupeKey: `withdraw_quote:${caseId}:${updated.version}`,
+    }).catch((error) =>
+      logger.error("[Sourcing] Withdraw notification failed", error),
+    );
+    return updated;
   }
   if (!canAdmin)
     throw new SourcingAccessError(
@@ -907,7 +1015,10 @@ export async function runVariantSourcingCommand(
           caseId,
           caseVariantId: selection.caseVariantId,
           ...(selection.status === "selected" && selection.quoteLineId
-            ? { quoteLineId: selection.quoteLineId }
+            ? {
+              quoteLineId: selection.quoteLineId,
+              orderQuantity: selection.orderQuantity ?? null,
+            }
             : {}),
           status: selection.status,
           skipReason:

@@ -11,7 +11,9 @@ import { ZodError } from "zod";
 
 export const sourcingListInclude = {
   quotes: { select: { status: true } },
-  orders: true,
+  // PO statuses let the portal show per-request shipping progress and target
+  // the supplier order that still needs an action.
+  orders: { include: { purchaseOrder: { select: { status: true } } } },
   variants: { orderBy: { position: "asc" as const } },
   attachments: {
     where: {

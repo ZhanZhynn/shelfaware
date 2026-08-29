@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   Send,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -77,12 +78,19 @@ import {
   useUploadSourcingAttachment,
   useDeleteSourcingAttachment,
 } from "@/hooks/queries";
+import {
+  usePlacePurchaseOrder,
+  useShipPurchaseOrder,
+} from "@/hooks/queries/use-purchase-orders";
 import { normalizeSourcingCostConfig } from "@/lib/sourcing/landed-cost";
 import { variantViability } from "@/lib/sourcing/variant-viability";
 import {
   getSourcingTimeline,
   getSourcingTimelineIndex,
 } from "@/lib/sourcing/presentation";
+import { ShipOrderDialog } from "./ShipOrderDialog";
+import { ArrangeSupplierOrderDialog } from "./ArrangeSupplierOrderDialog";
+import { SupplierOrderGroup } from "./SupplierOrderGroup";
 
 type SheetLine = {
   availability: "available" | "unavailable";
@@ -148,10 +156,16 @@ export default function VariantSourcingCaseDetail({
   const comment = useCreateSourcingComment();
   const uploadAttachment = useUploadSourcingAttachment();
   const deleteAttachment = useDeleteSourcingAttachment();
+  const placePurchaseOrder = usePlacePurchaseOrder();
+  const shipPurchaseOrder = useShipPurchaseOrder();
   const { data: suppliers = [] } = useSourcingSuppliers(
     item?.workspaceId || "",
   );
-  const admin = basePath.startsWith("/admin");
+  // Admin controls require the workspace role, not just the admin URL. The
+  // server enforces selection permissions, so hide those controls otherwise.
+  const admin =
+    basePath.startsWith("/admin") &&
+    (item?.capabilities as any)?.canDecide !== false;
   const [supplierId, setSupplierId] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
@@ -191,11 +205,18 @@ export default function VariantSourcingCaseDetail({
   const [orderQuantities, setOrderQuantities] = useState<
     Record<string, string>
   >({});
+  const quantitySaveTimers = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
   const [bulkOrderQuantity, setBulkOrderQuantity] = useState("");
   const [marketBenchmarks, setMarketBenchmarks] = useState<
     Record<string, MarketBenchmark>
   >({});
   const [commentBody, setCommentBody] = useState("");
+  const [placingOrder, setPlacingOrder] = useState<any>(null);
+  const [shippingOrder, setShippingOrder] = useState<any>(null);
+  const [withdrawSheetOpen, setWithdrawSheetOpen] = useState(false);
+  const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const [batchVariantIds, setBatchVariantIds] = useState<string[]>([]);
   const [batch, setBatch] = useState({
     availability: "available",
@@ -208,6 +229,12 @@ export default function VariantSourcingCaseDetail({
     piecesPerCarton: "",
     moq: "",
   });
+  useEffect(
+    () => () => {
+      Object.values(quantitySaveTimers.current).forEach(clearTimeout);
+    },
+    [],
+  );
   useEffect(() => {
     if (!item?.variants) return;
     setLines((current) =>
@@ -244,6 +271,21 @@ export default function VariantSourcingCaseDetail({
             marketPriceMyr: variant.marketPriceMyr ?? undefined,
             marketPack: variant.marketPack ?? 1,
           },
+        ]),
+      ),
+    );
+    // Rehydrate the confirmed order quantities so a refresh keeps the values
+    // that were saved with each variant selection.
+    setOrderQuantities(
+      Object.fromEntries(
+        item.variants.map((variant: any) => [
+          variant.id,
+          String(
+            variant.selection?.status === "selected" &&
+              variant.selection?.orderQuantity
+              ? variant.selection.orderQuantity
+              : variant.requestedQuantity,
+          ),
         ]),
       ),
     );
@@ -319,6 +361,25 @@ export default function VariantSourcingCaseDetail({
     },
     {},
   );
+  const createdQuoteIds = new Set(
+    item.orders.map((order: any) => order.quoteId),
+  );
+  const allOrdersCreated =
+    Object.keys(selectedBySupplier).length > 0 &&
+    Object.values(selectedBySupplier).every((lines) =>
+      createdQuoteIds.has((lines as any[])[0]?.quoteId),
+    );
+  const poStatuses = (item.orders || [])
+    .map((order: any) => order.purchaseOrder?.status)
+    .filter(Boolean);
+  const poTotal = poStatuses.length;
+  const poShipped = poStatuses.filter((status: string) =>
+    ["shipping", "received"].includes(status),
+  ).length;
+  const shippingProgress =
+    poTotal > 1 && ["ordered", "shipping"].includes(item.stage)
+      ? `${poShipped} of ${poTotal} supplier orders shipped.`
+      : null;
   const costConfig = normalizeSourcingCostConfig(item.costConfig);
   const caseAttachments = (item.attachments || []).filter(
     (attachment: any) => !attachment.quoteId && !attachment.caseVariantId,
@@ -355,17 +416,31 @@ export default function VariantSourcingCaseDetail({
           "Create supplier orders",
           "Review the supplier groups and create the purchase orders.",
         ]
-        : displayStage === "sourcing"
+        : displayStage === "order_pending"
+          ? allOrdersCreated
+            ? [
+              "Current progress",
+              "Supplier orders created",
+              "Wait for Sourcer to place each supplier order with the supplier.",
+            ]
+            : [
+              "Your next step",
+              "Create remaining supplier orders",
+              "Review the supplier groups and create the purchase orders.",
+            ]
+          : displayStage === "sourcing"
           ? [
             "Current progress",
             "Sourcer is collecting offers",
             "Wait for supplier quote sheets to be submitted.",
           ]
           : [
-            "Current progress",
-            currentTimelineLabel,
-            "Track the sourcing request and its supplier orders.",
-          ]
+              "Current progress",
+              currentTimelineLabel,
+              shippingProgress
+                ? `${shippingProgress} Track the sourcing request and its supplier orders.`
+                : "Track the sourcing request and its supplier orders.",
+            ]
     : displayStage === "changes_requested"
       ? [
         "Changes required",
@@ -390,7 +465,9 @@ export default function VariantSourcingCaseDetail({
             ? [
               "Your next step",
               "Arrange shipment",
-              "Open each supplier purchase order to add tracking and mark it shipped.",
+              shippingProgress
+                ? `${shippingProgress} Open each remaining supplier purchase order to add tracking and mark it shipped.`
+                : "Open each supplier purchase order to add tracking and mark it shipped.",
             ]
             : [
               "Current progress",
@@ -500,11 +577,16 @@ export default function VariantSourcingCaseDetail({
     line: SheetLine,
     field: keyof SheetLine,
   ) =>
-    submitAttempted &&
+    !quoteSheetLocked &&
       incompleteQuoteVariantIds.includes(variantId) &&
       missingQuoteFields(line).includes(field)
       ? "border-destructive focus-visible:ring-destructive"
       : "";
+  const activeSheet = supplierSheets.find(
+    (sheet: any) => sheet.id === activeSheetId,
+  );
+  const canWithdrawSheet =
+    !admin && item.stage === "quoted" && activeSheet?.status === "submitted";
   const uploadProposalImages = async (result: any) => {
     const ids: string[] = result?.proposalVariantIds || [];
     await Promise.all(
@@ -698,6 +780,11 @@ export default function VariantSourcingCaseDetail({
               caseVariantId: variant.id,
               quoteLineId: selected[variant.id],
               status: "selected",
+              // The order-qty input must travel with the selection, or the
+              // supplier order falls back to the requested quantity.
+              orderQuantity:
+                Number(orderQuantities[variant.id]) ||
+                variant.requestedQuantity,
               ...marketBenchmarks[variant.id],
             }
             : {
@@ -722,6 +809,34 @@ export default function VariantSourcingCaseDetail({
       !selected[variant.id] &&
       !skipped[variant.id]?.trim(),
   );
+  // Quantity edits on an already-selected offer persist shortly after typing
+  // stops, so a refresh or another admin's view sees the same numbers.
+  const persistOrderQuantity = (variant: any, quantity: string) => {
+    const quoteLineId = selected[variant.id];
+    if (!quoteLineId) return;
+    const parsed = Number(quantity);
+    if (!Number.isInteger(parsed) || parsed < 1) return;
+    if (variant.selection?.orderQuantity === parsed) return;
+    command.mutate({
+      id: item.id,
+      action: "save_variant_selection",
+      version: item.version,
+      selection: {
+        caseVariantId: variant.id,
+        quoteLineId,
+        status: "selected",
+        orderQuantity: parsed,
+        ...marketBenchmarks[variant.id],
+      },
+    });
+  };
+  const scheduleOrderQuantitySave = (variant: any, quantity: string) => {
+    clearTimeout(quantitySaveTimers.current[variant.id]);
+    quantitySaveTimers.current[variant.id] = setTimeout(() => {
+      delete quantitySaveTimers.current[variant.id];
+      persistOrderQuantity(variant, quantity);
+    }, 600);
+  };
   const updateLine = (
     variantId: string,
     field: keyof SheetLine,
@@ -807,11 +922,18 @@ export default function VariantSourcingCaseDetail({
               <a href="#variant-offers">Review variant offers</a>
             </Button>
           )}
-          {admin && ["approved", "order_pending"].includes(item.stage) && (
+          {admin &&
+            (item.stage === "approved" ||
+              (item.stage === "order_pending" && !allOrdersCreated)) && (
+              <Button asChild>
+                <Link href={`${basePath}/${item.id}/review`}>
+                  Create supplier orders
+                </Link>
+              </Button>
+            )}
+          {admin && item.stage === "order_pending" && allOrdersCreated && (
             <Button asChild>
-              <Link href={`${basePath}/${item.id}/review`}>
-                Create supplier orders
-              </Link>
+              <a href="#purchase-orders">View purchase orders</a>
             </Button>
           )}
           {sourcerAction && (
@@ -989,34 +1111,67 @@ export default function VariantSourcingCaseDetail({
           <CardContent className="flex flex-wrap gap-2">
             {supplierSheets.length ? (
               supplierSheets.map((sheet: any) => (
-                <button
-                  type="button"
-                  key={sheet.id}
-                  onClick={() => selectSheet(sheet)}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm ${sheet.status === "changes_requested" ? "border-red-500 bg-red-50 hover:bg-red-100" : activeSheetId === sheet.id ? "border-sky-600 bg-sky-50" : "hover:bg-muted/50"}`}
-                >
-                  <span className="block font-medium">
-                    {sheet.supplierName}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {sheet.status === "changes_requested"
-                      ? "Needs correction"
-                      : sheet.status === "submitted"
-                        ? "Submitted"
-                        : "Draft"}{" "}
-                    ·{" "}
-                    {
-                      sheet.lines.filter(
-                        (line: any) =>
-                          line.availability === "available" &&
-                          quoteRequestedVariants.some(
-                            (variant: any) => variant.id === line.caseVariantId,
-                          ),
-                      ).length
-                    }
-                    /{quoteRequestedVariants.length} available
-                  </span>
-                </button>
+                <div key={sheet.id} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => selectSheet(sheet)}
+                    className={`rounded-lg border px-3 py-2 pr-8 text-left text-sm ${sheet.status === "changes_requested" ? "border-red-500 bg-red-50 hover:bg-red-100" : activeSheetId === sheet.id ? "border-sky-600 bg-sky-50" : "hover:bg-muted/50"}`}
+                  >
+                    <span className="block font-medium">
+                      {sheet.supplierName}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {sheet.status === "changes_requested"
+                        ? "Needs correction"
+                        : sheet.status === "submitted"
+                          ? "Submitted"
+                          : "Draft"}{" "}
+                      ·{" "}
+                      {
+                        sheet.lines.filter(
+                          (line: any) =>
+                            line.availability === "available" &&
+                            quoteRequestedVariants.some(
+                              (variant: any) => variant.id === line.caseVariantId,
+                            ),
+                        ).length
+                      }
+                      /{quoteRequestedVariants.length} available
+                    </span>
+                  </button>
+                  {sheet.status === "draft" && (
+                    <button
+                      type="button"
+                      aria-label={`Delete ${sheet.supplierName} draft sheet`}
+                      title="Delete draft sheet"
+                      className="absolute right-1 top-1 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      disabled={command.isPending}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActiveSheetId(sheet.id);
+                        setDeleteSheetOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {sheet.status === "submitted" && item.stage === "quoted" && (
+                    <button
+                      type="button"
+                      aria-label={`Withdraw ${sheet.supplierName} offer`}
+                      title="Withdraw offer"
+                      className="absolute right-1 top-1 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      disabled={command.isPending}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setActiveSheetId(sheet.id);
+                        setWithdrawSheetOpen(true);
+                      }}
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               ))
             ) : (
               <p className="text-sm text-muted-foreground">
@@ -2052,6 +2207,17 @@ export default function VariantSourcingCaseDetail({
                   placeholder="Supplier-wide notes"
                 />
                 <div className="flex justify-end gap-2 border-t pt-4">
+                  {canWithdrawSheet && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mr-auto text-destructive"
+                      disabled={command.isPending}
+                      onClick={() => setWithdrawSheetOpen(true)}
+                    >
+                      Withdraw sheet
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"
@@ -2675,12 +2841,16 @@ export default function VariantSourcingCaseDetail({
                                   orderQuantities[variant.id] ??
                                   variant.requestedQuantity
                                 }
-                                onChange={(event) =>
+                                onChange={(event) => {
                                   setOrderQuantities((current) => ({
                                     ...current,
                                     [variant.id]: event.target.value,
-                                  }))
-                                }
+                                  }));
+                                  scheduleOrderQuantitySave(
+                                    variant,
+                                    event.target.value,
+                                  );
+                                }}
                               />
                             </label>
                             {belowMoq && (
@@ -3232,41 +3402,141 @@ export default function VariantSourcingCaseDetail({
                 (groups[key] ||= []).push(order);
                 return groups;
               }, {}),
-            ).map((supplierOrders: any) => {
-              const supplier = supplierOrders[0]?.purchaseOrder?.supplier;
-              const orders = supplierOrders.map((order: any) => order.purchaseOrder).filter(Boolean);
-              const items = orders.flatMap((order: any) => order.items || []);
-              const units = items.reduce((sum: number, entry: any) => sum + Number(entry.quantity || 0), 0);
-              const total = orders.reduce((sum: number, order: any) => sum + Number(order.totalAmount || 0), 0);
-              const currency = orders[0]?.currency || "CNY";
-              return (
-                <div key={supplier?.id || supplier?.name} className="overflow-hidden rounded-md border">
-                  <div className="flex flex-wrap items-center gap-3 bg-muted/50 px-4 py-3 text-sm">
-                    <div className="min-w-0 flex-1"><p className="font-semibold">{supplier?.name || "Unknown supplier"} <span className="ml-2 font-normal text-muted-foreground">{orders.length} PO{orders.length === 1 ? "" : "s"} · {items.length} product{items.length === 1 ? "" : "s"} · {units.toLocaleString()} units</span></p></div>
-                    <p className="font-medium">{currency} {total.toLocaleString()}</p>
-                  </div>
-                  <div className="divide-y">
-                    {orders.map((order: any) => (
-                      <div key={order.id}>
-                        <div className="flex items-center justify-between gap-3 bg-muted/20 px-4 py-2 text-xs text-muted-foreground"><span>{order.poNumber}</span><Link className="text-sky-600 hover:underline" href={`${basePath.includes("/admin") ? "/admin/purchase-orders" : "/sourcing/purchase-orders"}/${order.id}`}>View purchase order</Link></div>
-                        {(order.items || []).map((entry: any, index: number) => {
-                          const image = variantAttachments.find((attachment: any) => attachment.caseVariantId === entry.sourcingCaseVariantId && attachment.mimeType?.startsWith("image/"));
-                          return <div key={entry.id} className="grid grid-cols-[minmax(220px,1fr)_90px_100px_120px] gap-3 px-4 py-3 text-sm">
-                            <div className="flex min-w-0 gap-3">{image ? <img src={image.url} alt={entry.productName} className="h-12 w-12 shrink-0 rounded border object-cover" /> : <div className="h-12 w-12 shrink-0 rounded border bg-muted" />}<div className="min-w-0"><p className="line-clamp-2 font-medium">{entry.productName}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{entry.sku || "No SKU"} · {currency} {Number(entry.unitCost || 0).toLocaleString()} each</p></div></div>
-                            <span className="pt-1">x{Number(entry.quantity || 0).toLocaleString()}</span>
-                            {index === 0 ? <Badge variant="secondary" className="h-fit w-fit capitalize">{order.status}</Badge> : <span />}
-                            {index === 0 ? <span className="pt-1 font-medium">{currency} {Number(order.totalAmount || 0).toLocaleString()}</span> : <span />}
-                          </div>;
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+            ).map((supplierOrders: any) => (
+              <SupplierOrderGroup
+                key={supplierOrders[0]?.purchaseOrder?.supplier?.id || supplierOrders[0]?.purchaseOrder?.supplier?.name}
+                orders={supplierOrders.map((order: any) => order.purchaseOrder).filter(Boolean)}
+                detailHref={(order) => `${basePath.includes("/admin") ? "/admin/purchase-orders" : "/sourcing/purchase-orders"}/${order.id}`}
+                imageForItem={(_, entry) =>
+                  variantAttachments.find(
+                    (attachment: any) =>
+                      attachment.caseVariantId === (entry as any).sourcingCaseVariantId &&
+                      attachment.mimeType?.startsWith("image/"),
+                  )
+                }
+                onArrangeOrder={admin ? undefined : setPlacingOrder}
+                onShipOrder={admin ? undefined : setShippingOrder}
+              />
+            ))}
           </CardContent>
         </Card>
       )}
+      <ArrangeSupplierOrderDialog
+        key={placingOrder?.id || "none"}
+        open={!!placingOrder}
+        onOpenChange={(open) => !open && setPlacingOrder(null)}
+        supplierName={placingOrder?.supplier?.name}
+        poCount={1}
+        units={(placingOrder?.items || []).reduce(
+          (sum: number, entry: any) => sum + Number(entry.quantity || 0),
+          0,
+        )}
+        currency={placingOrder?.currency}
+        totalAmount={Number(placingOrder?.totalAmount || 0)}
+        isPending={placePurchaseOrder.isPending}
+        onSubmit={async (input) => {
+          if (!placingOrder) return;
+          try {
+            await placePurchaseOrder.mutateAsync({
+              id: placingOrder.id,
+              ...input,
+            });
+            setPlacingOrder(null);
+          } catch {
+            /* Error already toasted by the mutation hook. */
+          }
+        }}
+      />
+      <ShipOrderDialog
+        open={!!shippingOrder}
+        onOpenChange={(open) => !open && setShippingOrder(null)}
+        caseTitle={item.title}
+        poNumber={shippingOrder?.poNumber}
+        supplierName={shippingOrder?.supplier?.name}
+        currency={shippingOrder?.currency}
+        totalAmount={shippingOrder?.totalAmount}
+        isPending={shipPurchaseOrder.isPending}
+        onSubmit={async (input) => {
+          if (!shippingOrder) return;
+          try {
+            await shipPurchaseOrder.mutateAsync({ id: shippingOrder.id, ...input });
+            setShippingOrder(null);
+          } catch {
+            /* Error already toasted by the mutation hook. */
+          }
+        }}
+      />
+      <AlertDialog open={withdrawSheetOpen} onOpenChange={setWithdrawSheetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Withdraw this supplier sheet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeSheet?.supplierName}&apos;s submitted offer will be marked
+              withdrawn and the admin will no longer see it. If every submitted
+              offer is withdrawn, the request returns to sourcing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep offer</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!activeSheet) return;
+                try {
+                  await command.mutateAsync({
+                    id: item.id,
+                    action: "withdraw_quote",
+                    version: item.version,
+                    quoteId: activeSheet.id,
+                  });
+                  setWithdrawSheetOpen(false);
+                } catch {
+                  /* Error already toasted by the mutation hook. */
+                }
+              }}
+            >
+              Withdraw offer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={deleteSheetOpen} onOpenChange={setDeleteSheetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this draft sheet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {supplierSheets.find((sheet: any) => sheet.id === activeSheetId)
+                ?.supplierName}
+              &apos;s draft quote sheet and its recorded lines will be removed.
+              Submitted sheets are unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep draft</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!activeSheetId) return;
+                const sheetId = activeSheetId;
+                try {
+                  await command.mutateAsync({
+                    id: item.id,
+                    action: "delete_quote",
+                    version: item.version,
+                    quoteId: sheetId,
+                  });
+                  if (activeSheetId === sheetId) setActiveSheetId(null);
+                  setDeleteSheetOpen(false);
+                } catch {
+                  /* Error already toasted by the mutation hook. */
+                }
+              }}
+            >
+              Delete draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Card>
         <CardHeader>
           <CardTitle>Comments</CardTitle>

@@ -3,6 +3,7 @@ import { prisma } from "@/prisma/client";
 import { getSessionFromRequest } from "@/utils/auth";
 import { requireWorkspaceRole, SourcingAccessError } from "@/lib/sourcing/auth";
 import { invalidateAllServerCaches } from "@/lib/cache";
+import { reconcileSourcingCaseStage } from "@/lib/sourcing/case-stage";
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,9 +50,7 @@ export async function POST(request: NextRequest) {
       });
       const caseIds = [...new Set(orders.map((order) => order.caseId))];
       for (const caseId of caseIds) {
-        const linked = await tx.sourcingOrder.findMany({ where: { caseId }, include: { purchaseOrder: { select: { status: true } } } });
-        const allPlaced = linked.every((link) => ["ordered", "shipping", "received"].includes(link.purchaseOrder?.status || ""));
-        await tx.sourcingCase.update({ where: { id: caseId }, data: { stage: allPlaced ? "ordered" : "order_pending", version: { increment: 1 }, updatedAt: now } });
+        await reconcileSourcingCaseStage(tx, caseId, now);
       }
       await tx.sourcingEvent.createMany({ data: orders.map((order) => ({ workspaceId, caseId: order.caseId, actorId: user.id, type: "supplier_order_placed", payload: { purchaseOrderId: order.purchaseOrderId, reference: body.reference?.trim() || null } })) });
       return ids;

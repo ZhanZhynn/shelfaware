@@ -4,6 +4,7 @@ import { prisma } from "@/prisma/client";
 import { authorizePurchaseOrder } from "@/prisma/purchase-order";
 import { getAdminDataScope } from "@/lib/admin/data-scope";
 import { SourcingAccessError } from "@/lib/sourcing/auth";
+import { reconcileSourcingCaseStage } from "@/lib/sourcing/case-stage";
 import { invalidateAllServerCaches } from "@/lib/cache";
 
 export async function POST(
@@ -54,23 +55,9 @@ export async function POST(
         },
       });
       if (po.sourcingOrder) {
-        const linked = await tx.sourcingOrder.findMany({
-          where: { caseId: po.sourcingOrder.caseId },
-          include: { purchaseOrder: { select: { status: true } } },
-        });
-        const allPlaced = linked.every((link) =>
-          ["ordered", "shipping", "received"].includes(
-            link.purchaseOrder?.status || "",
-          ),
-        );
-        await tx.sourcingCase.update({
-          where: { id: po.sourcingOrder.caseId },
-          data: {
-            stage: allPlaced ? "ordered" : "order_pending",
-            version: { increment: 1 },
-            updatedAt: now,
-          },
-        });
+        // The case stage derives from every linked PO, so placing one supplier
+        // order only advances the request when the rest are placed too.
+        await reconcileSourcingCaseStage(tx, po.sourcingOrder.caseId, now);
         await tx.sourcingEvent.create({
           data: {
             workspaceId: po.sourcingOrder.workspaceId,

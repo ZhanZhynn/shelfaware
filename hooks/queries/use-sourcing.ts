@@ -142,8 +142,8 @@ function mutationOptions(
   success: string,
 ) {
   return {
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sourcing.all });
       toast({ title: success });
     },
     onError: (error: unknown) =>

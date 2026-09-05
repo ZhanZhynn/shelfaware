@@ -921,6 +921,7 @@ model SourcingAttachment {
   workspaceId  String       @db.ObjectId
   caseId       String       @db.ObjectId
   quoteId      String?      @db.ObjectId
+  quoteGroupId String?      @db.ObjectId
   caseVariantId String?      @db.ObjectId
   uploadedById String       @db.ObjectId
   fileName     String
@@ -937,6 +938,7 @@ model SourcingAttachment {
 
   @@index([caseId, createdAt])
   @@index([caseId, quoteId, createdAt])
+  @@index([caseId, quoteGroupId, createdAt])
   @@index([caseId, caseVariantId, createdAt])
   @@index([workspaceId, createdAt])
   @@index([uploadedById])

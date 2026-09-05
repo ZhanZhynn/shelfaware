@@ -96,16 +96,18 @@ export async function POST(
       return NextResponse.json({ error: "Invalid quote" }, { status: 400 });
     if (caseVariantId !== null && typeof caseVariantId !== "string")
       return NextResponse.json({ error: "Invalid variant" }, { status: 400 });
+    let quoteGroupId: string | undefined;
     if (quoteId) {
       const quote = await prisma.sourcingQuote.findFirst({
         where: { id: quoteId, caseId: sourcingCase.id },
-        select: { id: true },
+        select: { id: true, quoteGroupId: true },
       });
       if (!quote)
         return NextResponse.json(
           { error: "Quote not found for this sourcing case" },
           { status: 400 },
         );
+      quoteGroupId = quote.quoteGroupId || quote.id;
     }
     if (caseVariantId) {
       const variant = await prisma.sourcingCaseVariant.findFirst({
@@ -132,6 +134,7 @@ export async function POST(
           workspaceId: sourcingCase.workspaceId,
           caseId: sourcingCase.id,
           ...(quoteId ? { quoteId } : {}),
+          ...(quoteGroupId ? { quoteGroupId } : {}),
           ...(caseVariantId ? { caseVariantId } : {}),
           uploadedById: user.id,
           fileName: file.name,

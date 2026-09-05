@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- sourcing attachments require authenticated URLs. */
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronsUpDown,
@@ -56,6 +56,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -117,6 +118,9 @@ type ProposalDraft = SheetLine & {
   colour: string;
   customLabel: string;
 };
+type ImageDraft = { file: File; preview: string };
+const MAX_SUPPLIER_IMAGES = 10;
+const MAX_VARIANT_IMAGES = 5;
 const emptyLine = (): SheetLine => ({
   availability: "available",
   unitPriceRmb: "",
@@ -174,6 +178,15 @@ export default function VariantSourcingCaseDetail({
   const sheetSelectionInitialized = useRef(false);
   const [paymentTerms, setPaymentTerms] = useState("");
   const [sheetNotes, setSheetNotes] = useState("");
+  const [supplierImageDrafts, setSupplierImageDrafts] = useState<ImageDraft[]>(
+    [],
+  );
+  const [variantImageDrafts, setVariantImageDrafts] = useState<
+    Record<string, ImageDraft[]>
+  >({});
+  const [supplierDetailsVariantId, setSupplierDetailsVariantId] = useState<
+    string | null
+  >(null);
   const [lines, setLines] = useState<Record<string, SheetLine>>({});
   const [proposals, setProposals] = useState<ProposalDraft[]>([]);
   const [proposalImages, setProposalImages] = useState<
@@ -386,6 +399,11 @@ export default function VariantSourcingCaseDetail({
   const activeVariant = item.variants.find(
     (variant: any) => variant.id === activeVariantId,
   );
+  const supplierDetailsVariant = supplierDetailsVariantId
+    ? item.variants.find(
+        (variant: any) => variant.id === supplierDetailsVariantId,
+      )
+    : null;
   const activeMarket = {
     marketPriceMyr: activeVariant?.marketPriceMyr ?? undefined,
     marketPack: activeVariant?.marketPack ?? 1,
@@ -429,8 +447,35 @@ export default function VariantSourcingCaseDetail({
     (attachment: any) => !attachment.quoteId && !attachment.caseVariantId,
   );
   const variantAttachments = (item.attachments || []).filter(
-    (attachment: any) => attachment.caseVariantId,
+    (attachment: any) =>
+      attachment.caseVariantId && !attachment.quoteId && !attachment.quoteGroupId,
   );
+  const quoteGroupById = new Map(
+    item.quotes.map((quote: any) => [
+      quote.id,
+      quote.quoteGroupId || quote.id,
+    ]),
+  );
+  const activeQuoteGroupId = activeSheet?.quoteGroupId || activeSheet?.id;
+  const supplierSheetAttachments = activeSheetId
+    ? (item.attachments || []).filter(
+        (attachment: any) =>
+          attachment.quoteGroupId === activeQuoteGroupId ||
+          (!attachment.quoteGroupId &&
+            attachment.quoteId &&
+            quoteGroupById.get(attachment.quoteId) === activeQuoteGroupId),
+      )
+    : [];
+  const supplierWideImages = supplierSheetAttachments.filter(
+    (attachment: any) =>
+      !attachment.caseVariantId && attachment.mimeType?.startsWith("image/"),
+  );
+  const supplierVariantImages = (variantId: string) =>
+    supplierSheetAttachments.filter(
+      (attachment: any) =>
+        attachment.caseVariantId === variantId &&
+        attachment.mimeType?.startsWith("image/"),
+    );
   const caseImages = caseAttachments.filter((attachment: any) =>
     attachment.mimeType?.startsWith("image/"),
   );
@@ -640,6 +685,60 @@ export default function VariantSourcingCaseDetail({
       }),
     );
   };
+  const queueSupplierImages = (files: FileList | null) => {
+    if (!files) return;
+    setSupplierImageDrafts((current) => [
+      ...current,
+      ...Array.from(files)
+        .filter((file) => file.type.startsWith("image/"))
+        .slice(0, MAX_SUPPLIER_IMAGES - current.length)
+        .map((file) => ({ file, preview: URL.createObjectURL(file) })),
+    ]);
+  };
+  const queueVariantImages = (variantId: string, files: FileList | null) => {
+    if (!files) return;
+    setVariantImageDrafts((current) => {
+      const existing = current[variantId] || [];
+      return {
+        ...current,
+        [variantId]: [
+          ...existing,
+          ...Array.from(files)
+            .filter((file) => file.type.startsWith("image/"))
+            .slice(0, MAX_VARIANT_IMAGES - existing.length)
+            .map((file) => ({ file, preview: URL.createObjectURL(file) })),
+        ],
+      };
+    });
+  };
+  const clearSupplierImageDrafts = () => {
+    supplierImageDrafts.forEach((draft) => URL.revokeObjectURL(draft.preview));
+    Object.values(variantImageDrafts)
+      .flat()
+      .forEach((draft) => URL.revokeObjectURL(draft.preview));
+    setSupplierImageDrafts([]);
+    setVariantImageDrafts({});
+  };
+  const uploadSupplierDetails = async (result: any) => {
+    const quoteId = result?.id || activeSheetId;
+    if (!quoteId) return;
+    await Promise.all([
+      ...supplierImageDrafts.map((draft) =>
+        uploadAttachment.mutateAsync({ id: item.id, file: draft.file, quoteId }),
+      ),
+      ...Object.entries(variantImageDrafts).flatMap(([caseVariantId, images]) =>
+        images.map((draft) =>
+          uploadAttachment.mutateAsync({
+            id: item.id,
+            file: draft.file,
+            quoteId,
+            caseVariantId,
+          }),
+        ),
+      ),
+    ]);
+    clearSupplierImageDrafts();
+  };
   const submitSheet = async () => {
     setSubmitAttempted(true);
     if (submitBlocker) return;
@@ -652,6 +751,7 @@ export default function VariantSourcingCaseDetail({
     });
     if (result?.id) setActiveSheetId(result.id);
     await uploadProposalImages(result);
+    await uploadSupplierDetails(result);
   };
   const saveSheet = async () => {
     const result = await command.mutateAsync({
@@ -661,9 +761,12 @@ export default function VariantSourcingCaseDetail({
       quoteId: activeSheetId || undefined,
       quoteSheet: sheetPayload(),
     });
+    if (result?.id) setActiveSheetId(result.id);
     await uploadProposalImages(result);
+    await uploadSupplierDetails(result);
   };
   const selectSheet = (sheet: any) => {
+    clearSupplierImageDrafts();
     setActiveSheetId(sheet.id);
     setSupplierId(sheet.supplierId || "");
     setSupplierName(sheet.supplierName);
@@ -748,6 +851,7 @@ export default function VariantSourcingCaseDetail({
     selectSheet(requestedSheet || defaultQuoteSheet);
   }, [defaultQuoteSheet?.id]);
   const startNewQuoteSheet = () => {
+    clearSupplierImageDrafts();
     setActiveSheetId(null);
     setSupplierId("");
     setSupplierName("");
@@ -1381,7 +1485,7 @@ export default function VariantSourcingCaseDetail({
                         </th>
                         <th className="p-2">Variant</th>
                         <th className="p-2">Marketplace</th>
-                        <th className="p-2">Remarks</th>
+                        <th className="p-2">Request remarks</th>
                         <th className="p-2">Available</th>
                         <th className="p-2">CNY / selling unit</th>
                         <th className="p-2">Carton weight</th>
@@ -1571,9 +1675,9 @@ export default function VariantSourcingCaseDetail({
                           const correctionIssue =
                             correctionIssuesByVariantId.get(variant.id);
                           return (
+                            <Fragment key={variant.id}>
                             <tr
-                              key={variant.id}
-                              className={`border-b align-top ${correctionIssue ? "bg-red-50/60 outline outline-1 -outline-offset-1 outline-red-500" : line.availability === "unavailable" ? "bg-muted/20 text-muted-foreground" : ""}`}
+                              className={`align-top ${correctionIssue ? "relative z-10 border-x border-red-500 bg-red-50/60 shadow-[0_-1px_0_0_#ef4444]" : line.availability === "unavailable" ? "border-b border-dashed bg-muted/20 text-muted-foreground" : "border-b border-dashed"}`}
                             >
                               <td className="p-2">
                                 <Checkbox
@@ -1655,7 +1759,7 @@ export default function VariantSourcingCaseDetail({
                                 )}
                               </td>
                               <td className="max-w-40 p-2 text-xs text-muted-foreground">
-                                {variant.remarks || "-"}
+                                <p>{variant.remarks || "-"}</p>
                               </td>
                               <td className="p-2">
                                 <div className="flex items-center gap-2">
@@ -1824,12 +1928,127 @@ export default function VariantSourcingCaseDetail({
                                 />
                               </td>
                             </tr>
+                            <tr
+                              className={
+                                correctionIssue
+                                  ? "border-x border-b border-t border-solid [border-top-style:dashed] border-x-red-500 border-b-red-500 border-t-border bg-red-50/60"
+                                  : "border-b bg-muted/20"
+                              }
+                            >
+                              <td className="p-2" />
+                              <td colSpan={10} className="px-3 py-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Input
+                                    className="h-8 w-64"
+                                    value={line.notes}
+                                    onChange={(event) =>
+                                      updateLine(
+                                        variant.id,
+                                        "notes",
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="Add supplier note"
+                                    aria-label={`Supplier note for ${label(variant)}`}
+                                  />
+                                  {supplierVariantImages(variant.id).map(
+                                    (attachment: any) => (
+                                      <div key={attachment.id} className="relative">
+                                        <a
+                                          href={attachment.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          <img
+                                            className="h-8 w-8 rounded border object-cover"
+                                            src={attachment.url}
+                                            alt={`Supplier image for ${label(variant)}`}
+                                          />
+                                        </a>
+                                        {attachment.canDelete && (
+                                          <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="destructive"
+                                            className="absolute -right-2 -top-2 h-4 w-4"
+                                            aria-label={`Delete supplier image for ${label(variant)}`}
+                                            onClick={() =>
+                                              deleteAttachment.mutate({
+                                                id: item.id,
+                                                attachmentId: attachment.id,
+                                              })
+                                            }
+                                          >
+                                            <Trash2 className="h-2.5 w-2.5" />
+                                          </Button>
+                                        )}
+                                      </div>
+                                    ),
+                                  )}
+                                  {(variantImageDrafts[variant.id] || []).map(
+                                    (draft) => (
+                                      <div key={draft.preview} className="relative">
+                                        <img
+                                          className="h-8 w-8 rounded border border-dashed object-cover"
+                                          src={draft.preview}
+                                          alt="Pending supplier image"
+                                        />
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="destructive"
+                                          className="absolute -right-2 -top-2 h-4 w-4"
+                                          aria-label="Remove pending supplier image"
+                                          onClick={() =>
+                                            setVariantImageDrafts((current) => {
+                                              URL.revokeObjectURL(draft.preview);
+                                              return {
+                                                ...current,
+                                                [variant.id]: (
+                                                  current[variant.id] || []
+                                                ).filter(
+                                                  (entry) =>
+                                                    entry.preview !== draft.preview,
+                                                ),
+                                              };
+                                            })
+                                          }
+                                        >
+                                          <Trash2 className="h-2.5 w-2.5" />
+                                        </Button>
+                                      </div>
+                                    ),
+                                  )}
+                                  <label className="flex h-8 cursor-pointer items-center gap-1 rounded border border-dashed border-sky-300 px-2 text-xs text-sky-700 hover:bg-sky-50">
+                                    <ImagePlus className="h-3.5 w-3.5" />
+                                    Upload images
+                                    <input
+                                      className="sr-only"
+                                      type="file"
+                                      accept="image/jpeg,image/png,image/webp,image/gif"
+                                      multiple
+                                      onChange={(event) => {
+                                        queueVariantImages(
+                                          variant.id,
+                                          event.target.files,
+                                        );
+                                        event.target.value = "";
+                                      }}
+                                    />
+                                  </label>
+                                  <span className="text-xs text-muted-foreground">
+                                    Up to {MAX_VARIANT_IMAGES} images · saved with this sheet
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                            </Fragment>
                           );
                         })}
                       {proposals.map((proposal, index) => (
+                        <Fragment key={proposal.clientKey}>
                         <tr
-                          key={proposal.clientKey}
-                          className="border-b align-top"
+                          className="border-b border-dashed align-top"
                         >
                           <td className="p-2">
                             <Checkbox
@@ -1878,7 +2097,7 @@ export default function VariantSourcingCaseDetail({
                                 })
                               }
                             />
-                            <label className="mt-2 flex h-12 w-12 cursor-pointer items-center justify-center overflow-hidden rounded border border-dashed bg-background">
+                            <div className="hidden">
                               {proposalImagePreviews[proposal.clientKey] ? (
                                 <img
                                   className="h-full w-full object-cover"
@@ -1915,46 +2134,12 @@ export default function VariantSourcingCaseDetail({
                               ) : (
                                 <ImagePlus className="h-4 w-4 text-muted-foreground" />
                               )}
-                              <input
-                                className="sr-only"
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp,image/gif"
-                                onChange={(event) => {
-                                  const file = event.target.files?.[0];
-                                  if (!file) return;
-                                  setProposalImages((current) => ({
-                                    ...current,
-                                    [proposal.clientKey]: file,
-                                  }));
-                                  setProposalImagePreviews((current) => ({
-                                    ...current,
-                                    [proposal.clientKey]:
-                                      URL.createObjectURL(file),
-                                  }));
-                                  if (proposal.caseVariantId)
-                                    uploadAttachment.mutate({
-                                      id: item.id,
-                                      file,
-                                      caseVariantId: proposal.caseVariantId,
-                                    });
-                                }}
-                              />
-                            </label>
+                            </div>
                           </td>
                           <td className="p-2 text-muted-foreground">
                             Supplier proposal
                           </td>
-                          <td className="p-2">
-                            <Input
-                              placeholder="Notes"
-                              value={proposal.notes}
-                              onChange={(event) =>
-                                updateProposal(index, {
-                                  notes: event.target.value,
-                                })
-                              }
-                            />
-                          </td>
+                          <td className="p-2 text-xs text-muted-foreground">-</td>
                           <td className="p-2">
                             <Switch
                               checked={proposal.availability === "available"}
@@ -2064,6 +2249,74 @@ export default function VariantSourcingCaseDetail({
                             />
                           </td>
                         </tr>
+                        <tr className="border-b bg-muted/20">
+                          <td className="p-2" />
+                          <td colSpan={10} className="px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Input
+                                className="h-8 w-64"
+                                value={proposal.notes}
+                                onChange={(event) =>
+                                  updateProposal(index, {
+                                    notes: event.target.value,
+                                  })
+                                }
+                                placeholder="Add supplier note"
+                                aria-label={`Supplier note for ${proposal.customLabel || "supplier proposal"}`}
+                              />
+                              {proposalImagePreviews[proposal.clientKey] ? (
+                                <img
+                                  className="h-8 w-8 rounded border border-dashed object-cover"
+                                  src={proposalImagePreviews[proposal.clientKey]}
+                                  alt="Pending supplier proposal image"
+                                />
+                              ) : proposal.caseVariantId &&
+                                variantAttachments.find(
+                                  (attachment: any) =>
+                                    attachment.caseVariantId === proposal.caseVariantId &&
+                                    attachment.mimeType?.startsWith("image/"),
+                                ) ? (
+                                <img
+                                  className="h-8 w-8 rounded border object-cover"
+                                  src={
+                                    variantAttachments.find(
+                                      (attachment: any) =>
+                                        attachment.caseVariantId === proposal.caseVariantId &&
+                                        attachment.mimeType?.startsWith("image/"),
+                                    )!.url
+                                  }
+                                  alt="Supplier proposal image"
+                                />
+                              ) : null}
+                              <label className="flex h-8 cursor-pointer items-center gap-1 rounded border border-dashed border-sky-300 px-2 text-xs text-sky-700 hover:bg-sky-50">
+                                <ImagePlus className="h-3.5 w-3.5" />
+                                Upload image
+                                <input
+                                  className="sr-only"
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp,image/gif"
+                                  onChange={(event) => {
+                                    const file = event.target.files?.[0];
+                                    if (!file) return;
+                                    setProposalImages((current) => ({
+                                      ...current,
+                                      [proposal.clientKey]: file,
+                                    }));
+                                    setProposalImagePreviews((current) => ({
+                                      ...current,
+                                      [proposal.clientKey]: URL.createObjectURL(file),
+                                    }));
+                                    event.target.value = "";
+                                  }}
+                                />
+                              </label>
+                              <span className="text-xs text-muted-foreground">
+                                Saved with this sheet
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                        </Fragment>
                       ))}
                       <tr>
                         <td colSpan={11} className="p-2">
@@ -2248,11 +2501,252 @@ export default function VariantSourcingCaseDetail({
                     ))}
                   </div>
                 )}
-                <Textarea
-                  value={sheetNotes}
-                  onChange={(event) => setSheetNotes(event.target.value)}
-                  placeholder="Supplier-wide notes"
-                />
+                <Dialog
+                  open={!!supplierDetailsVariant}
+                  onOpenChange={(open) =>
+                    !open && setSupplierDetailsVariantId(null)
+                  }
+                >
+                  <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>
+                        Supplier details{supplierDetailsVariant ? `: ${label(supplierDetailsVariant)}` : ""}
+                      </DialogTitle>
+                      <DialogDescription>
+                        Add supplier-specific remarks and reference images. They save with this supplier quote sheet.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {supplierDetailsVariant && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label
+                            htmlFor="supplier-variant-notes"
+                            className="text-sm font-medium"
+                          >
+                            Supplier remarks
+                          </label>
+                          <Textarea
+                            id="supplier-variant-notes"
+                            value={
+                              lines[supplierDetailsVariant.id]?.notes || ""
+                            }
+                            onChange={(event) =>
+                              updateLine(
+                                supplierDetailsVariant.id,
+                                "notes",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="Availability, finish, packaging, or other supplier notes"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <label className="text-sm font-medium">
+                              Supplier images
+                            </label>
+                            <span className="text-xs text-muted-foreground">
+                              JPG, PNG, WebP or GIF · 10 MB each · up to {MAX_VARIANT_IMAGES}
+                            </span>
+                          </div>
+                          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-sky-300 bg-sky-50/50 px-4 py-5 text-sm text-sky-800 hover:bg-sky-50">
+                            <ImagePlus className="h-4 w-4" />
+                            Add images
+                            <input
+                              className="sr-only"
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/gif"
+                              multiple
+                              onChange={(event) => {
+                                queueVariantImages(
+                                  supplierDetailsVariant.id,
+                                  event.target.files,
+                                );
+                                event.target.value = "";
+                              }}
+                            />
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {supplierVariantImages(
+                              supplierDetailsVariant.id,
+                            ).map((attachment: any) => (
+                              <div key={attachment.id} className="group relative">
+                                <a href={attachment.url} target="_blank" rel="noreferrer">
+                                  <img
+                                    className="h-16 w-16 rounded border object-cover"
+                                    src={attachment.url}
+                                    alt={`Supplier image for ${label(supplierDetailsVariant)}`}
+                                  />
+                                </a>
+                                {attachment.canDelete && (
+                                  <Button
+                                    type="button"
+                                    size="icon"
+                                    variant="destructive"
+                                    className="absolute -right-2 -top-2 h-5 w-5"
+                                    aria-label={`Delete supplier image for ${label(supplierDetailsVariant)}`}
+                                    onClick={() =>
+                                      deleteAttachment.mutate({
+                                        id: item.id,
+                                        attachmentId: attachment.id,
+                                      })
+                                    }
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            ))}
+                            {(variantImageDrafts[
+                              supplierDetailsVariant.id
+                            ] || []).map((draft, index) => (
+                              <div key={draft.preview} className="group relative">
+                                <img
+                                  className="h-16 w-16 rounded border object-cover"
+                                  src={draft.preview}
+                                  alt={`Pending supplier image ${index + 1}`}
+                                />
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="destructive"
+                                  className="absolute -right-2 -top-2 h-5 w-5"
+                                  aria-label="Remove pending supplier image"
+                                  onClick={() =>
+                                    setVariantImageDrafts((current) => {
+                                      const next = (current[
+                                        supplierDetailsVariant.id
+                                      ] || []).filter(
+                                        (entry) => entry.preview !== draft.preview,
+                                      );
+                                      URL.revokeObjectURL(draft.preview);
+                                      return { ...current, [supplierDetailsVariant.id]: next };
+                                    })
+                                  }
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Images upload when you save or submit this sheet.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    <DialogFooter>
+                      <Button
+                        type="button"
+                        onClick={() => setSupplierDetailsVariantId(null)}
+                      >
+                        Done
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+                  <div>
+                    <h3 className="font-medium">Supplier-wide details</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Notes and images that apply to this entire supplier quote.
+                    </p>
+                  </div>
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)]">
+                    <div className="space-y-2">
+                      <label htmlFor="supplier-wide-notes" className="text-sm font-medium">
+                        Supplier-wide remarks
+                      </label>
+                      <Textarea
+                        id="supplier-wide-notes"
+                        value={sheetNotes}
+                        onChange={(event) => setSheetNotes(event.target.value)}
+                        placeholder="Payment, production, packaging, or other supplier-wide notes"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <label className="text-sm font-medium">Supplier-wide images</label>
+                        <span className="text-xs text-muted-foreground">
+                          Up to {MAX_SUPPLIER_IMAGES}
+                        </span>
+                      </div>
+                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-sky-300 bg-sky-50/50 px-4 py-5 text-sm text-sky-800 hover:bg-sky-50">
+                        <ImagePlus className="h-4 w-4" />
+                        Add images
+                        <input
+                          className="sr-only"
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          multiple
+                          onChange={(event) => {
+                            queueSupplierImages(event.target.files);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {supplierWideImages.map((attachment: any) => (
+                          <div key={attachment.id} className="group relative">
+                            <a href={attachment.url} target="_blank" rel="noreferrer">
+                              <img
+                                className="h-16 w-16 rounded border object-cover"
+                                src={attachment.url}
+                                alt="Supplier-wide image"
+                              />
+                            </a>
+                            {attachment.canDelete && (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="destructive"
+                                className="absolute -right-2 -top-2 h-5 w-5"
+                                aria-label="Delete supplier-wide image"
+                                onClick={() =>
+                                  deleteAttachment.mutate({
+                                    id: item.id,
+                                    attachmentId: attachment.id,
+                                  })
+                                }
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                        {supplierImageDrafts.map((draft, index) => (
+                          <div key={draft.preview} className="group relative">
+                            <img
+                              className="h-16 w-16 rounded border object-cover"
+                              src={draft.preview}
+                              alt={`Pending supplier-wide image ${index + 1}`}
+                            />
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="destructive"
+                              className="absolute -right-2 -top-2 h-5 w-5"
+                              aria-label="Remove pending supplier-wide image"
+                              onClick={() =>
+                                setSupplierImageDrafts((current) => {
+                                  URL.revokeObjectURL(draft.preview);
+                                  return current.filter(
+                                    (entry) => entry.preview !== draft.preview,
+                                  );
+                                })
+                              }
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        JPG, PNG, WebP or GIF · 10 MB each · uploads on save.
+                      </p>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex justify-end gap-2 border-t pt-4">
                   {canWithdrawSheet && (
                     <Button
@@ -2944,6 +3438,17 @@ export default function VariantSourcingCaseDetail({
                           (!quoteIssues.length || offerIssues.length > 0);
                         const offerRejected = offer.reviewStatus === "rejected";
                         const chosen = selected[variant.id] === offer.id;
+                        const offerImages = (item.attachments || []).filter(
+                          (attachment: any) =>
+                            attachment.caseVariantId === variant.id &&
+                            attachment.mimeType?.startsWith("image/") &&
+                            (attachment.quoteGroupId ===
+                              (offer.quote.quoteGroupId || offer.quote.id) ||
+                              (!attachment.quoteGroupId &&
+                                attachment.quoteId &&
+                                quoteGroupById.get(attachment.quoteId) ===
+                                  (offer.quote.quoteGroupId || offer.quote.id))),
+                        );
                         const statusBadge = correctionPending ? (
                           <TooltipProvider delayDuration={0}>
                             <Tooltip>
@@ -3064,6 +3569,29 @@ export default function VariantSourcingCaseDetail({
                                   {offer.quote.supplierName}
                                 </span>
                               </div>
+                              {(offer.notes || offerImages.length > 0) && (
+                                <div className="mt-2 space-y-2 pl-6 text-xs text-muted-foreground">
+                                  {offer.notes && <p>{offer.notes}</p>}
+                                  {offerImages.length > 0 && (
+                                    <div className="flex flex-wrap gap-1">
+                                      {offerImages.map((attachment: any) => (
+                                        <a
+                                          key={attachment.id}
+                                          href={attachment.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          <img
+                                            className="h-10 w-10 rounded border object-cover"
+                                            src={attachment.url}
+                                            alt={`Supplier image from ${offer.quote.supplierName}`}
+                                          />
+                                        </a>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="p-3">
                               CNY {offer.unitPriceRmb ?? "-"} / unit

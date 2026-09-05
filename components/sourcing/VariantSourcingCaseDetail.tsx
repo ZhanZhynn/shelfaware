@@ -92,6 +92,7 @@ import {
 import { ShipOrderDialog } from "./ShipOrderDialog";
 import { ArrangeSupplierOrderDialog } from "./ArrangeSupplierOrderDialog";
 import { SupplierOrderGroup } from "./SupplierOrderGroup";
+import { SupplierQuoteContext } from "./SupplierQuoteContext";
 
 type SheetLine = {
   availability: "available" | "unavailable";
@@ -456,6 +457,36 @@ export default function VariantSourcingCaseDetail({
       quote.quoteGroupId || quote.id,
     ]),
   );
+  const supplierQuoteContexts = Object.values(
+    item.quotes
+      .filter((quote: any) =>
+        ["submitted", "changes_requested"].includes(quote.status),
+      )
+      .reduce((groups: Record<string, any>, quote: any) => {
+        const key = quote.quoteGroupId || quote.id;
+        if (!groups[key] || groups[key].revision < quote.revision)
+          groups[key] = quote;
+        return groups;
+      }, {}),
+  )
+    .map((quote: any) => {
+      const quoteGroupId = quote.quoteGroupId || quote.id;
+      const images = (item.attachments || []).filter(
+        (attachment: any) =>
+          !attachment.caseVariantId &&
+          attachment.mimeType?.startsWith("image/") &&
+          (attachment.quoteGroupId === quoteGroupId ||
+            (!attachment.quoteGroupId &&
+              attachment.quoteId &&
+              quoteGroupById.get(attachment.quoteId) === quoteGroupId)),
+      );
+      return {
+        quoteGroupId,
+        supplierName: quote.supplierName,
+        notes: quote.notes,
+        images,
+      };
+    })
   const activeQuoteGroupId = activeSheet?.quoteGroupId || activeSheet?.id;
   const supplierSheetAttachments = activeSheetId
     ? (item.attachments || []).filter(
@@ -3241,6 +3272,9 @@ export default function VariantSourcingCaseDetail({
       {/*       </CardContent> */}
       {/*     </Card> */}
       {/*   )} */}
+      {admin && supplierQuoteContexts.length > 0 && (
+        <SupplierQuoteContext contexts={supplierQuoteContexts} />
+      )}
       {admin && !decisionsLocked && (
         <Card id="variant-offers" className="scroll-mt-4">
           <CardHeader>

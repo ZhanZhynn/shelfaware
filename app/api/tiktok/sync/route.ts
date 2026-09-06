@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveShop, syncTikTokProducts, syncTikTokOrders, syncTikTokFinance, syncTikTokPayoutStatements, syncTikTokAll, isShopSyncing, validateTikTokToken } from "@/lib/tiktok";
+import { setActiveShop, syncTikTokProducts, syncTikTokOrders, syncTikTokFinance, syncTikTokPayoutStatements, syncTikTokAll, isShopSyncing, ensureFreshToken, validateTikTokToken } from "@/lib/tiktok";
 import { tiktokSyncBodySchema } from "@/lib/validations/tiktok";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -62,8 +62,9 @@ export async function POST(request: NextRequest) {
 
     setActiveShop(shopId);
 
-    // Pre-flight token check
-    const tokenStatus = await validateTikTokToken();
+    // Refresh an expired token before validating it with TikTok.
+    await ensureFreshToken(shopId, shop.userId);
+    const tokenStatus = await validateTikTokToken(shopId, shop.userId);
     if (!tokenStatus.valid) {
       return NextResponse.json(
         {

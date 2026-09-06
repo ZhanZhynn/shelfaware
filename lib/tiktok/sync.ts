@@ -130,16 +130,17 @@ export async function syncTikTokProducts(
       let created = 0;
       let updated = 0;
 
-      // Validate token
-      const tokenCheck = await validateTikTokToken();
+      const accessToken = await ensureFreshToken(shopId, userId);
+
+      // Validate the current token after refreshing an expired one.
+      const tokenCheck = await validateTikTokToken(shopId, userId);
       if (!tokenCheck.valid) {
         throw new Error(
           `TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`,
         );
       }
 
-      const accessToken = await ensureFreshToken();
-      const cipher = await getActiveShopCipher();
+      const cipher = await getActiveShopCipher(shopId, userId);
 
       // Fetch all products using pagination
       const syncedProductIds: string[] = [];
@@ -386,16 +387,17 @@ export async function syncTikTokOrders(
       let created = 0;
       let updated = 0;
 
-      // Validate token
-      const tokenCheck = await validateTikTokToken();
+      const accessToken = await ensureFreshToken(shopId, userId);
+
+      // Validate the current token after refreshing an expired one.
+      const tokenCheck = await validateTikTokToken(shopId, userId);
       if (!tokenCheck.valid) {
         throw new Error(
           `TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`,
         );
       }
 
-      const accessToken = await ensureFreshToken();
-      const cipher = await getActiveShopCipher();
+      const cipher = await getActiveShopCipher(shopId, userId);
 
       // Default to last 15 days if no date specified
       const createTimeFrom = createdAfter || Math.floor(Date.now() / 1000) - 15 * 24 * 60 * 60;
@@ -631,14 +633,14 @@ export async function syncTikTokFinance(
     { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "finance" },
     async () => {
       try {
-        const tokenCheck = await validateTikTokToken();
+        const accessToken = await ensureFreshToken(shopId, userId);
+        const tokenCheck = await validateTikTokToken(shopId, userId);
         if (!tokenCheck.valid) {
           throw new Error(`TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`);
         }
 
-        const [accessToken, cipher, orders] = await Promise.all([
-          ensureFreshToken(),
-          getActiveShopCipher(),
+        const [cipher, orders] = await Promise.all([
+          getActiveShopCipher(shopId, userId),
           prisma.tikTokOrder.findMany({
             where: { shopId: shop.id },
             select: { tiktokOrderId: true },
@@ -797,14 +799,14 @@ export async function syncTikTokPayoutStatements(
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "payouts" },
     async () => {
-      const tokenCheck = await validateTikTokToken();
+      const accessToken = await ensureFreshToken(shopId, userId);
+      const tokenCheck = await validateTikTokToken(shopId, userId);
       if (!tokenCheck.valid) {
         throw new Error(`TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`);
       }
 
-      const [accessToken, cipher, ledgerRows] = await Promise.all([
-        ensureFreshToken(),
-        getActiveShopCipher(),
+      const [cipher, ledgerRows] = await Promise.all([
+        getActiveShopCipher(shopId, userId),
         prisma.marketplaceFinancialRecord.findMany({
           where: {
             platform: "tiktok",

@@ -60,6 +60,10 @@ describe("TikTok final statement evidence sync", () => {
 
     await syncTikTokFinance("shop-1", "user-1");
 
+    expect(ensureFreshToken.mock.invocationCallOrder[0]!).toBeLessThan(
+      validateTikTokToken.mock.invocationCallOrder[0]!,
+    );
+
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         externalId: "statement-1",

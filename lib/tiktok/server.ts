@@ -184,12 +184,12 @@ export async function persistTokens(
  * Validate that the current token can successfully call the TikTok API.
  * Makes a lightweight API call to check token validity.
  */
-export async function validateTikTokToken(): Promise<{
+export async function validateTikTokToken(shopId?: string, userId?: string): Promise<{
   valid: boolean;
   error?: string;
 }> {
   try {
-    const shop = await getActiveShopRecord();
+    const shop = await getActiveShopRecord(shopId, userId);
     if (!shop?.accessToken) {
       return { valid: false, error: "No access token available" };
     }
@@ -210,12 +210,13 @@ export async function validateTikTokToken(): Promise<{
  * Get the active shop's record from DB.
  * Uses activeShopId if set, otherwise falls back to most recently updated shop.
  */
-async function getActiveShopRecord() {
-  if (activeShopId) {
+async function getActiveShopRecord(shopId?: string, userId?: string) {
+  if (shopId && userId) {
     return prisma.tikTokShop.findFirst({
-      where: { shopId: activeShopId },
+      where: { shopId, userId },
     });
   }
+  if (activeShopId) return prisma.tikTokShop.findFirst({ where: { shopId: activeShopId } });
   return prisma.tikTokShop.findFirst({
     orderBy: { updatedAt: "desc" },
   });
@@ -225,8 +226,8 @@ async function getActiveShopRecord() {
  * Ensure the active shop has a valid token, refreshing if needed.
  * Called internally before any authenticated API operation.
  */
-export async function ensureFreshToken(): Promise<string> {
-  const shop = await getActiveShopRecord();
+export async function ensureFreshToken(shopId?: string, userId?: string): Promise<string> {
+  const shop = await getActiveShopRecord(shopId, userId);
 
   if (!shop?.accessToken) {
     throw new Error("No TikTok shop found or access token missing.");
@@ -262,8 +263,8 @@ export async function ensureFreshToken(): Promise<string> {
  * Get the shop cipher for the active shop.
  * Shop cipher is required for all shop-level API calls.
  */
-export async function getActiveShopCipher(): Promise<string> {
-  const shop = await getActiveShopRecord();
+export async function getActiveShopCipher(shopId?: string, userId?: string): Promise<string> {
+  const shop = await getActiveShopRecord(shopId, userId);
 
   if (!shop?.shopCipher) {
     throw new Error("No TikTok shop found or shop cipher missing.");

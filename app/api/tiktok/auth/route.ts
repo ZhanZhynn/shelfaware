@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { isTikTokConfigured, getTikTokAuthUrl } from "@/lib/tiktok";
+import { createTikTokOAuthState, isTikTokConfigured, getTikTokAuthUrl } from "@/lib/tiktok";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
@@ -31,7 +31,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const authUrl = getTikTokAuthUrl(redirectUri);
+    const state = createTikTokOAuthState(session.id);
+    const authUrl = getTikTokAuthUrl(redirectUri, state);
     if (!authUrl) {
       return NextResponse.json(
         { error: "Failed to generate authorization URL" },

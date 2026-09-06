@@ -4,8 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/utils/auth";
-import { exchangeCodeForToken, getAuthorizedShops } from "@/lib/tiktok";
+import { exchangeCodeForToken, getAuthorizedShops, getTikTokOAuthStateUserId } from "@/lib/tiktok";
 import prisma from "@/prisma/client";
 import { tiktokCallbackQuerySchema } from "@/lib/validations/tiktok";
 import { logger } from "@/lib/logger";
@@ -14,17 +13,11 @@ import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getSessionFromRequest(request);
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = session.id;
     const { searchParams } = new URL(request.url);
 
     const params = {
       code: searchParams.get("code") || "",
-      state: searchParams.get("state") || undefined,
+      state: searchParams.get("state") || "",
     };
 
     const validationResult = tiktokCallbackQuerySchema.safeParse(params);
@@ -35,7 +28,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { code } = validationResult.data;
+    const { code, state } = validationResult.data;
+    const userId = getTikTokOAuthStateUserId(state);
+    if (!userId) {
+      return NextResponse.json({ error: "Invalid or expired authorization state" }, { status: 401 });
+    }
 
     // Exchange code for token
     const tokenData = await exchangeCodeForToken(code);

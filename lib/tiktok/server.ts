@@ -13,6 +13,7 @@
  */
 
 import prisma from "@/prisma/client";
+import crypto from "crypto";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getAuthorizedShops } from "./custom-api";
@@ -49,16 +50,46 @@ export function isTikTokConfigured(): boolean {
  * Generate the TikTok Shop authorization URL for OAuth flow.
  * Redirects user to TikTok's consent page.
  */
-export function getTikTokAuthUrl(redirectUri: string): string | null {
+export function getTikTokAuthUrl(redirectUri: string, state: string): string | null {
   if (!isTikTokConfigured()) return null;
 
   const serviceId = getEnvVar("TIKTOK_SERVICE_ID") || "default";
 
   // US market: services.us.tiktokshop.com, ROW: services.tiktokshop.com
   const authBase = "https://services.tiktokshop.com";
-  const url = `${authBase}/open/authorize?service_id=${serviceId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const url = `${authBase}/open/authorize?service_id=${serviceId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
 
   return url;
+}
+
+/** Create a short-lived, tamper-proof state binding a TikTok callback to a user. */
+export function createTikTokOAuthState(userId: string): string {
+  const payload = Buffer.from(JSON.stringify({
+    userId,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    nonce: crypto.randomBytes(16).toString("hex"),
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", getEnvVar("JWT_SECRET")).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+/** Resolve a valid TikTok OAuth state to the user that initiated the flow. */
+export function getTikTokOAuthStateUserId(state: string): string | null {
+  const [payload, signature] = state.split(".");
+  if (!payload || !signature) return null;
+
+  const expectedSignature = crypto.createHmac("sha256", getEnvVar("JWT_SECRET")).update(payload).digest("base64url");
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) return null;
+
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { userId?: unknown; expiresAt?: unknown };
+    if (typeof data.userId !== "string" || !data.userId || typeof data.expiresAt !== "number" || data.expiresAt < Date.now()) return null;
+    return data.userId;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Token Exchange ───────────────────────────────────────────────────────

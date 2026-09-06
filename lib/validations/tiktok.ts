@@ -38,7 +38,7 @@ export type TiktokOrderListQuery = z.infer<typeof tiktokOrderListQuerySchema>;
 // --- Callback Query ---
 export const tiktokCallbackQuerySchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
-  state: z.string().optional(),
+  state: z.string().min(1, "Authorization state is required"),
 });
 
 export type TiktokCallbackQuery = z.infer<typeof tiktokCallbackQuerySchema>;

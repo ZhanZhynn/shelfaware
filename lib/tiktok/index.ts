@@ -7,6 +7,8 @@ export {
   setActiveShop,
   getActiveShopId,
   getTikTokAuthUrl,
+  createTikTokOAuthState,
+  getTikTokOAuthStateUserId,
   exchangeCodeForToken,
   refreshTikTokToken,
   persistTokens,

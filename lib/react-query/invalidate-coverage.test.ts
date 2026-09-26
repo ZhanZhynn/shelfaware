@@ -127,6 +127,10 @@ const API_WRITE_EXEMPT = new Set([
   "app/api/email/queue/process/route.ts",
   "app/api/workspaces/route.ts",
   "app/api/workspaces/[id]/members/route.ts",
+  // Token lifecycle changes authentication material only; no server-cached
+  // inventory or marketplace response derives from these records.
+  "app/api/api-tokens/route.ts",
+  "app/api/api-tokens/[id]/route.ts",
   // These endpoints only calculate values, send outbound messages, or persist
   // user-local notification settings; none backs a server-cached data view.
   "app/api/settings/notifications/route.ts",

@@ -569,6 +569,26 @@ model User {
   sourcingComments         SourcingComment[]
   sourcingAttachments      SourcingAttachment[]
   sourcingCostScenarios    SourcingCostScenario[] @relation("SourcingCostScenarioCreator")
+  apiTokens                ApiToken[]
+}
+
+model ApiToken {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String    @db.ObjectId
+  name        String
+  tokenPrefix String
+  tokenHash   String    @unique
+  scopes      String[]
+  createdAt   DateTime  @default(now()) @db.Date
+  expiresAt   DateTime? @db.Date
+  lastUsedAt  DateTime? @db.Date
+  revokedAt   DateTime? @db.Date
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 model UserAction {
@@ -840,7 +860,9 @@ model SourcingQuoteLine {
   workspace            Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   quote                SourcingQuote             @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   caseVariant          SourcingCaseVariant       @relation(fields: [caseVariantId], references: [id], onDelete: Cascade)
-  selection            SourcingVariantSelection?
+  // Backed by a partial unique MongoDB index because quoteLineId is optional.
+  // Prisma models this as one-to-many because it cannot express that index.
+  selections           SourcingVariantSelection[]
 
   @@unique([quoteId, caseVariantId])
   @@index([workspaceId, caseVariantId])
@@ -851,7 +873,10 @@ model SourcingVariantSelection {
   workspaceId   String              @db.ObjectId
   caseId        String              @db.ObjectId
   caseVariantId String              @unique @db.ObjectId
-  quoteLineId   String?             @unique @db.ObjectId
+  // MongoDB enforces uniqueness only when this optional reference is present.
+  // Prisma cannot model the required partial unique index; keep it via
+  // scripts/migrate-selection-quote-line-index.ts instead of @unique.
+  quoteLineId   String?             @db.ObjectId
   orderQuantity Int?
   status        String
   skipReason    String?
@@ -2255,6 +2280,33 @@ model MappingBackfillRun {
 
   @@index([status])
   @@index([platform, internalShopId])
+}
+
+// Durable, coalesced marketplace synchronization work. A worker must hold the
+// database lease before performing a provider call; no request handler runs it.
+model MarketplaceSyncJob {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  platform          String
+  shopId            String    @db.ObjectId // Canonical internal marketplace-shop id.
+  syncType          String    // products | orders | finance | returns | ads | payouts | all
+  requestedByUserId String    @db.ObjectId
+  idempotencyKey    String?
+  input             Json?
+  status            String    @default("pending") // pending | running | retrying | completed | failed | cancelled
+  leaseOwner        String?
+  leaseExpiresAt    DateTime?
+  attempts          Int       @default(0)
+  lastError         String?
+  errors            Json?     // Bounded safe error-code history; never raw provider errors.
+  nextAttemptAt     DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([platform, shopId, syncType])
+  @@index([requestedByUserId, createdAt])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
 }
 
 // ─── Marketplace Analytics State ──────────────────────────────────────────

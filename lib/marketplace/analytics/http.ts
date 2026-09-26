@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/utils/auth";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { ApiScopeError, requireApiActor } from "@/lib/auth/require-api-scope";
+import { ApiTokenAuthenticationError } from "@/lib/auth/api-token";
 import { ANALYTICS_CALCULATION_VERSION, AnalyticsValidationError, getMarketplaceAnalytics } from "./server";
 import { ANALYTICS_API_VERSION } from "./cache";
 import { legacyMarketplaceStatsResponse } from "./legacy";
@@ -38,13 +39,19 @@ export async function marketplaceStaticMetricResponse(request: NextRequest, plat
 export async function marketplaceStatsResponse(request: NextRequest, platform: MarketplacePlatform, metric = "summary") {
   const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
   const respondError = (code: string, message: string, status: number, details?: Record<string, string>) => NextResponse.json({ error: { code, message, requestId, ...(details ? { details } : {}) } }, { status, headers: { "x-request-id": requestId } });
-  const limited = await withRateLimit(request, defaultRateLimits.standard);
+  let actor;
+  try {
+    actor = await requireApiActor(request, ["marketplace:read"]);
+  } catch (error) {
+    if (error instanceof ApiScopeError) return respondError("FORBIDDEN", "Forbidden", 403);
+    if (error instanceof ApiTokenAuthenticationError) return respondError("UNAUTHORIZED", "Unauthorized", 401);
+    return respondError("INTERNAL_ERROR", "Analytics request failed", 500);
+  }
+  const limited = await withRateLimit(request, defaultRateLimits.standard, actor.authType === "api_token" ? `api-token:${actor.tokenId}` : actor.user.id);
   if (limited) return limited;
-  const session = await getSessionFromRequest(request);
-  if (!session) return respondError("UNAUTHORIZED", "Unauthorized", 401);
   if (!metrics.has(metric)) return respondError("NOT_FOUND", "Not found", 404);
   try {
-    const result = await getMarketplaceAnalytics(platform, session, new URL(request.url).searchParams, metric);
+    const result = await getMarketplaceAnalytics(platform, actor.user, new URL(request.url).searchParams, metric);
     const key = metric === "summary" ? "summary" : metric === "revenue-trend" ? "revenueTrend" : metric;
     return NextResponse.json({ apiVersion: "2026-analytics-v1", calculationVersion: ANALYTICS_CALCULATION_VERSION, requestId, platform, metric, filters: result.filters, data: result[key as keyof typeof result], operationalCoverage: result.operationalCoverage, financialCoverage: result.financialCoverage, capabilities: result.capabilities, warnings: result.operationalCoverage.reason ? [result.operationalCoverage.reason] : [], page: result.page }, { headers: { "x-request-id": requestId } });
   } catch (error) {

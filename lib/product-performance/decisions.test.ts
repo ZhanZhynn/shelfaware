@@ -1,18 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { decideProduct } from "./decisions";
 
-const base = { active: true, coverageComplete: true, unitsSold: 30, available: 20, dailyVelocity: 1, leadTimeDays: 30, trend: "stable" as const, reviewQuality: null };
+const base = {
+  active: true,
+  coverageComplete: true,
+  totalUnitsSold: 30,
+  available: 20,
+  inboundQuantity: 0,
+  dailyVelocity: 1,
+  leadTimeDays: 30,
+  projectedStockoutDate: new Date("2026-01-21"),
+  willStockOutWithinLeadTime: true,
+  trend: "stable" as const,
+};
+
 describe("product performance decisions", () => {
-  it("restocks below lead time plus safety, with a transparent quantity", () => expect(decideProduct(base)).toMatchObject({ recommendation: "restock", suggestedQuantity: 17 }));
-  it("distinguishes known zero sales with stock from no stock, inactive, and incomplete new-listing coverage", () => {
-    expect(decideProduct({ ...base, unitsSold: 0, dailyVelocity: 0, available: 10, leadTimeDays: null })).toMatchObject({ recommendation: "review-excess" });
-    expect(decideProduct({ ...base, unitsSold: 0, dailyVelocity: 0, available: 0, leadTimeDays: null })).toMatchObject({ recommendation: "healthy" });
-    expect(decideProduct({ ...base, active: false })).toMatchObject({ recommendation: "needs-data" });
-    expect(decideProduct({ ...base, coverageComplete: false })).toMatchObject({ recommendation: "needs-data" });
-    expect(decideProduct({ ...base, coverageComplete: false, unitsSold: 0, dailyVelocity: 0, available: 10 })).toMatchObject({ recommendation: "needs-data", reasons: ["incomplete-observation-coverage"] });
+  it("marks stock that cannot cover lead time as critical", () => {
+    expect(decideProduct(base)).toMatchObject({ recommendation: "critical", suggestedQuantity: 17, reasons: ["stockout-before-replenishment"] });
   });
-  it("uses listing signals without a conversion proxy and respects precedence", () => {
-    expect(decideProduct({ ...base, available: 200, leadTimeDays: 14, trend: "decreasing" })).toMatchObject({ recommendation: "review-excess" });
-    expect(decideProduct({ ...base, available: 50, leadTimeDays: 14, trend: "decreasing" })).toMatchObject({ recommendation: "review-listing" });
+
+  it("uses inbound stock in the reorder calculation", () => {
+    expect(decideProduct({ ...base, available: 35, inboundQuantity: 1, projectedStockoutDate: new Date("2026-02-05"), willStockOutWithinLeadTime: false })).toMatchObject({ recommendation: "reorder", suggestedQuantity: 1 });
+    expect(decideProduct({ ...base, inboundQuantity: 20, willStockOutWithinLeadTime: false })).toMatchObject({ recommendation: "watch", suggestedQuantity: 0 });
+  });
+
+  it("distinguishes dormant, not-stocked, inactive, and data issues", () => {
+    expect(decideProduct({ ...base, totalUnitsSold: 0, dailyVelocity: 0, available: 10, leadTimeDays: null, projectedStockoutDate: null, willStockOutWithinLeadTime: false })).toMatchObject({ recommendation: "dormant" });
+    expect(decideProduct({ ...base, totalUnitsSold: 0, dailyVelocity: 0, available: 0, leadTimeDays: null, projectedStockoutDate: null, willStockOutWithinLeadTime: false })).toMatchObject({ recommendation: "not-stocked" });
+    expect(decideProduct({ ...base, active: false })).toMatchObject({ recommendation: "inactive" });
+    expect(decideProduct({ ...base, coverageComplete: false })).toMatchObject({ recommendation: "data-issue", reasons: ["incomplete-observation-coverage"] });
+  });
+
+  it("separates excess and growing-demand watch signals", () => {
+    expect(decideProduct({ ...base, available: 200, leadTimeDays: 14, projectedStockoutDate: new Date("2026-07-20"), willStockOutWithinLeadTime: false })).toMatchObject({ recommendation: "excess" });
+    expect(decideProduct({ ...base, available: 25, leadTimeDays: 14, trend: "increasing", projectedStockoutDate: new Date("2026-01-26"), willStockOutWithinLeadTime: false })).toMatchObject({ recommendation: "watch" });
   });
 });

@@ -982,8 +982,8 @@ class ApiClient {
   };
 
   productPerformance = {
-    get: async (params: { dateFrom: string; dateTo: string }) => {
-      const query = new URLSearchParams(params).toString();
+    get: async (params: { dateFrom: string; dateTo: string; view?: string; page?: number; pageSize?: number }) => {
+      const query = new URLSearchParams(Object.entries(params).flatMap(([key, value]) => value === undefined ? [] : [[key, String(value)]])).toString();
       const response = await this.client.get(
         `${API_ENDPOINTS.inventory.productPerformance}?${query}`,
       );

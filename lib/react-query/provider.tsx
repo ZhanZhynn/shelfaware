@@ -43,10 +43,15 @@ export function QueryProvider({ children }: QueryProviderProps) {
         persistOptions={{
           persister,
           maxAge: 1000 * 60 * 60 * 24, // 24 hours
-          buster: "v2.0.1",
+          // Discard the previous cache once: it may contain an oversized
+          // product-performance response persisted before this safeguard.
+          buster: "v2.0.2",
           dehydrateOptions: {
             shouldDehydrateQuery: (query) => {
-              return query.state.status === "success";
+              // This report includes the entire catalog plus nested channel and
+              // kit data. Sync localStorage serialization blocks the renderer
+              // and can make Chromium appear frozen.
+              return query.state.status === "success" && query.queryKey[0] !== "productPerformance";
             },
           },
         }}
@@ -71,4 +76,3 @@ export function QueryProvider({ children }: QueryProviderProps) {
     </QueryClientProvider>
   );
 }
-

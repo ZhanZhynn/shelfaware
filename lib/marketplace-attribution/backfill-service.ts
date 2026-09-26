@@ -49,6 +49,7 @@ export async function commitBackfill(
     throw new Error("Only admins can run backfill operations.");
   }
 
+  let run: { id: string; status: string; processedCount: number; factCount: number; errorCount: number; checkpoint?: unknown } | null = null;
   if (input.idempotencyKey) {
     const existing = await prisma.mappingBackfillRun.findFirst({
       where: {
@@ -60,42 +61,46 @@ export async function commitBackfill(
         idempotencyKey: input.idempotencyKey,
       },
     });
-    if (existing) return { runId: existing.id, status: existing.status as "running" | "completed" | "completed_with_errors" | "failed" | "cancelled", processedCount: existing.processedCount, factCount: existing.factCount, errorCount: existing.errorCount };
+    if (existing && existing.status === "running") run = existing;
+    else if (existing) return { runId: existing.id, status: existing.status as "running" | "completed" | "completed_with_errors" | "failed" | "cancelled", processedCount: existing.processedCount, factCount: existing.factCount, errorCount: existing.errorCount };
   }
-  const run = await prisma.mappingBackfillRun.create({
-    data: {
-      initiatedById: input.initiatedById,
-      platform: input.platform,
-      internalShopId: input.internalShopId ?? null,
-      effectiveDate: input.dateTo,
-      dateFrom: input.dateFrom,
-      dateTo: input.dateTo,
-      calculationVersion: input.calculationVersion ?? "v1",
-      idempotencyKey: input.idempotencyKey ?? null,
-      status: "running",
-      startedAt: new Date(),
-    },
-  });
+  if (!run) {
+    run = await prisma.mappingBackfillRun.create({
+      data: {
+        initiatedById: input.initiatedById,
+        platform: input.platform,
+        internalShopId: input.internalShopId ?? null,
+        effectiveDate: input.dateTo,
+        dateFrom: input.dateFrom,
+        dateTo: input.dateTo,
+        calculationVersion: input.calculationVersion ?? "v1",
+        idempotencyKey: input.idempotencyKey ?? null,
+        status: "running",
+        startedAt: new Date(),
+      },
+    });
+  }
 
   try {
+    const existingRun = await prisma.mappingBackfillRun.findUnique({ where: { id: run.id } });
+    if (existingRun?.status === "cancelled") {
+      return { runId: run.id, status: "cancelled" as const };
+    }
     if (input.platform === "shopee" && input.internalShopId) {
       await projectSourceLinesFromShopeeOrderItems(
         input.internalShopId,
         input.dateFrom,
         input.dateTo,
+        undefined,
+        true,
       );
     }
 
-    let processedCount = 0;
-    let factCount = 0;
-    let errorCount = 0;
+    let processedCount = existingRun?.processedCount ?? 0;
+    let factCount = existingRun?.factCount ?? 0;
+    let errorCount = existingRun?.errorCount ?? 0;
     const errors: { sourceLineId: string; error: string }[] = [];
     let lastSourceLineId: string | null = null;
-
-    const existingRun = await prisma.mappingBackfillRun.findUnique({ where: { id: run.id } });
-    if (existingRun?.status === "cancelled") {
-      return { runId: run.id, status: "cancelled" as const };
-    }
 
     const checkpointOffset = existingRun?.checkpoint && typeof existingRun.checkpoint === "object"
       ? (existingRun.checkpoint as { lastSourceLineId?: string }).lastSourceLineId

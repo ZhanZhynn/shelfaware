@@ -123,8 +123,10 @@ export async function projectFactsForSourceLines(sourceLineIds: string[]) {
   let salesSkuFacts = 0;
   let wmsFacts = 0;
 
-  for (const line of sourceLines) {
-    if (!line.offerId) continue;
+  const projectionBatchSize = 20;
+  for (let offset = 0; offset < sourceLines.length; offset += projectionBatchSize) {
+    await Promise.all(sourceLines.slice(offset, offset + projectionBatchSize).map(async (line) => {
+    if (!line.offerId) return;
 
     const offer = line.offerId ? offerById.get(line.offerId) : null;
 
@@ -150,16 +152,16 @@ export async function projectFactsForSourceLines(sourceLineIds: string[]) {
     });
     offerFacts++;
 
-    if (!offer) continue;
+    if (!offer) return;
 
     const offerKey = offerKeyForIdentity(offer);
     const mappingKey = `${line.internalShopId}:${offerKey}`;
     const offerMappings = mappingsByShopOffer.get(mappingKey) ?? [];
 
-    if (!offerMappings.length) continue;
+    if (!offerMappings.length) return;
 
     const effectiveMapping = resolveEffectiveMapping(offerMappings, line.orderDate);
-    if (!effectiveMapping) continue;
+    if (!effectiveMapping) return;
 
     const pkSku = salesSkuFactKey(line, effectiveMapping.id);
     await prisma.salesSkuPerformanceFact.upsert({
@@ -186,8 +188,8 @@ export async function projectFactsForSourceLines(sourceLineIds: string[]) {
 
     const skuRecipes = recipesBySkuId.get(effectiveMapping.salesSkuId) ?? [];
     const effectiveRecipe = resolveRecipeForDate(skuRecipes, line.orderDate);
-    if (!effectiveRecipe?.components.length) continue;
-    if (!line.grossItemSalesMinor || line.marketplaceQuantity == null) continue;
+    if (!effectiveRecipe?.components.length) return;
+    if (!line.grossItemSalesMinor || line.marketplaceQuantity == null) return;
 
     const gmvMinor = BigInt(line.grossItemSalesMinor);
     const components = effectiveRecipe.components;
@@ -238,6 +240,7 @@ export async function projectFactsForSourceLines(sourceLineIds: string[]) {
       });
       wmsFacts++;
     }
+    }));
   }
 
   return { offerFacts, salesSkuFacts, wmsFacts, skipped: sourceLineIds.length - sourceLines.length };

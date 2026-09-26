@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
     // Invalidate cache after sync
     await invalidateCache(cacheKeys.shopee.pattern);
     await invalidateCache(cacheKeys.abcAnalysis.pattern);
+    await invalidateCache(cacheKeys.productPerformance.pattern);
     await invalidateMarketplaceAnalytics("shopee");
 
     return NextResponse.json(result);

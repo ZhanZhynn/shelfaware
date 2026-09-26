@@ -48,8 +48,11 @@ async function getUnmappedMateriality() {
   const allOffers = await prisma.marketplaceOffer.findMany({
     select: {
       id: true,
+      platform: true,
       identityKey: true,
       internalShopId: true,
+      externalProductId: true,
+      externalVariantId: true,
       sellerSku: true,
       productName: true,
     },
@@ -57,14 +60,21 @@ async function getUnmappedMateriality() {
 
   const activeMappings = await prisma.marketplaceSkuMapping.findMany({
     where: { effectiveTo: null },
-    select: { shopId: true, offerKey: true },
+    select: { platform: true, shopId: true, offerKey: true },
   });
   const mappedKeys = new Set(
-    activeMappings.map((m) => `${m.shopId}:${m.offerKey}`),
+    activeMappings.map((m) => `${m.platform}:${m.shopId}:${m.offerKey}`),
   );
 
   const unmappedOffers = allOffers.filter(
-    (o) => !mappedKeys.has(`${o.internalShopId}:${o.identityKey}`),
+    (offer) => {
+      // MarketplaceOffer.identityKey includes the internal shop as part of its
+      // own identity. MarketplaceSkuMapping.offerKey intentionally does not.
+      const offerKey = offer.platform === "shopee"
+        ? `shopee:${offer.externalProductId}:${offer.externalVariantId ?? "product"}`
+        : null;
+      return !offerKey || !mappedKeys.has(`${offer.platform}:${offer.internalShopId}:${offerKey}`);
+    },
   );
 
   const offerIds = unmappedOffers.map((o) => o.id);

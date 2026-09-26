@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate all Shopee caches
     await invalidateCache(cacheKeys.shopee.pattern);
+    await invalidateCache(cacheKeys.productPerformance.pattern);
     await invalidateMarketplaceAnalytics("shopee");
 
     const succeeded = results.filter((r) => r.success).length;

@@ -1,8 +1,9 @@
 import prisma from "@/prisma/client";
 import type { Prisma } from "@prisma/client";
 import { resolveShopeeProductId } from "./shopee-identity";
-import { upsertShopeeOfferForItem, shopeeIdentityKey } from "./offer-adapter";
+import { upsertShopeeOfferForItem } from "./offer-adapter";
 import { isCancelledStatus, isUnpaidStatus } from "./order-status";
+import { projectFactsForSourceLines } from "./fact-projector";
 
 export type SourceLineInput = {
   platform: "shopee";
@@ -29,10 +30,13 @@ export async function projectSourceLinesFromShopeeOrderItems(
   shopId: string,
   from?: Date,
   to?: Date,
+  orderIds?: string[],
+  skipExisting = false,
 ) {
   const where: Record<string, unknown> = {
     order: {
       shopId,
+      ...(orderIds?.length ? { shopeeOrderId: { in: orderIds } } : {}),
       shopeeCreatedAt: from || to ? { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } : undefined,
     },
   };
@@ -43,19 +47,30 @@ export async function projectSourceLinesFromShopeeOrderItems(
       order: { select: { shopId: true, shopeeOrderId: true, orderStatus: true, currency: true, shopeeCreatedAt: true } },
       variant: { select: { shopeeItemId: true } },
     },
-    orderBy: { order: { shopeeCreatedAt: "asc" } },
   });
 
   const products = await prisma.shopeeProduct.findMany({
     where: { shopId, variants: { none: {} } },
     select: { shopeeItemId: true, itemSku: true },
   });
+  const existingLineIds = skipExisting && items.length > 0
+    ? new Set((await prisma.marketplaceSourceSalesLine.findMany({
+        where: {
+          platform: "shopee",
+          internalShopId: shopId,
+          externalLineId: { in: items.map((item) => `${item.order.shopeeOrderId}:${item.id}`) },
+        },
+        select: { externalLineId: true },
+      })).map((line) => line.externalLineId))
+    : new Set<string>();
 
   const results = { created: 0, updated: 0, skipped: 0, total: items.length };
 
-  for (const item of items) {
+  const writeBatchSize = 25;
+  for (let offset = 0; offset < items.length; offset += writeBatchSize) {
+    await Promise.all(items.slice(offset, offset + writeBatchSize).map(async (item) => {
     const occurredAt = item.order.shopeeCreatedAt;
-    if (!occurredAt) { results.skipped++; continue; }
+    if (!occurredAt) { results.skipped++; return; }
 
     const orderStatus = item.order.orderStatus;
     const isCancelled = isCancelledStatus(orderStatus);
@@ -86,6 +101,7 @@ export async function projectSourceLinesFromShopeeOrderItems(
     // new item rows), this key would need to incorporate a hash of stable
     // line attributes (SKU + quantity + price) instead.
     const externalLineId = `${item.order.shopeeOrderId}:${item.id}`;
+    if (existingLineIds.has(externalLineId)) { results.skipped++; return; }
     const sourceRevision = item.order.shopeeOrderId;
 
     const data: SourceLineInput = {
@@ -136,27 +152,38 @@ export async function projectSourceLinesFromShopeeOrderItems(
         updatedAt: new Date(),
       },
     });
-
-    const existing = await prisma.marketplaceSourceSalesLine.findUnique({
-      where: {
-        platform_internalShopId_externalOrderId_externalLineId: {
-          platform: data.platform,
-          internalShopId: data.internalShopId,
-          externalOrderId: data.externalOrderId,
-          externalLineId: data.externalLineId,
-        },
-      },
-      select: { createdAt: true, updatedAt: true },
-    });
-
-    if (existing && existing.updatedAt && existing.updatedAt > existing.createdAt) {
-      results.updated++;
-    } else {
-      results.created++;
-    }
+    // Prisma upsert does not report whether it inserted or updated. Counting
+    // every durable write as updated avoids a per-line read that made historical
+    // backfills exceed Mongo and HTTP execution limits.
+    results.updated++;
+    }));
   }
 
   return results;
+}
+
+/**
+ * Project the order lines just synchronized, rather than repeatedly replaying
+ * every order in the sync window. Raw order sync remains authoritative; failed
+ * analytics projection is safe to retry because source and fact writes upsert.
+ */
+export async function projectShopeeAttributionForOrderIds(shopId: string, orderIds: string[]) {
+  if (!orderIds.length) return { sourceLines: { created: 0, updated: 0, skipped: 0, total: 0 }, offerFacts: 0, salesSkuFacts: 0, wmsFacts: 0, skipped: 0 };
+  const sourceLines = await projectSourceLinesFromShopeeOrderItems(shopId, undefined, undefined, orderIds);
+  const lines = await prisma.marketplaceSourceSalesLine.findMany({
+    where: { platform: "shopee", internalShopId: shopId, externalOrderId: { in: orderIds }, orderEligibility: "eligible" },
+    select: { id: true },
+  });
+  const result = { offerFacts: 0, salesSkuFacts: 0, wmsFacts: 0, skipped: 0 };
+  const batchSize = 200;
+  for (let offset = 0; offset < lines.length; offset += batchSize) {
+    const batch = await projectFactsForSourceLines(lines.slice(offset, offset + batchSize).map((line) => line.id));
+    result.offerFacts += batch.offerFacts;
+    result.salesSkuFacts += batch.salesSkuFacts;
+    result.wmsFacts += batch.wmsFacts;
+    result.skipped += batch.skipped;
+  }
+  return { sourceLines, ...result };
 }
 
 const currencyScale = (currency: string) =>

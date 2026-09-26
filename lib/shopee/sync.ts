@@ -12,6 +12,8 @@ import { logger } from "@/lib/logger";
 import { parseSourceNumber } from "@/lib/marketplace/analytics/provenance";
 import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/json";
 import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
+import { projectShopeeAttributionForOrderIds } from "@/lib/marketplace-attribution/source-line-projector";
+import { isSharedSkuMappingAnalyticsEnabled } from "@/lib/marketplace-attribution/feature-flags";
 
 // Shopee order status mapping to our internal status
 const ORDER_STATUS_MAP: Record<string, string> = {
@@ -967,6 +969,17 @@ export async function syncShopeeOrders(
       where: { id: shop.id },
       data: { lastSyncedAt: new Date(), updatedAt: new Date() },
     });
+
+    if (isSharedSkuMappingAnalyticsEnabled()) {
+      try {
+        const attribution = await projectShopeeAttributionForOrderIds(shop.id, allOrderSns.map((order) => order.sn));
+        logger.info(`[Shopee Sync] Attribution projected: ${attribution.sourceLines.total} source lines, ${attribution.wmsFacts} component facts`);
+      } catch (attributionError) {
+        // Order sync must not be rolled back because analytics projection can be
+        // retried idempotently after mapping or recipe corrections.
+        logger.error("[Shopee Sync] Attribution projection failed:", attributionError);
+      }
+    }
 
     logger.info(
       `[Shopee Sync] Orders synced: ${synced} (created: ${created}, updated: ${updated}, errors: ${errors.length})`,

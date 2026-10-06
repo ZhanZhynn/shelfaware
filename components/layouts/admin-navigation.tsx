@@ -10,6 +10,7 @@ import {
   FileText,
   Gauge,
   History,
+  KeyRound,
   Link2,
   LayoutDashboard,
   Mail,
@@ -139,6 +140,7 @@ export const adminNavigationSections: AdminNavigationSection[] = [
   {
     label: "System Settings",
     items: [
+      { href: "/admin/settings/api-tokens", label: "API Tokens", icon: KeyRound },
       { href: "/admin/settings/email-preferences", label: "Email Preferences", icon: Mail },
       { href: "/admin/settings/notifications", label: "Notifications", icon: Bell },
     ],

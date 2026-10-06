@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { syncShopifyProducts, syncShopifyOrders, syncShopifyFinance, syncShopifyAll, isShopSyncing, validateShopifyToken, setActiveShop } from "@/lib/shopify";
+import { syncShopifyProducts, syncShopifyOrders, syncShopifyFinance, syncShopifyAll, isShopSyncing, validateShopifyToken } from "@/lib/shopify";
 import { shopifySyncBodySchema } from "@/lib/validations/shopify";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     const shop = await prisma.shopifyShop.findFirst({
       where: { id: shopId, userId: { in: ownerIds } },
-      select: { id: true, userId: true, shopDomain: true },
+      select: { id: true, userId: true, shopDomain: true, accessToken: true },
     });
 
     if (!shop) {
@@ -61,9 +61,11 @@ export async function POST(request: NextRequest) {
       `[Shopify Sync] Triggered ${syncType} sync for shop ${shop.shopDomain} by user ${userId}`,
     );
 
-    // Pre-flight token check (must set active shop so token validation targets the right shop)
-    setActiveShop(shop.shopDomain);
-    const tokenStatus = await validateShopifyToken();
+    // Pre-flight token check for the selected shop's explicit credentials.
+    const tokenStatus = await validateShopifyToken({
+      shopDomain: shop.shopDomain,
+      accessToken: shop.accessToken,
+    });
     if (!tokenStatus.valid) {
       return NextResponse.json(
         {

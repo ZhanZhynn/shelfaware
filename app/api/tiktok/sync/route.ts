@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveShop, syncTikTokProducts, syncTikTokOrders, syncTikTokFinance, syncTikTokPayoutStatements, syncTikTokAll, isShopSyncing, ensureFreshToken, validateTikTokToken } from "@/lib/tiktok";
+import { syncTikTokProducts, syncTikTokOrders, syncTikTokFinance, syncTikTokPayoutStatements, syncTikTokAll, isShopSyncing, ensureFreshToken, validateTikTokToken } from "@/lib/tiktok";
 import { tiktokSyncBodySchema } from "@/lib/validations/tiktok";
 import prisma from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -60,11 +60,10 @@ export async function POST(request: NextRequest) {
       `[TikTok Sync] Triggered ${syncType} sync for shop ${shopId} by user ${userId}`,
     );
 
-    setActiveShop(shopId);
-
     // Refresh an expired token before validating it with TikTok.
-    await ensureFreshToken(shopId, shop.userId);
-    const tokenStatus = await validateTikTokToken(shopId, shop.userId);
+    const shopContext = { shopId, userId: shop.userId };
+    await ensureFreshToken(shopContext);
+    const tokenStatus = await validateTikTokToken(shopContext);
     if (!tokenStatus.valid) {
       return NextResponse.json(
         {

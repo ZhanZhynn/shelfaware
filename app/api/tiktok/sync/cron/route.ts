@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import prisma from "@/prisma/client";
-import { setActiveShop, syncTikTokAll } from "@/lib/tiktok";
+import { syncTikTokAll } from "@/lib/tiktok";
 import { logger } from "@/lib/logger";
 import { invalidateAllServerCaches, invalidateMarketplaceAnalytics } from "@/lib/cache";
 
@@ -55,7 +55,6 @@ export async function POST(request: NextRequest) {
     const results = [];
     for (const shop of shops) {
       try {
-        setActiveShop(shop.shopId);
         const result = await syncTikTokAll(shop.shopId, shop.userId);
         results.push({
           shopId: shop.shopId,

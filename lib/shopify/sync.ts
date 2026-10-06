@@ -6,11 +6,10 @@
  */
 
 import {
-  setActiveShop,
   validateShopifyToken,
-  getActiveAccessToken,
   SHOPIFY_API_VERSION,
 } from "./server";
+import type { ShopifyTokenContext } from "./server";
 import { fetchAllProducts, fetchAllOrders, fetchAllFinanceOrders } from "./graphql-client";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
@@ -108,6 +107,7 @@ export async function syncShopifyProducts(
 }> {
   const shop = await prisma.shopifyShop.findFirst({
     where: { id: shopId, userId },
+    select: { id: true, shopDomain: true, accessToken: true },
   });
   if (!shop) throw new Error(`Shopify shop ${shopId} not found for user ${userId}`);
 
@@ -115,7 +115,10 @@ export async function syncShopifyProducts(
     throw new Error(`Sync already in progress for Shopify shop ${shopId}`);
   }
   try {
-    setActiveShop(shop.shopDomain);
+    const tokenContext: ShopifyTokenContext = {
+      shopDomain: shop.shopDomain,
+      accessToken: shop.accessToken,
+    };
 
     return await runWithSyncLog(
       { shopId: shop.id, userId: actorId, channel: "shopify", syncType: "products" },
@@ -126,12 +129,12 @@ export async function syncShopifyProducts(
       let updated = 0;
 
       // Pre-flight token check
-      const tokenCheck = await validateShopifyToken();
+      const tokenCheck = await validateShopifyToken(tokenContext);
       if (!tokenCheck.valid) {
         throw new Error(`Token validation failed: ${tokenCheck.error}`);
       }
 
-      const accessToken = await getActiveAccessToken();
+      const accessToken = tokenContext.accessToken;
       const products = await withShopifyRetry(() => fetchAllProducts(shop.shopDomain, accessToken));
 
       logger.info(`[Shopify Sync] Fetched ${products.length} products from ${shop.shopDomain}`);
@@ -248,6 +251,7 @@ export async function syncShopifyOrders(
 }> {
   const shop = await prisma.shopifyShop.findFirst({
     where: { id: shopId, userId },
+    select: { id: true, shopDomain: true, accessToken: true },
   });
   if (!shop) throw new Error(`Shopify shop ${shopId} not found for user ${userId}`);
 
@@ -255,7 +259,10 @@ export async function syncShopifyOrders(
     throw new Error(`Sync already in progress for Shopify shop ${shopId}`);
   }
   try {
-    setActiveShop(shop.shopDomain);
+    const tokenContext: ShopifyTokenContext = {
+      shopDomain: shop.shopDomain,
+      accessToken: shop.accessToken,
+    };
 
     return await runWithSyncLog(
       { shopId: shop.id, userId: actorId, channel: "shopify", syncType: "orders" },
@@ -266,12 +273,12 @@ export async function syncShopifyOrders(
       let updated = 0;
 
       // Pre-flight token check
-      const tokenCheck = await validateShopifyToken();
+      const tokenCheck = await validateShopifyToken(tokenContext);
       if (!tokenCheck.valid) {
         throw new Error(`Token validation failed: ${tokenCheck.error}`);
       }
 
-      const accessToken = await getActiveAccessToken();
+      const accessToken = tokenContext.accessToken;
       const createdAfter = daysBack
         ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
         : undefined;
@@ -418,22 +425,28 @@ export async function syncShopifyFinance(
   daysBack?: number,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
-  const shop = await prisma.shopifyShop.findFirst({ where: { id: shopId, userId } });
+  const shop = await prisma.shopifyShop.findFirst({
+    where: { id: shopId, userId },
+    select: { id: true, shopDomain: true, accessToken: true },
+  });
   if (!shop) throw new Error(`Shopify shop ${shopId} not found for user ${userId}`);
 
   if (!acquireSyncLock(shopId)) {
     throw new Error(`Sync already in progress for Shopify shop ${shopId}`);
   }
   try {
-    setActiveShop(shop.shopDomain);
+    const tokenContext: ShopifyTokenContext = {
+      shopDomain: shop.shopDomain,
+      accessToken: shop.accessToken,
+    };
     return await runWithSyncLog(
       { shopId: shop.id, userId: actorId, channel: "shopify", syncType: "finance" },
       async () => {
         try {
-          const tokenCheck = await validateShopifyToken();
+          const tokenCheck = await validateShopifyToken(tokenContext);
           if (!tokenCheck.valid) throw new Error(`Token validation failed: ${tokenCheck.error}`);
 
-          const accessToken = await getActiveAccessToken();
+          const accessToken = tokenContext.accessToken;
           const updatedAfter = daysBack
             ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
             : undefined;

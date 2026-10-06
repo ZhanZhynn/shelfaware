@@ -7,7 +7,7 @@ const {
   setMarketplaceCapability,
   validateTikTokToken,
   ensureFreshToken,
-  getActiveShopCipher,
+  getTikTokShopCipher,
 } = vi.hoisted(() => ({
   prismaMock: {
     tikTokShop: { findFirst: vi.fn() },
@@ -20,14 +20,13 @@ const {
   setMarketplaceCapability: vi.fn(),
   validateTikTokToken: vi.fn(),
   ensureFreshToken: vi.fn(),
-  getActiveShopCipher: vi.fn(),
+  getTikTokShopCipher: vi.fn(),
 }));
 
 vi.mock("./server", () => ({
-  setActiveShop: vi.fn(),
   validateTikTokToken,
   ensureFreshToken,
-  getActiveShopCipher,
+  getTikTokShopCipher,
 }));
 vi.mock("./custom-api", () => ({ getOrderStatementTransactions, getStatementTransactions }));
 vi.mock("@/prisma/client", () => ({ default: prismaMock, prisma: prismaMock }));
@@ -47,7 +46,7 @@ describe("TikTok final statement evidence sync", () => {
     prismaMock.syncLog.update.mockResolvedValue({});
     validateTikTokToken.mockResolvedValue({ valid: true });
     ensureFreshToken.mockResolvedValue("seller-token");
-    getActiveShopCipher.mockResolvedValue("shop-cipher");
+    getTikTokShopCipher.mockResolvedValue("shop-cipher");
     setMarketplaceCapability.mockResolvedValue({});
   });
 
@@ -63,6 +62,9 @@ describe("TikTok final statement evidence sync", () => {
     expect(ensureFreshToken.mock.invocationCallOrder[0]!).toBeLessThan(
       validateTikTokToken.mock.invocationCallOrder[0]!,
     );
+    expect(ensureFreshToken).toHaveBeenCalledWith({ shopId: "shop-1", userId: "user-1" });
+    expect(validateTikTokToken).toHaveBeenCalledWith({ shopId: "shop-1", userId: "user-1" });
+    expect(getTikTokShopCipher).toHaveBeenCalledWith({ shopId: "shop-1", userId: "user-1" });
 
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { prismaMock, fetchAllOrders } = vi.hoisted(() => {
+const { prismaMock, fetchAllOrders, validateShopifyToken } = vi.hoisted(() => {
   const tx = {
     shopifyOrder: { update: vi.fn(), create: vi.fn() },
     shopifyOrderItem: { deleteMany: vi.fn(), create: vi.fn() },
@@ -13,12 +13,16 @@ const { prismaMock, fetchAllOrders } = vi.hoisted(() => {
     $transaction: vi.fn(async (operation) => operation(tx)),
     tx,
   };
-  return { prismaMock, fetchAllOrders: vi.fn() };
+  return {
+    prismaMock,
+    fetchAllOrders: vi.fn(),
+    validateShopifyToken: vi.fn().mockResolvedValue({ valid: true }),
+  };
 });
 
 vi.mock("@/prisma/client", () => ({ default: prismaMock }));
 vi.mock("./graphql-client", () => ({ fetchAllOrders, fetchAllProducts: vi.fn(), fetchAllFinanceOrders: vi.fn() }));
-vi.mock("./server", () => ({ setActiveShop: vi.fn(), validateShopifyToken: vi.fn().mockResolvedValue({ valid: true }), getActiveAccessToken: vi.fn().mockResolvedValue("token"), SHOPIFY_API_VERSION: "2025-07" }));
+vi.mock("./server", () => ({ validateShopifyToken, SHOPIFY_API_VERSION: "2025-07" }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability: vi.fn() }));
 
 import { syncShopifyOrders } from "./sync";
@@ -30,7 +34,7 @@ const order = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  prismaMock.shopifyShop.findFirst.mockResolvedValue({ id: "shop-record", shopDomain: "shop.myshopify.com" });
+  prismaMock.shopifyShop.findFirst.mockResolvedValue({ id: "shop-record", shopDomain: "shop.myshopify.com", accessToken: "shop-token" });
   prismaMock.shopifyShop.update.mockResolvedValue({});
   prismaMock.syncLog.create.mockResolvedValue({ id: "log" });
   prismaMock.syncLog.update.mockResolvedValue({});
@@ -49,6 +53,11 @@ describe("Shopify order persistence", () => {
     const result = await syncShopifyOrders("shop-record", "user-record");
 
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(validateShopifyToken).toHaveBeenCalledWith({
+      shopDomain: "shop.myshopify.com",
+      accessToken: "shop-token",
+    });
+    expect(fetchAllOrders).toHaveBeenCalledWith("shop.myshopify.com", "shop-token", undefined);
     expect(result).toMatchObject({ synced: 0, created: 0, updated: 0 });
     expect(result.errors).toEqual([expect.stringContaining("write failed")]);
     // The real Mongo transaction rolls back the preceding order update and item delete.

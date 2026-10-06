@@ -6,11 +6,11 @@
  */
 
 import {
-  setActiveShop,
   validateTikTokToken,
   ensureFreshToken,
-  getActiveShopCipher,
+  getTikTokShopCipher,
 } from "./server";
+import type { TikTokShopContext } from "./server";
 import {
   searchProducts,
   getProductDetail,
@@ -115,12 +115,11 @@ export async function syncTikTokProducts(
   updated: number;
   errors: string[];
 }> {
-  setActiveShop(shopId);
-
   const shop = await prisma.tikTokShop.findFirst({
     where: { shopId, userId },
   });
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
+  const shopContext: TikTokShopContext = { shopId, userId };
 
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "products" },
@@ -130,17 +129,17 @@ export async function syncTikTokProducts(
       let created = 0;
       let updated = 0;
 
-      const accessToken = await ensureFreshToken(shopId, userId);
+      const accessToken = await ensureFreshToken(shopContext);
 
       // Validate the current token after refreshing an expired one.
-      const tokenCheck = await validateTikTokToken(shopId, userId);
+      const tokenCheck = await validateTikTokToken(shopContext);
       if (!tokenCheck.valid) {
         throw new Error(
           `TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`,
         );
       }
 
-      const cipher = await getActiveShopCipher(shopId, userId);
+      const cipher = await getTikTokShopCipher(shopContext);
 
       // Fetch all products using pagination
       const syncedProductIds: string[] = [];
@@ -372,12 +371,11 @@ export async function syncTikTokOrders(
   updated: number;
   errors: string[];
 }> {
-  setActiveShop(shopId);
-
   const shop = await prisma.tikTokShop.findFirst({
     where: { shopId, userId },
   });
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
+  const shopContext: TikTokShopContext = { shopId, userId };
 
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "orders" },
@@ -387,17 +385,17 @@ export async function syncTikTokOrders(
       let created = 0;
       let updated = 0;
 
-      const accessToken = await ensureFreshToken(shopId, userId);
+      const accessToken = await ensureFreshToken(shopContext);
 
       // Validate the current token after refreshing an expired one.
-      const tokenCheck = await validateTikTokToken(shopId, userId);
+      const tokenCheck = await validateTikTokToken(shopContext);
       if (!tokenCheck.valid) {
         throw new Error(
           `TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`,
         );
       }
 
-      const cipher = await getActiveShopCipher(shopId, userId);
+      const cipher = await getTikTokShopCipher(shopContext);
 
       // Default to last 15 days if no date specified
       const createTimeFrom = createdAfter || Math.floor(Date.now() / 1000) - 15 * 24 * 60 * 60;
@@ -624,23 +622,22 @@ export async function syncTikTokFinance(
   userId: string,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
-  setActiveShop(shopId);
-
   const shop = await prisma.tikTokShop.findFirst({ where: { shopId, userId } });
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
+  const shopContext: TikTokShopContext = { shopId, userId };
 
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "finance" },
     async () => {
       try {
-        const accessToken = await ensureFreshToken(shopId, userId);
-        const tokenCheck = await validateTikTokToken(shopId, userId);
+        const accessToken = await ensureFreshToken(shopContext);
+        const tokenCheck = await validateTikTokToken(shopContext);
         if (!tokenCheck.valid) {
           throw new Error(`TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`);
         }
 
         const [cipher, orders] = await Promise.all([
-          getActiveShopCipher(shopId, userId),
+          getTikTokShopCipher(shopContext),
           prisma.tikTokOrder.findMany({
             where: { shopId: shop.id },
             select: { tiktokOrderId: true },
@@ -791,22 +788,21 @@ export async function syncTikTokPayoutStatements(
   userId: string,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
-  setActiveShop(shopId);
-
   const shop = await prisma.tikTokShop.findFirst({ where: { shopId, userId } });
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
+  const shopContext: TikTokShopContext = { shopId, userId };
 
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "tiktok", syncType: "payouts" },
     async () => {
-      const accessToken = await ensureFreshToken(shopId, userId);
-      const tokenCheck = await validateTikTokToken(shopId, userId);
+      const accessToken = await ensureFreshToken(shopContext);
+      const tokenCheck = await validateTikTokToken(shopContext);
       if (!tokenCheck.valid) {
         throw new Error(`TikTok token is invalid: ${tokenCheck.error}. Please re-authorize the shop.`);
       }
 
       const [cipher, ledgerRows] = await Promise.all([
-        getActiveShopCipher(shopId, userId),
+        getTikTokShopCipher(shopContext),
         prisma.marketplaceFinancialRecord.findMany({
           where: {
             platform: "tiktok",

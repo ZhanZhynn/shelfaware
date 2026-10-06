@@ -14,7 +14,7 @@ export type MarketplaceSyncInput = Prisma.InputJsonObject;
 export class MarketplaceSyncJobNotFoundError extends Error {}
 
 type MarketplaceActor = Parameters<typeof marketplaceOwnerIds>[0];
-type MarketplaceSyncJobRecord = {
+export type MarketplaceSyncJobRecord = {
   id: string;
   platform: string;
   shopId: string;
@@ -143,6 +143,18 @@ export async function completeMarketplaceSyncJob(id: string, workerId: string, n
   return result.count === 1;
 }
 
+/** Read work only after this worker has acquired and still owns its lease. */
+export async function getClaimedMarketplaceSyncJob(id: string, workerId: string, now = new Date()) {
+  return prisma.marketplaceSyncJob.findFirst({
+    where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } },
+  });
+}
+
+/** Read a retry timestamp after releasing a lease so a queue can schedule it. */
+export async function getMarketplaceSyncJobNextAttempt(id: string) {
+  return prisma.marketplaceSyncJob.findUnique({ where: { id }, select: { nextAttemptAt: true } });
+}
+
 /** Persist only stable error codes; provider exception messages may contain sensitive data. */
 export function marketplaceSyncErrorCode(value: string) {
   return /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : "SYNC_ATTEMPT_FAILED";
@@ -170,6 +182,24 @@ export async function retryMarketplaceSyncJob(id: string, workerId: string, erro
       nextAttemptAt: exhausted ? null : marketplaceSyncRetryAt(job.attempts, now),
       lastError: code,
       errors: errors as Prisma.InputJsonArray,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    },
+  });
+  return result.count === 1;
+}
+
+/** Mark deterministic, non-retryable worker failures without retaining provider details. */
+export async function failMarketplaceSyncJob(id: string, workerId: string, error: string, now = new Date()) {
+  const code = marketplaceSyncErrorCode(error);
+  const result = await prisma.marketplaceSyncJob.updateMany({
+    where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } },
+    data: {
+      status: "failed",
+      completedAt: now,
+      nextAttemptAt: null,
+      lastError: code,
+      errors: [{ at: now.toISOString(), code }] as Prisma.InputJsonArray,
       leaseOwner: null,
       leaseExpiresAt: null,
     },
@@ -207,7 +237,3 @@ export function marketplaceSyncJobResponse(job: MarketplaceSyncJobRecord) {
     updatedAt: job.updatedAt.toISOString(),
   };
 }
-
-// TODO(sync-workers): Wire a worker only after every provider uses a per-shop
-// client instance. Do not enqueue QStash work against the current mutable
-// module-global provider clients; the persisted lease is ready for that phase.

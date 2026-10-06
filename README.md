@@ -219,7 +219,8 @@ Uncomment and set in `.env` only if you need the feature:
 | **Brevo**         | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_ADMIN_EMAIL` — Transactional email (invoice send, reminders)                                                                                                            |
 | **Sentry**        | `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN` — Error monitoring                                                                                                                                                                                  |
 | **Upstash Redis** | `UPSTASH_REDIS_URL`, `UPSTASH_REDIS_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) — Caching, rate limiting                                                                                                             |
-| **QStash**        | `QSTASH_URL`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` — Background job queue (e.g. email)                                                                                                                  |
+| **QStash**        | `QSTASH_URL`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` — Background job queue (e.g. email and marketplace sync)                                                                                               |
+| **Marketplace sync worker** | `MARKETPLACE_SYNC_WORKER_SECRET` — Optional self-hosted worker Bearer secret when QStash is unavailable. |
 | **OpenRouter**    | `OPENROUTER_API_KEY` — AI insights (primary LLM)                                                                                                                                                                                           |
 | **Groq**          | `GROQ_API_KEY`, optional `GROQ_MODEL` (default `llama-3.3-70b-versatile`) — fallback when OpenRouter billing/rate-limit/upstream fails                                                                                                     |
 | **Stripe**        | `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` — Payments (checkout, webhooks)                                                                                                                            |
@@ -234,6 +235,28 @@ DATABASE_URL="mongodb://localhost:27017/stockly"
 JWT_SECRET="your-super-secret-jwt-key-min-32-chars"
 NEXT_PUBLIC_API_URL="http://localhost:3000"
 ```
+
+### Marketplace sync workers
+
+`POST /api/v1/marketplaces/{platform}/syncs` always creates a durable job and
+returns `202`; it never calls a marketplace provider inline. With QStash fully
+configured, the job is published to the signed worker automatically and retries
+are scheduled from the job's persisted `nextAttemptAt` value.
+
+For a self-hosted deployment without QStash, set a long random
+`MARKETPLACE_SYNC_WORKER_SECRET`. A trusted scheduler may then invoke the
+protected worker for the returned job ID:
+
+```bash
+curl -X POST https://your-app.example/api/marketplace/sync-jobs/worker \
+  -H "Authorization: Bearer $MARKETPLACE_SYNC_WORKER_SECRET" \
+  -H "Content-Type: application/json" \
+  --data '{"jobId":"<internal-job-id>"}'
+```
+
+Run it again after the response's `nextAttemptAt` if the job is `retrying`.
+The worker accepts QStash-signed requests when QStash is configured, or this
+timing-safe Bearer fallback; it never accepts unauthenticated requests.
 
 ### Full `.env.example` reference
 

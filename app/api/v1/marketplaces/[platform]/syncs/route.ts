@@ -11,6 +11,7 @@ import {
   type MarketplaceSyncInput,
   MarketplaceSyncJobNotFoundError,
 } from "@/lib/marketplace/sync-jobs";
+import { enqueueMarketplaceSyncJob } from "@/lib/marketplace/sync-enqueue";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
@@ -66,11 +67,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       idempotencyKey,
       input: body.input as MarketplaceSyncInput | undefined,
     });
+    // This only publishes durable work. It intentionally never falls back to a
+    // provider call in the API request when QStash is unavailable.
+    const queued = await enqueueMarketplaceSyncJob(result.job.id, {
+      notBefore: result.job.nextAttemptAt ?? undefined,
+    });
     return NextResponse.json(
       {
         apiVersion: "2026-marketplace-v1",
         data: marketplaceSyncJobResponse(result.job),
-        meta: { requestId, platform, execution: "not_scheduled", coalesced: result.coalesced },
+        meta: { requestId, platform, execution: queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced },
       },
       { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
     );

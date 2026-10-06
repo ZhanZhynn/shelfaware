@@ -25,6 +25,7 @@ import {
   claimMarketplaceSyncJob,
   completeMarketplaceSyncJob,
   createMarketplaceSyncJob,
+  failMarketplaceSyncJob,
   getMarketplaceSyncJob,
   marketplaceSyncErrorCode,
   retryMarketplaceSyncJob,
@@ -127,6 +128,16 @@ describe("MarketplaceSyncJob", () => {
     expect(update.data).toMatchObject({ status: "retrying", lastError: "SYNC_ATTEMPT_FAILED" });
     expect(update.data.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(now.getTime() + 22_500);
     expect(update.data.nextAttemptAt.getTime()).toBeLessThanOrEqual(now.getTime() + 37_500);
+  });
+
+  it("marks deterministic worker failures without retaining unsafe details", async () => {
+    mocks.marketplaceSyncJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(failMarketplaceSyncJob("a".repeat(24), "worker-a", "provider token=secret", now)).resolves.toBe(true);
+
+    const update = mocks.marketplaceSyncJob.updateMany.mock.calls[0]?.[0];
+    expect(update.data).toMatchObject({ status: "failed", lastError: "SYNC_ATTEMPT_FAILED", leaseOwner: null });
+    expect(JSON.stringify(update.data.errors)).not.toContain("secret");
   });
 
   it("scopes status reads to both the requesting owner and the current shop owner", async () => {

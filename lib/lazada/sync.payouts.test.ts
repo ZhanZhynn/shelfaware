@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { prismaMock, getPayoutStatusCustom, setMarketplaceCapability, validateLazadaToken } = vi.hoisted(() => ({
+const { prismaMock, getPayoutStatusCustom, setMarketplaceCapability, validateLazadaToken, createLazadaShopContext, ensureFreshLazadaToken } = vi.hoisted(() => ({
   prismaMock: {
     lazadaShop: { findFirst: vi.fn() },
     syncLog: { create: vi.fn(), update: vi.fn() },
@@ -9,9 +9,11 @@ const { prismaMock, getPayoutStatusCustom, setMarketplaceCapability, validateLaz
   getPayoutStatusCustom: vi.fn(),
   setMarketplaceCapability: vi.fn(),
   validateLazadaToken: vi.fn(),
+  createLazadaShopContext: vi.fn((shop) => ({ shopId: shop.id, userId: shop.userId, sellerId: shop.sellerId, countryCode: shop.countryCode, accessToken: shop.accessToken, refreshToken: shop.refreshToken, tokenExpiry: shop.tokenExpiry, refreshExpiry: shop.refreshExpiry })),
+  ensureFreshLazadaToken: vi.fn((context) => context),
 }));
 
-vi.mock("./server", () => ({ setActiveSeller: vi.fn(), validateLazadaToken }));
+vi.mock("./server", () => ({ createLazadaShopContext, ensureFreshLazadaToken, validateLazadaToken }));
 vi.mock("./custom-api", () => ({ getPayoutStatusCustom }));
 vi.mock("@/prisma/client", () => ({ default: prismaMock, prisma: prismaMock }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability }));
@@ -21,7 +23,7 @@ import { syncLazadaPayoutStatements } from "./sync";
 describe("Lazada payout statement sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    prismaMock.lazadaShop.findFirst.mockResolvedValue({ id: "shop-record" });
+    prismaMock.lazadaShop.findFirst.mockResolvedValue({ id: "shop-record", userId: "user-record", sellerId: "seller-record", countryCode: "my", accessToken: "token-a", refreshToken: "refresh-a", tokenExpiry: null, refreshExpiry: null });
     prismaMock.syncLog.create.mockResolvedValue({ id: "sync-log" });
     prismaMock.syncLog.update.mockResolvedValue({});
     prismaMock.marketplaceFinancialRecord.findUnique.mockResolvedValue(null);

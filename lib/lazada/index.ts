@@ -3,18 +3,17 @@
  */
 
 export {
-  getLazadaSDK,
   isLazadaConfigured,
-  setActiveSeller,
-  getActiveSellerId,
+  createLazadaShopContext,
+  ensureFreshLazadaToken,
   persistTokens,
   getLazadaAuthUrl,
   exchangeLazadaCodeForToken,
   validateLazadaToken,
   getLazadaEndpoint,
-  patchLazadaSDKEndpoint,
   LAZADA_URLS,
 } from "./server";
+export type { LazadaShopContext } from "./server";
 export {
   syncLazadaProducts,
   syncLazadaOrders,

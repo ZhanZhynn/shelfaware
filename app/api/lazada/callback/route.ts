@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { exchangeLazadaCodeForToken, persistTokens, setActiveSeller } from "@/lib/lazada/server";
+import { createLazadaShopContext, exchangeLazadaCodeForToken, persistTokens } from "@/lib/lazada/server";
 import prisma from "@/prisma/client";
 import { lazadaCallbackQuerySchema } from "@/lib/validations/lazada";
 import { logger } from "@/lib/logger";
@@ -58,12 +58,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Set active seller for token persistence
-    setActiveSeller(sellerId);
-
-    // Persist tokens
-    await persistTokens(token);
-
     // Upsert LazadaShop record
     const now = new Date();
     const accessTokenExpiry = token.expires_in
@@ -77,8 +71,8 @@ export async function GET(request: NextRequest) {
       where: { userId, sellerId },
     });
 
-    if (existingShop) {
-      await prisma.lazadaShop.update({
+    const savedShop = existingShop
+      ? await prisma.lazadaShop.update({
         where: { id: existingShop.id },
         data: {
           accessToken: token.access_token,
@@ -88,9 +82,8 @@ export async function GET(request: NextRequest) {
           countryCode: country,
           updatedAt: now,
         },
-      });
-    } else {
-      await prisma.lazadaShop.create({
+      })
+      : await prisma.lazadaShop.create({
         data: {
           userId,
           sellerId,
@@ -103,7 +96,9 @@ export async function GET(request: NextRequest) {
           createdBy: userId,
         },
       });
-    }
+
+    // Persistence is scoped to the exact internal shop just authorised.
+    await persistTokens(createLazadaShopContext(savedShop), token);
     await invalidateMarketplaceAnalytics("lazada");
 
     logger.info(`[Lazada Auth] Seller ${sellerId} connected for user ${userId}`);

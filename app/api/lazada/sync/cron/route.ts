@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import prisma from "@/prisma/client";
-import { setActiveSeller, syncLazadaAll, patchLazadaSDKEndpoint } from "@/lib/lazada";
+import { syncLazadaAll } from "@/lib/lazada";
 import { logger } from "@/lib/logger";
 import { invalidateAllServerCaches, invalidateMarketplaceAnalytics } from "@/lib/cache";
 
@@ -56,8 +56,6 @@ export async function POST(request: NextRequest) {
     const results = [];
     for (const shop of shops) {
       try {
-        setActiveSeller(shop.sellerId);
-        patchLazadaSDKEndpoint(shop.countryCode);
         const result = await syncLazadaAll(shop.sellerId, shop.userId);
         results.push({
           sellerId: shop.sellerId,

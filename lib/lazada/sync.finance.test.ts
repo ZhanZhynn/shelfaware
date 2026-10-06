@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { prismaMock, getAllFinanceTransactionDetailsCustom, setMarketplaceCapability, validateLazadaToken } = vi.hoisted(() => ({
+const { prismaMock, getAllFinanceTransactionDetailsCustom, setMarketplaceCapability, validateLazadaToken, createLazadaShopContext, ensureFreshLazadaToken } = vi.hoisted(() => ({
   prismaMock: {
     lazadaShop: { findFirst: vi.fn() },
     syncLog: { create: vi.fn(), update: vi.fn() },
@@ -9,9 +9,11 @@ const { prismaMock, getAllFinanceTransactionDetailsCustom, setMarketplaceCapabil
   getAllFinanceTransactionDetailsCustom: vi.fn(),
   setMarketplaceCapability: vi.fn(),
   validateLazadaToken: vi.fn(),
+  createLazadaShopContext: vi.fn((shop) => ({ shopId: shop.id, userId: shop.userId, sellerId: shop.sellerId, countryCode: shop.countryCode, accessToken: shop.accessToken, refreshToken: shop.refreshToken, tokenExpiry: shop.tokenExpiry, refreshExpiry: shop.refreshExpiry })),
+  ensureFreshLazadaToken: vi.fn((context) => context),
 }));
 
-vi.mock("./server", () => ({ setActiveSeller: vi.fn(), validateLazadaToken }));
+vi.mock("./server", () => ({ createLazadaShopContext, ensureFreshLazadaToken, validateLazadaToken }));
 vi.mock("./custom-api", () => ({ getAllFinanceTransactionDetailsCustom }));
 vi.mock("@/prisma/client", () => ({ default: prismaMock, prisma: prismaMock }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability }));
@@ -21,7 +23,7 @@ import { syncLazadaFinance } from "./sync";
 describe("Lazada finance sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    prismaMock.lazadaShop.findFirst.mockResolvedValue({ id: "shop-record" });
+    prismaMock.lazadaShop.findFirst.mockResolvedValue({ id: "shop-record", userId: "user-record", sellerId: "seller-record", countryCode: "my", accessToken: "token-a", refreshToken: "refresh-a", tokenExpiry: null, refreshExpiry: null });
     prismaMock.syncLog.create.mockResolvedValue({ id: "sync-log" });
     prismaMock.syncLog.update.mockResolvedValue({});
     prismaMock.marketplaceFinancialRecord.findUnique.mockResolvedValue(null);
@@ -43,5 +45,17 @@ describe("Lazada finance sync", () => {
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({ statementExternalId: "11 May 2016 - 17 May 2016", amountMinor: "-62", amountScale: 2 }),
     }));
+  });
+
+  it("passes the authorized internal shop context to every finance call", async () => {
+    getAllFinanceTransactionDetailsCustom.mockResolvedValue([]);
+
+    await syncLazadaFinance("seller-record", "user-record");
+
+    expect(getAllFinanceTransactionDetailsCustom).toHaveBeenCalledWith(
+      expect.objectContaining({ shopId: "shop-record", sellerId: "seller-record", accessToken: "token-a" }),
+      expect.any(Object),
+    );
+    expect(validateLazadaToken).toHaveBeenCalledWith(expect.objectContaining({ shopId: "shop-record" }));
   });
 });

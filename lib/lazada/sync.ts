@@ -5,7 +5,7 @@
  * Uses runWithSyncLog for generic sync log lifecycle.
  */
 
-import { getLazadaSDK, setActiveSeller, validateLazadaToken } from "./server";
+import { createLazadaShopContext, ensureFreshLazadaToken, validateLazadaToken } from "./server";
 import { getAllFinanceTransactionDetailsCustom, getAllLogisticsFeeDetailCustom, getAllProductsCustom, getAllOrdersCustom, getMultipleOrderItemsCustom, getPayoutStatusCustom } from "./custom-api";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
@@ -91,8 +91,6 @@ export async function syncLazadaProducts(
   updated: number;
   errors: string[];
 }> {
-  setActiveSeller(sellerId);
-
   const shop = await prisma.lazadaShop.findFirst({
     where: { sellerId, userId },
   });
@@ -101,14 +99,14 @@ export async function syncLazadaProducts(
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "products" },
     async () => {
-      const sdk = await getLazadaSDK();
+      const context = await ensureFreshLazadaToken(createLazadaShopContext(shop));
       const errors: string[] = [];
       let synced = 0;
       let created = 0;
       let updated = 0;
 
       // Validate token before attempting API calls
-      const tokenCheck = await validateLazadaToken();
+      const tokenCheck = await validateLazadaToken(context);
       if (!tokenCheck.valid) {
         throw new Error(
           `Lazada token is invalid or expired: ${tokenCheck.error}. ` +
@@ -116,23 +114,11 @@ export async function syncLazadaProducts(
         );
       }
 
-      // Diagnostic: verify the SDK is hitting the correct endpoint
-      const _require = eval("require") as NodeRequire;
-      const { join } = _require("node:path") as typeof import("node:path");
-      const constantPath = join(
-        process.cwd(),
-        "node_modules/lazada-api-client/dist/module/lazada/common/constant.js",
-      );
-      const constant = _require(constantPath) as { LZD_END_POINT: string };
-      logger.info(
-        `[Lazada Sync] SDK endpoint at call time: ${constant.LZD_END_POINT}`,
-      );
-
       // Use custom getProducts implementation (SDK's version is broken - missing mandatory filter parameter)
       let products: Awaited<ReturnType<typeof getAllProductsCustom>>;
       try {
         // Fetch all products using custom implementation with proper API parameters
-        products = await withLazadaRetry(() => getAllProductsCustom("live"));
+        products = await withLazadaRetry(() => getAllProductsCustom(context, "live"));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error(`[Lazada Sync] Custom getProducts failed: ${msg}`);
@@ -281,8 +267,6 @@ export async function syncLazadaOrders(
   updated: number;
   errors: string[];
 }> {
-  setActiveSeller(sellerId);
-
   const shop = await prisma.lazadaShop.findFirst({
     where: { sellerId, userId },
   });
@@ -291,31 +275,20 @@ export async function syncLazadaOrders(
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "orders" },
     async () => {
+      const context = await ensureFreshLazadaToken(createLazadaShopContext(shop));
       const errors: string[] = [];
       let synced = 0;
       let created = 0;
       let updated = 0;
 
       // Validate token before attempting API calls
-      const tokenCheck = await validateLazadaToken();
+      const tokenCheck = await validateLazadaToken(context);
       if (!tokenCheck.valid) {
         throw new Error(
           `Lazada token is invalid or expired: ${tokenCheck.error}. ` +
           `Please re-authorize the seller by connecting again.`
         );
       }
-
-      // Diagnostic: verify the SDK is hitting the correct endpoint
-      const _require = eval("require") as NodeRequire;
-      const { join } = _require("node:path") as typeof import("node:path");
-      const constantPath = join(
-        process.cwd(),
-        "node_modules/lazada-api-client/dist/module/lazada/common/constant.js",
-      );
-      const constant = _require(constantPath) as { LZD_END_POINT: string };
-      logger.info(
-        `[Lazada Sync] SDK endpoint at order-sync call time: ${constant.LZD_END_POINT}`,
-      );
 
       // Default to last 15 days if no date specified
       // Convert to ISO 8601 format without milliseconds (Lazada expects +0800, not Z)
@@ -331,7 +304,7 @@ export async function syncLazadaOrders(
 
       // Fetch all orders using custom implementation
       const orders = await withLazadaRetry(() =>
-        getAllOrdersCustom({ created_after: after }),
+        getAllOrdersCustom(context, { created_after: after }),
       );
 
       // Batch fetch order items (max 50 IDs per request)
@@ -348,7 +321,7 @@ export async function syncLazadaOrders(
 
         try {
           const itemsList = await withLazadaRetry(() =>
-            getMultipleOrderItemsCustom(orderIds),
+            getMultipleOrderItemsCustom(context, orderIds),
           );
           for (const entry of itemsList) {
             if (entry.order_id && entry.order_items) {
@@ -574,8 +547,6 @@ export async function syncLazadaFinance(
   createdAfter?: string,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
-  setActiveSeller(sellerId);
-
   const shop = await prisma.lazadaShop.findFirst({ where: { sellerId, userId } });
   if (!shop) throw new Error(`Lazada seller ${sellerId} not found for user ${userId}`);
 
@@ -583,12 +554,13 @@ export async function syncLazadaFinance(
     { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "finance" },
     async () => {
       try {
-        const tokenCheck = await validateLazadaToken();
+        const context = await ensureFreshLazadaToken(createLazadaShopContext(shop));
+        const tokenCheck = await validateLazadaToken(context);
         if (!tokenCheck.valid) {
           throw new Error(`Lazada token is invalid or expired: ${tokenCheck.error}. Please re-authorize the seller by connecting again.`);
         }
 
-        const transactions = await withLazadaRetry(() => getAllFinanceTransactionDetailsCustom({
+        const transactions = await withLazadaRetry(() => getAllFinanceTransactionDetailsCustom(context, {
           start_time: createdAfter || defaultFinanceStart(),
           end_time: new Date(),
         }));
@@ -692,8 +664,6 @@ export async function syncLazadaLogisticsFees(
   createdAfter?: string,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
-  setActiveSeller(sellerId);
-
   const shop = await prisma.lazadaShop.findFirst({ where: { sellerId, userId } });
   if (!shop) throw new Error(`Lazada seller ${sellerId} not found for user ${userId}`);
 
@@ -701,7 +671,8 @@ export async function syncLazadaLogisticsFees(
     { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "logistics_fees" },
     async () => {
       try {
-        const tokenCheck = await validateLazadaToken();
+        const context = await ensureFreshLazadaToken(createLazadaShopContext(shop));
+        const tokenCheck = await validateLazadaToken(context);
         if (!tokenCheck.valid) {
           throw new Error(`Lazada token is invalid or expired: ${tokenCheck.error}. Please re-authorize the seller by connecting again.`);
         }
@@ -711,8 +682,7 @@ export async function syncLazadaLogisticsFees(
         const endTime = Date.now();
 
         const logisticsFees = await withLazadaRetry(() =>
-          getAllLogisticsFeeDetailCustom({
-            seller_id: sellerId,
+          getAllLogisticsFeeDetailCustom(context, {
             bill_start_time: startTime,
             bill_end_time: endTime,
           }),
@@ -856,20 +826,19 @@ export async function syncLazadaPayoutStatements(
   createdAfter?: string,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
-  setActiveSeller(sellerId);
-
   const shop = await prisma.lazadaShop.findFirst({ where: { sellerId, userId } });
   if (!shop) throw new Error(`Lazada seller ${sellerId} not found for user ${userId}`);
 
   return runWithSyncLog(
     { shopId: shop.id, userId: actorId, channel: "lazada", syncType: "payouts" },
     async () => {
-      const tokenCheck = await validateLazadaToken();
+      const context = await ensureFreshLazadaToken(createLazadaShopContext(shop));
+      const tokenCheck = await validateLazadaToken(context);
       if (!tokenCheck.valid) {
         throw new Error(`Lazada token is invalid or expired: ${tokenCheck.error}. Please re-authorize the seller by connecting again.`);
       }
 
-      const statements = await withLazadaRetry(() => getPayoutStatusCustom(createdAfter || defaultFinanceStart()));
+      const statements = await withLazadaRetry(() => getPayoutStatusCustom(context, createdAfter || defaultFinanceStart()));
       const errors: string[] = [];
       let created = 0;
       let updated = 0;

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/prisma/client";
-import { setActiveShop, syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
+import { syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
 import { invalidateCache, cacheKeys, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { logger } from "@/lib/logger";
 
@@ -67,7 +67,6 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        setActiveShop(shop.shopId);
         await syncShopeeAll(shop.shopId, shop.userId);
         // Sync ads after products+orders (separate to avoid one failure blocking the other)
         try {

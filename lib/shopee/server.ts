@@ -1,11 +1,10 @@
 /**
  * Shopee Server-Side Client
- * Lazy singleton SDK instance with configuration guards.
+ * Per-shop SDK instances with configuration guards.
  * Uses @congminh1254/shopee-sdk for HMAC signing, OAuth, and API access.
  *
- * Multi-shop: single SDK instance now, setActiveShop() sets which shop's
- * token the storage layer returns. When adding shop #2, create per-shop
- * SDK instances instead.
+ * Every authenticated SDK instance owns an immutable shop context. This keeps
+ * concurrent requests from reading or refreshing another shop's token.
  */
 
 import { ShopeeSDK } from "@congminh1254/shopee-sdk";
@@ -13,55 +12,101 @@ import type { ShopeeRegion } from "@congminh1254/shopee-sdk/schemas";
 import { getEnvVar } from "@/lib/env";
 import { PrismaTokenStorage } from "./token-storage";
 
-// Lazy initialization to avoid issues during build
-let sdkInstance: ShopeeSDK | null = null;
+type ShopeeAccessToken = {
+  access_token: string;
+  refresh_token: string;
+  expire_in: number;
+  request_id: string;
+  error: string;
+  message: string;
+  shop_id?: number;
+  merchant_id?: number;
+  expired_at?: number;
+};
 
-/**
- * Active shop context — token storage uses this to return the right token.
- * Set via setActiveShop() before any SDK call that requires auth.
- */
-let activeShopId: number | null = null;
+class TransientTokenStorage {
+  private token: ShopeeAccessToken | null;
 
-/**
- * Set the active shop for subsequent SDK calls.
- * Must be called before any authenticated SDK operation.
- */
-export function setActiveShop(shopId: number): void {
-  activeShopId = shopId;
+  constructor(
+    private readonly shopId: number,
+    token: ShopeeAccessToken,
+  ) {
+    this.token = { ...token, shop_id: shopId };
+  }
+
+  async store(token: ShopeeAccessToken): Promise<void> {
+    this.token = { ...token, shop_id: this.shopId };
+  }
+
+  async get(): Promise<ShopeeAccessToken | null> {
+    return this.token;
+  }
+
+  async clear(): Promise<void> {
+    this.token = null;
+  }
 }
 
-/**
- * Get the currently active shop ID.
- */
-export function getActiveShopId(): number | null {
-  return activeShopId;
-}
+const shopSdkCache = new Map<number, ShopeeSDK>();
+let publicSdk: ShopeeSDK | null = null;
 
-/**
- * Get Shopee SDK server instance (lazy singleton)
- * Uses custom Prisma-backed token storage for persistence across serverless cold starts.
- */
-export function getShopeeSDK(): ShopeeSDK {
-  if (!sdkInstance) {
-    const partnerId = getEnvVar("SHOPEE_PARTNER_ID");
-    const partnerKey = getEnvVar("SHOPEE_PARTNER_KEY");
+function getShopeeConfig(shopId?: number) {
+  const partnerId = getEnvVar("SHOPEE_PARTNER_ID");
+  const partnerKey = getEnvVar("SHOPEE_PARTNER_KEY");
 
-    if (!partnerId || !partnerKey) {
-      throw new Error(
-        "Shopee is not configured. Set SHOPEE_PARTNER_ID and SHOPEE_PARTNER_KEY.",
-      );
-    }
-
-    sdkInstance = new ShopeeSDK(
-      {
-        partner_id: Number(partnerId),
-        partner_key: partnerKey,
-        region: "GLOBAL" as ShopeeRegion,
-      },
-      new PrismaTokenStorage(),
+  if (!partnerId || !partnerKey) {
+    throw new Error(
+      "Shopee is not configured. Set SHOPEE_PARTNER_ID and SHOPEE_PARTNER_KEY.",
     );
   }
-  return sdkInstance;
+
+  return {
+    partner_id: Number(partnerId),
+    partner_key: partnerKey,
+    region: "GLOBAL" as ShopeeRegion,
+    ...(shopId === undefined ? {} : { shop_id: shopId }),
+  };
+}
+
+/**
+ * Get the public SDK used by the OAuth flow. It has no token storage because
+ * authorization URL generation and code exchange do not require a shop token.
+ */
+export function getPublicShopeeSDK(): ShopeeSDK {
+  if (!publicSdk) {
+    publicSdk = new ShopeeSDK(getShopeeConfig());
+  }
+  return publicSdk;
+}
+
+/**
+ * Get the cached SDK for one authenticated shop. Its Prisma token storage is
+ * bound to that shop, so token resolution cannot bleed across requests.
+ */
+export function getShopeeSDK(shopId: number): ShopeeSDK {
+  let sdk = shopSdkCache.get(shopId);
+  if (!sdk) {
+    sdk = new ShopeeSDK(
+      getShopeeConfig(shopId),
+      new PrismaTokenStorage(shopId),
+    );
+    shopSdkCache.set(shopId, sdk);
+  }
+  return sdk;
+}
+
+/**
+ * Create a short-lived SDK for the OAuth callback before its token has been
+ * persisted to a ShopeeShop record. Do not cache this instance.
+ */
+export function getTransientShopeeSDK(
+  shopId: number,
+  token: ShopeeAccessToken,
+): ShopeeSDK {
+  return new ShopeeSDK(
+    getShopeeConfig(shopId),
+    new TransientTokenStorage(shopId, token),
+  );
 }
 
 /**

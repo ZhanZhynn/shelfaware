@@ -3,7 +3,7 @@
  * Handles OAuth URL generation and authorization code exchange.
  */
 
-import { getShopeeSDK, isShopeeConfigured, setActiveShop } from "./server";
+import { getPublicShopeeSDK, getTransientShopeeSDK, isShopeeConfigured } from "./server";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
@@ -14,7 +14,7 @@ import { logger } from "@/lib/logger";
 export function getShopeeAuthUrl(): string | null {
   if (!isShopeeConfigured()) return null;
 
-  const sdk = getShopeeSDK();
+  const sdk = getPublicShopeeSDK();
   const redirectUri = getEnvVar("SHOPEE_REDIRECT_URL");
 
   if (!redirectUri) {
@@ -40,6 +40,9 @@ export async function exchangeCodeForToken(
   access_token: string;
   refresh_token: string;
   expire_in: number;
+  request_id: string;
+  error: string;
+  message: string;
   expired_at: number;
   shop_id: number;
   merchant_id?: number;
@@ -47,21 +50,20 @@ export async function exchangeCodeForToken(
   if (!isShopeeConfigured()) return null;
 
   try {
-    const sdk = getShopeeSDK();
-    const redirectUri = getEnvVar("SHOPEE_REDIRECT_URL");
+    const sdk = getPublicShopeeSDK();
 
     // SDK getAccessToken(code, shopId) — the SDK handles redirect_uri internally
     const token = await sdk.auth.getAccessToken(code, shopId);
 
     logger.info(`[Shopee Auth] Token acquired for shop ${shopId}`);
 
-    // Set active shop after successful token exchange
-    setActiveShop(shopId);
-
     return token as unknown as {
       access_token: string;
       refresh_token: string;
       expire_in: number;
+      request_id: string;
+      error: string;
+      message: string;
       expired_at: number;
       shop_id: number;
       merchant_id?: number;
@@ -74,9 +76,22 @@ export async function exchangeCodeForToken(
 
 /**
  * Get shop information after successful authorization.
- * Requires the SDK to have a valid token (setActiveShop must be called first).
+ * Uses the callback token directly because the shop record is not persisted yet.
  */
-export async function getShopeeShopInfo(): Promise<{
+export async function getShopeeShopInfo(
+  shopId: number,
+  token: {
+    access_token: string;
+    refresh_token: string;
+    expire_in: number;
+    request_id: string;
+    error: string;
+    message: string;
+    expired_at: number;
+    shop_id: number;
+    merchant_id?: number;
+  },
+): Promise<{
   shop_name: string;
   region: string;
   status: string;
@@ -87,7 +102,7 @@ export async function getShopeeShopInfo(): Promise<{
   if (!isShopeeConfigured()) return null;
 
   try {
-    const sdk = getShopeeSDK();
+    const sdk = getTransientShopeeSDK(shopId, token);
     const info = await sdk.shop.getShopInfo();
     return info as unknown as {
       shop_name: string;

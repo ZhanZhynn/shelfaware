@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { setActiveShop, syncShopeeProducts, syncShopeeOrders, syncShopeePayoutStatements, syncShopeeReturns, syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
+import { syncShopeeProducts, syncShopeeOrders, syncShopeePayoutStatements, syncShopeeReturns, syncShopeeAll, syncShopeeAds, isShopSyncing } from "@/lib/shopee";
 import { shopeeSyncBodySchema } from "@/lib/validations/shopee";
 import { prisma } from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
@@ -61,9 +61,6 @@ export async function POST(request: NextRequest) {
     logger.info(
       `[Shopee Sync] Triggered ${syncType} sync for shop ${shopId} by user ${userId}`,
     );
-
-    // Set active shop for token resolution
-    setActiveShop(shopId);
 
     let result: {
       products?: { synced: number; created: number; updated: number; errors: string[] };

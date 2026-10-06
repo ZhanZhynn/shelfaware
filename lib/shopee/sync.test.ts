@@ -87,6 +87,7 @@ describe("Shopee final payout sync", () => {
 
     expect(first).toMatchObject({ synced: 1, created: 1, updated: 0, errors: [] });
     expect(second).toMatchObject({ synced: 1, created: 0, updated: 1, errors: [] });
+    expect(getShopeeSDK).toHaveBeenCalledWith(123);
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         platform_shopId_externalId: {

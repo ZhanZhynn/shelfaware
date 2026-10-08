@@ -33,6 +33,9 @@ const COMPONENT_FETCH_CRUD_ALLOWLIST = new Set([
   "components/sourcing/SourcingCaseDetail.tsx",
   "components/sourcing/SourcingHeader.tsx",
   "components/sourcing/SourcingMembers.tsx",
+  // API token lifecycle is self-contained client state and does not back an
+  // inventory query key.
+  "components/admin/ApiTokenSettings.tsx",
 ]);
 
 /** Domains with query sub-keys beyond list/detail — invalidate-all must use *.all */
@@ -127,6 +130,14 @@ const API_WRITE_EXEMPT = new Set([
   "app/api/email/queue/process/route.ts",
   "app/api/workspaces/route.ts",
   "app/api/workspaces/[id]/members/route.ts",
+  // Token lifecycle changes authentication material only; no server-cached
+  // inventory or marketplace response derives from these records.
+  "app/api/api-tokens/route.ts",
+  "app/api/api-tokens/[id]/route.ts",
+  // Sync creation only persists durable queue state. The authenticated worker
+  // invalidates marketplace caches after the provider operation completes.
+  "app/api/v1/marketplaces/[platform]/syncs/route.ts",
+  "app/api/marketplace/sync-jobs/worker/route.ts",
   // These endpoints only calculate values, send outbound messages, or persist
   // user-local notification settings; none backs a server-cached data view.
   "app/api/settings/notifications/route.ts",

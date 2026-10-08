@@ -1,4 +1,7 @@
+import { loadEnvConfig } from "@next/env";
 import { MongoClient } from "mongodb";
+
+loadEnvConfig(process.cwd());
 
 async function main() {
   const url = process.env.DATABASE_URL;

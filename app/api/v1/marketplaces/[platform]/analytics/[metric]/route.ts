@@ -1,0 +1,14 @@
+import { NextRequest, NextResponse } from "next/server";
+import { marketplaceStatsResponse } from "@/lib/marketplace/analytics/http";
+import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
+
+const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
+
+export async function GET(request: NextRequest, { params }: { params: Promise<{ platform: string; metric: string }> }) {
+  const { platform, metric } = await params;
+  if (!platforms.has(platform as MarketplacePlatform)) {
+    const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+    return NextResponse.json({ error: { code: "NOT_FOUND", message: "Not found", requestId } }, { status: 404, headers: { "x-request-id": requestId } });
+  }
+  return marketplaceStatsResponse(request, platform as MarketplacePlatform, metric);
+}

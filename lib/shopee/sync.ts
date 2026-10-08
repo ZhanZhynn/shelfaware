@@ -146,7 +146,7 @@ export async function syncShopeeProducts(
   updated: number;
   errors: string[];
 }> {
-  const sdk = getShopeeSDK();
+  const sdk = getShopeeSDK(shopId);
   const errors: string[] = [];
   let synced = 0;
   let created = 0;
@@ -681,7 +681,7 @@ export async function syncShopeeOrders(
   updated: number;
   errors: string[];
 }> {
-  const sdk = getShopeeSDK();
+  const sdk = getShopeeSDK(shopId);
   const errors: string[] = [];
   let synced = 0;
   let created = 0;
@@ -1020,7 +1020,7 @@ export async function syncShopeeReturns(
   updated: number;
   errors: string[];
 }> {
-  const sdk = getShopeeSDK();
+  const sdk = getShopeeSDK(shopId);
   const errors: string[] = [];
   let synced = 0;
   let created = 0;
@@ -1223,7 +1223,7 @@ export async function syncShopeePayoutStatements(
   daysBack = 15,
   actorId = userId,
 ): Promise<SyncResult> {
-  const sdk = getShopeeSDK();
+  const sdk = getShopeeSDK(shopId);
   const shop = await prisma.shopeeShop.findFirst({ where: { shopId, userId } });
   if (!shop) throw new Error(`ShopeeShop record not found for shop_id=${shopId}`);
 
@@ -1509,7 +1509,7 @@ export async function syncShopeeAds(
   campaigns: number;
   errors: string[];
 }> {
-  const sdk = getShopeeSDK();
+  const sdk = getShopeeSDK(shopId);
   const errors: string[] = [];
   let synced = 0;
   let campaigns = 0;

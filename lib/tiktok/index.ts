@@ -4,8 +4,6 @@
 
 export {
   isTikTokConfigured,
-  setActiveShop,
-  getActiveShopId,
   getTikTokAuthUrl,
   createTikTokOAuthState,
   getTikTokOAuthStateUserId,
@@ -14,9 +12,10 @@ export {
   persistTokens,
   validateTikTokToken,
   ensureFreshToken,
-  getActiveShopCipher,
+  getTikTokShopCipher,
   TIKTOK_URLS,
 } from "./server";
+export type { TikTokShopContext } from "./server";
 
 export {
   syncTikTokProducts,

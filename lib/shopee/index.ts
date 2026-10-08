@@ -4,9 +4,9 @@
 
 export {
   getShopeeSDK,
+  getPublicShopeeSDK,
+  getTransientShopeeSDK,
   isShopeeConfigured,
-  setActiveShop,
-  getActiveShopId,
   SHOPEE_URLS,
 } from "./server";
 export { PrismaTokenStorage } from "./token-storage";

@@ -5,8 +5,8 @@
  */
 
 import { getLazadaEndpoint } from "./server";
+import type { LazadaShopContext } from "./server";
 import { getEnvVar } from "@/lib/env";
-import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
 import { createHmac } from "crypto";
 
@@ -99,6 +99,7 @@ function createSignature(
  * @returns Array of products
  */
 export async function getProductsCustom(
+  context: LazadaShopContext,
   params: GetProductsParams = {},
 ): Promise<LazadaProduct[]> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
@@ -108,26 +109,8 @@ export async function getProductsCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  // Find the active seller's shop
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-
-  let shop;
-  if (activeSellerId) {
-    shop = await prisma.lazadaShop.findFirst({
-      where: { sellerId: activeSellerId },
-    });
-  } else {
-    shop = await prisma.lazadaShop.findFirst({
-      orderBy: { updatedAt: "desc" },
-    });
-  }
-
-  if (!shop?.accessToken) {
-    throw new Error("No Lazada shop found or access token missing.");
-  }
-
-  const endpoint = getLazadaEndpoint(shop.countryCode);
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
+  const endpoint = getLazadaEndpoint(context.countryCode);
   const path = "/products/get";
 
   // Build request parameters - filter is MANDATORY per API docs
@@ -135,7 +118,7 @@ export async function getProductsCustom(
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    access_token: shop.accessToken,
+    access_token: context.accessToken,
     filter: params.filter || "live", // Default to "live" products
   };
 
@@ -195,6 +178,7 @@ export async function getProductsCustom(
  * @returns Array of all products
  */
 export async function getAllProductsCustom(
+  context: LazadaShopContext,
   filter: "all" | "live" | "inactive" | "deleted" | "pending" | "rejected" | "sold-out" = "live",
 ): Promise<LazadaProduct[]> {
   const allProducts: LazadaProduct[] = [];
@@ -214,7 +198,7 @@ export async function getAllProductsCustom(
       params.update_after = lastUpdateTime;
     }
 
-    const products = await getProductsCustom(params);
+    const products = await getProductsCustom(context, params);
 
     if (products.length === 0) {
       hasMore = false;
@@ -400,6 +384,7 @@ export function validateFinanceDateRange(startTime: string | Date, endTime: stri
 
 /** Fetch one signed page of transaction details from Lazada's finance API. */
 export async function getFinanceTransactionDetailsCustom(
+  context: LazadaShopContext,
   params: GetFinanceTransactionDetailsParams,
 ): Promise<LazadaFinanceTransaction[]> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
@@ -408,13 +393,7 @@ export async function getFinanceTransactionDetailsCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-  const shop = activeSellerId
-    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
-    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
-
-  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
 
   const { startTime, endTime } = validateFinanceDateRange(params.start_time, params.end_time);
   const path = "/finance/transaction/details/get";
@@ -422,7 +401,7 @@ export async function getFinanceTransactionDetailsCustom(
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    access_token: shop.accessToken,
+    access_token: context.accessToken,
     start_time: startTime,
     end_time: endTime,
   };
@@ -436,7 +415,7 @@ export async function getFinanceTransactionDetailsCustom(
   const queryString = Object.entries(requestParams)
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join("&");
-  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const response = await fetch(`${getLazadaEndpoint(context.countryCode)}${path}?${queryString}&sign=${signature}`);
   const data: GetFinanceTransactionDetailsResponse = await response.json();
 
   if (String(data.code) !== "0") {
@@ -449,6 +428,7 @@ export async function getFinanceTransactionDetailsCustom(
 
 /** Fetch all finance transaction pages using Lazada's documented 500-row limit. */
 export async function getAllFinanceTransactionDetailsCustom(
+  context: LazadaShopContext,
   params: Omit<GetFinanceTransactionDetailsParams, "offset" | "limit">,
 ): Promise<LazadaFinanceTransaction[]> {
   const transactions: LazadaFinanceTransaction[] = [];
@@ -456,7 +436,7 @@ export async function getAllFinanceTransactionDetailsCustom(
   let offset = 0;
 
   while (true) {
-    const page = await getFinanceTransactionDetailsCustom({ ...params, offset, limit: pageSize });
+    const page = await getFinanceTransactionDetailsCustom(context, { ...params, offset, limit: pageSize });
     transactions.push(...page);
     if (page.length < pageSize) break;
     offset += pageSize;
@@ -506,7 +486,6 @@ interface GetLogisticsFeeDetailResponse {
 }
 
 interface GetLogisticsFeeDetailParams {
-  seller_id: string;
   request_type?: string;
   trade_order_id?: string;
   trade_order_line_id?: string;
@@ -520,6 +499,7 @@ interface GetLogisticsFeeDetailParams {
 
 /** Fetch one signed page of logistics fee details from Lazada's SLB API. */
 export async function getLogisticsFeeDetailCustom(
+  context: LazadaShopContext,
   params: GetLogisticsFeeDetailParams,
 ): Promise<LazadaLogisticsFee[]> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
@@ -528,21 +508,15 @@ export async function getLogisticsFeeDetailCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-  const shop = activeSellerId
-    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
-    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
-
-  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
 
   const path = "/lbs/slb/queryLogisticsFeeDetail";
   const requestParams: Record<string, string> = {
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    access_token: shop.accessToken,
-    seller_id: params.seller_id,
+    access_token: context.accessToken,
+    seller_id: context.sellerId,
     request_type: params.request_type ?? "OPEN_API",
   };
   if (params.trade_order_id) requestParams.trade_order_id = params.trade_order_id;
@@ -558,7 +532,7 @@ export async function getLogisticsFeeDetailCustom(
   const queryString = Object.entries(requestParams)
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join("&");
-  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const response = await fetch(`${getLazadaEndpoint(context.countryCode)}${path}?${queryString}&sign=${signature}`);
   const data: GetLogisticsFeeDetailResponse = await response.json();
 
   if (String(data.code) !== "0") {
@@ -571,6 +545,7 @@ export async function getLogisticsFeeDetailCustom(
 
 /** Fetch all logistics fee detail pages. */
 export async function getAllLogisticsFeeDetailCustom(
+  context: LazadaShopContext,
   params: Omit<GetLogisticsFeeDetailParams, "page_no" | "page_size">,
 ): Promise<LazadaLogisticsFee[]> {
   const records: LazadaLogisticsFee[] = [];
@@ -578,7 +553,7 @@ export async function getAllLogisticsFeeDetailCustom(
   let pageNo = 1;
 
   while (true) {
-    const page = await getLogisticsFeeDetailCustom({ ...params, page_no: pageNo, page_size: pageSize });
+    const page = await getLogisticsFeeDetailCustom(context, { ...params, page_no: pageNo, page_size: pageSize });
     records.push(...page);
     if (page.length < pageSize) break;
     pageNo++;
@@ -610,8 +585,8 @@ interface GetShippingFeeResponse {
 
 /** Fetch estimated and actual shipping fee for a single package by tracking number. */
 export async function getShippingFeeCustom(
+  context: LazadaShopContext,
   trackingNumber: string,
-  sellerId: string,
 ): Promise<LazadaShippingFeeResult | null> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
   const appSecret = getEnvVar("LAZADA_APP_SECRET");
@@ -619,20 +594,14 @@ export async function getShippingFeeCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-  const shop = activeSellerId
-    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
-    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
-
-  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
 
   const path = "/logistics/epis/get_shipping_fee";
   const requestParams: Record<string, string> = {
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    externalSellerId: sellerId,
+    externalSellerId: context.sellerId,
     platformName: "Platform_Lazada",
     trackingNumber: trackingNumber,
   };
@@ -641,7 +610,7 @@ export async function getShippingFeeCustom(
   const queryString = Object.entries(requestParams)
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join("&");
-  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const response = await fetch(`${getLazadaEndpoint(context.countryCode)}${path}?${queryString}&sign=${signature}`);
   const data: GetShippingFeeResponse = await response.json();
 
   if (String(data.code) !== "0") {
@@ -654,6 +623,7 @@ export async function getShippingFeeCustom(
 
 /** Fetch Lazada payout statements created after the required calendar date. */
 export async function getPayoutStatusCustom(
+  context: LazadaShopContext,
   createdAfter: string | Date,
 ): Promise<LazadaPayoutStatement[]> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
@@ -662,12 +632,7 @@ export async function getPayoutStatusCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-  const shop = activeSellerId
-    ? await prisma.lazadaShop.findFirst({ where: { sellerId: activeSellerId } })
-    : await prisma.lazadaShop.findFirst({ orderBy: { updatedAt: "desc" } });
-  if (!shop?.accessToken) throw new Error("No Lazada shop found or access token missing.");
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
 
   const date = createdAfter instanceof Date ? new Date(createdAfter) : new Date(createdAfter);
   if (Number.isNaN(date.getTime())) {
@@ -679,14 +644,14 @@ export async function getPayoutStatusCustom(
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    access_token: shop.accessToken,
+    access_token: context.accessToken,
     created_after: date.toISOString().slice(0, 10),
   };
   const signature = createSignature(path, requestParams, appSecret);
   const queryString = Object.entries(requestParams)
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join("&");
-  const response = await fetch(`${getLazadaEndpoint(shop.countryCode)}${path}?${queryString}&sign=${signature}`);
+  const response = await fetch(`${getLazadaEndpoint(context.countryCode)}${path}?${queryString}&sign=${signature}`);
   const data: GetPayoutStatusResponse = await response.json();
 
   if (String(data.code) !== "0") {
@@ -705,6 +670,7 @@ export async function getPayoutStatusCustom(
  * @returns Array of orders
  */
 export async function getOrdersCustom(
+  context: LazadaShopContext,
   params: GetOrdersParams = {},
 ): Promise<LazadaOrder[]> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
@@ -714,25 +680,8 @@ export async function getOrdersCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-
-  let shop;
-  if (activeSellerId) {
-    shop = await prisma.lazadaShop.findFirst({
-      where: { sellerId: activeSellerId },
-    });
-  } else {
-    shop = await prisma.lazadaShop.findFirst({
-      orderBy: { updatedAt: "desc" },
-    });
-  }
-
-  if (!shop?.accessToken) {
-    throw new Error("No Lazada shop found or access token missing.");
-  }
-
-  const endpoint = getLazadaEndpoint(shop.countryCode);
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
+  const endpoint = getLazadaEndpoint(context.countryCode);
   const path = "/orders/get";
 
   // Build request parameters
@@ -740,7 +689,7 @@ export async function getOrdersCustom(
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    access_token: shop.accessToken,
+    access_token: context.accessToken,
   };
 
   // Add optional parameters
@@ -799,6 +748,7 @@ export async function getOrdersCustom(
  * @returns Array of all orders
  */
 export async function getAllOrdersCustom(
+  context: LazadaShopContext,
   params: Omit<GetOrdersParams, "offset" | "limit"> = {},
 ): Promise<LazadaOrder[]> {
   const allOrders: LazadaOrder[] = [];
@@ -810,7 +760,7 @@ export async function getAllOrdersCustom(
   logger.info(`[Lazada Custom API] Fetching all orders`);
 
   while (offset < 5000) { // Max offset per API docs
-    const orders = await getOrdersCustom({
+    const orders = await getOrdersCustom(context, {
       ...params,
       offset,
       limit: pageSize,
@@ -843,6 +793,7 @@ export async function getAllOrdersCustom(
  * @returns Array of order items grouped by order
  */
 export async function getMultipleOrderItemsCustom(
+  context: LazadaShopContext,
   orderIds: number[],
 ): Promise<Array<{ order_id: number; order_items: OrderItem[] }>> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
@@ -852,32 +803,15 @@ export async function getMultipleOrderItemsCustom(
     throw new Error("Lazada is not configured. Set LAZADA_APP_KEY and LAZADA_APP_SECRET.");
   }
 
-  const { getActiveSellerId } = await import("./server");
-  const activeSellerId = getActiveSellerId();
-
-  let shop;
-  if (activeSellerId) {
-    shop = await prisma.lazadaShop.findFirst({
-      where: { sellerId: activeSellerId },
-    });
-  } else {
-    shop = await prisma.lazadaShop.findFirst({
-      orderBy: { updatedAt: "desc" },
-    });
-  }
-
-  if (!shop?.accessToken) {
-    throw new Error("No Lazada shop found or access token missing.");
-  }
-
-  const endpoint = getLazadaEndpoint(shop.countryCode);
+  if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
+  const endpoint = getLazadaEndpoint(context.countryCode);
   const path = "/orders/items/get";
 
   const requestParams: Record<string, string> = {
     app_key: appKey,
     sign_method: "sha256",
     timestamp: String(Date.now()),
-    access_token: shop.accessToken,
+    access_token: context.accessToken,
     order_ids: `[${orderIds.join(",")}]`,
   };
 

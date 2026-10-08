@@ -1,8 +1,6 @@
 /**
  * Shopify Server-Side Module
- * Handles OAuth flow, HMAC validation, token exchange, active shop context.
- *
- * Pattern: Same as TikTok's server.ts — module-level activeShopId, Prisma persistence.
+ * Handles OAuth flow, HMAC validation, token exchange, and explicit token contexts.
  *
  * Key differences:
  * - OAuth: 6 callback params (code, hmac, host, shop, state, timestamp)
@@ -27,17 +25,17 @@ export const SHOPIFY_API_VERSION = "2025-07";
 const OAUTH_SCOPES_DEFAULT = "read_products,read_orders";
 const OAUTH_TIMESTAMP_TOLERANCE_SEC = 120; // 2 minutes
 
-// ─── Active Shop Context ──────────────────────────────────────────────────
+// ─── Token Context ────────────────────────────────────────────────────────
 
-let activeShopDomain: string | null = null;
-
-export function setActiveShop(shopDomain: string): void {
-  activeShopDomain = shopDomain;
-}
-
-export function getActiveShopDomain(): string | null {
-  return activeShopDomain;
-}
+/**
+ * The credentials for one Shopify shop. Callers load this context for the
+ * target shop and pass it to authenticated operations; it is never retained
+ * in module state, so concurrent requests cannot use another shop's token.
+ */
+export type ShopifyTokenContext = {
+  shopDomain: string;
+  accessToken: string;
+};
 
 // ─── Configuration Guard ──────────────────────────────────────────────────
 
@@ -278,37 +276,23 @@ export async function fetchShopInfo(
   }
 }
 
-// ─── Active Shop Record ───────────────────────────────────────────────────
-
-async function getActiveShopRecord() {
-  if (activeShopDomain) {
-    return prisma.shopifyShop.findFirst({
-      where: { shopDomain: activeShopDomain },
-    });
-  }
-  return prisma.shopifyShop.findFirst({
-    orderBy: { updatedAt: "desc" },
-  });
-}
-
 // ─── Token Validation ─────────────────────────────────────────────────────
 
 /**
- * Validate that the current token can successfully call the Shopify API.
+ * Validate that a shop's token can successfully call the Shopify API.
  */
-export async function validateShopifyToken(): Promise<{
+export async function validateShopifyToken(context: ShopifyTokenContext): Promise<{
   valid: boolean;
   error?: string;
 }> {
   try {
-    const shop = await getActiveShopRecord();
-    if (!shop?.accessToken) {
+    if (!context.accessToken) {
       return { valid: false, error: "No access token available" };
     }
 
     await shopifyGraphQL<{ shop: { name: string } }>(
-      shop.shopDomain,
-      shop.accessToken,
+      context.shopDomain,
+      context.accessToken,
       `query { shop { name } }`,
     );
     return { valid: true };
@@ -317,20 +301,6 @@ export async function validateShopifyToken(): Promise<{
     logger.warn(`[Shopify] Token validation failed: ${msg}`);
     return { valid: false, error: msg };
   }
-}
-
-// ─── Get Active Access Token ──────────────────────────────────────────────
-
-/**
- * Get the access token for the active shop.
- * Shopify offline tokens don't expire, so no refresh is needed.
- */
-export async function getActiveAccessToken(): Promise<string> {
-  const shop = await getActiveShopRecord();
-  if (!shop?.accessToken) {
-    throw new Error("No Shopify shop found or access token missing.");
-  }
-  return shop.accessToken;
 }
 
 // ─── Token Persistence ────────────────────────────────────────────────────

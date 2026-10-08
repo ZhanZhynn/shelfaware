@@ -1,9 +1,6 @@
 /**
  * TikTok Shop Server-Side Module
- * Handles OAuth flow, token management, active shop context.
- *
- * Pattern: Same as Lazada's server.ts — module-level activeShopId,
- * lazy token refresh, Prisma persistence.
+ * Handles OAuth flow and token management for explicitly selected shops.
  *
  * Key differences from Lazada:
  * - Token exchange: GET to auth.tiktok-shops.com (not POST to API)
@@ -26,17 +23,13 @@ const TOKEN_GET_PATH = "/api/v2/token/get";
 const TOKEN_REFRESH_PATH = "/api/v2/token/refresh";
 const GRANT_TYPE = "authorized_code"; // NOT "authorization_code"
 
-// ─── Active Shop Context ──────────────────────────────────────────────────
+// ─── Shop Context ─────────────────────────────────────────────────────────
 
-let activeShopId: string | null = null;
-
-export function setActiveShop(shopId: string): void {
-  activeShopId = shopId;
-}
-
-export function getActiveShopId(): string | null {
-  return activeShopId;
-}
+/** Identifies the sole shop whose credentials an operation may resolve. */
+export type TikTokShopContext = {
+  shopId: string;
+  userId: string;
+};
 
 // ─── Configuration Guard ──────────────────────────────────────────────────
 
@@ -215,12 +208,12 @@ export async function persistTokens(
  * Validate that the current token can successfully call the TikTok API.
  * Makes a lightweight API call to check token validity.
  */
-export async function validateTikTokToken(shopId?: string, userId?: string): Promise<{
+export async function validateTikTokToken(context: TikTokShopContext): Promise<{
   valid: boolean;
   error?: string;
 }> {
   try {
-    const shop = await getActiveShopRecord(shopId, userId);
+    const shop = await getTikTokShopRecord(context);
     if (!shop?.accessToken) {
       return { valid: false, error: "No access token available" };
     }
@@ -238,27 +231,20 @@ export async function validateTikTokToken(shopId?: string, userId?: string): Pro
 // ─── Ensure Fresh Token ───────────────────────────────────────────────────
 
 /**
- * Get the active shop's record from DB.
- * Uses activeShopId if set, otherwise falls back to most recently updated shop.
+ * Resolve one explicitly selected shop from the database.
  */
-async function getActiveShopRecord(shopId?: string, userId?: string) {
-  if (shopId && userId) {
-    return prisma.tikTokShop.findFirst({
-      where: { shopId, userId },
-    });
-  }
-  if (activeShopId) return prisma.tikTokShop.findFirst({ where: { shopId: activeShopId } });
+async function getTikTokShopRecord({ shopId, userId }: TikTokShopContext) {
   return prisma.tikTokShop.findFirst({
-    orderBy: { updatedAt: "desc" },
+    where: { shopId, userId },
   });
 }
 
 /**
- * Ensure the active shop has a valid token, refreshing if needed.
+ * Ensure the selected shop has a valid token, refreshing if needed.
  * Called internally before any authenticated API operation.
  */
-export async function ensureFreshToken(shopId?: string, userId?: string): Promise<string> {
-  const shop = await getActiveShopRecord(shopId, userId);
+export async function ensureFreshToken(context: TikTokShopContext): Promise<string> {
+  const shop = await getTikTokShopRecord(context);
 
   if (!shop?.accessToken) {
     throw new Error("No TikTok shop found or access token missing.");
@@ -291,11 +277,11 @@ export async function ensureFreshToken(shopId?: string, userId?: string): Promis
 // ─── Shop Cipher ──────────────────────────────────────────────────────────
 
 /**
- * Get the shop cipher for the active shop.
+ * Get the shop cipher for the selected shop.
  * Shop cipher is required for all shop-level API calls.
  */
-export async function getActiveShopCipher(shopId?: string, userId?: string): Promise<string> {
-  const shop = await getActiveShopRecord(shopId, userId);
+export async function getTikTokShopCipher(context: TikTokShopContext): Promise<string> {
+  const shop = await getTikTokShopRecord(context);
 
   if (!shop?.shopCipher) {
     throw new Error("No TikTok shop found or shop cipher missing.");

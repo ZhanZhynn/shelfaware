@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
-import { exchangeCodeForToken, getShopeeShopInfo, setActiveShop } from "@/lib/shopee";
+import { exchangeCodeForToken, getShopeeShopInfo } from "@/lib/shopee";
 import { prisma } from "@/prisma/client";
 import { shopeeCallbackQuerySchema } from "@/lib/validations/shopee";
 import { logger } from "@/lib/logger";
@@ -38,9 +38,6 @@ export async function GET(request: NextRequest) {
 
     const { code, shop_id } = validationResult.data;
 
-    // Set active shop before token exchange so token storage resolves correctly
-    setActiveShop(shop_id);
-
     // Exchange code for token
     const token = await exchangeCodeForToken(code, shop_id);
     if (!token) {
@@ -51,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get shop info
-    const shopInfo = await getShopeeShopInfo();
+    const shopInfo = await getShopeeShopInfo(shop_id, token);
 
     // Upsert ShopeeShop record
     const existingShop = await prisma.shopeeShop.findFirst({

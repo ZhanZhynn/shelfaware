@@ -3,12 +3,10 @@
  * Implements the TokenStorage interface from @congminh1254/shopee-sdk
  * for persistence across serverless cold starts.
  *
- * Shop-aware: get() uses the active shop ID from server.ts to return
- * the correct token for the targeted shop.
+ * Each storage instance is bound to one Shopee shop ID.
  */
 
 import prisma from "@/prisma/client";
-import { getActiveShopId } from "./server";
 import { logger } from "@/lib/logger";
 
 /** Matches the SDK's AccessToken interface */
@@ -58,24 +56,26 @@ function toAccessToken(shop: {
  * Tokens are stored per-shop on the ShopeeShop model.
  */
 export class PrismaTokenStorage implements TokenStorage {
+  constructor(private readonly shopId: number) {}
+
   /**
    * Store or update a token for a shop.
-   * The SDK passes the full AccessToken object including shop_id.
+   * The storage's shop context, rather than mutable request-global state,
+   * determines the record to update.
    * Uses upsert to prevent race conditions on concurrent refreshes.
    */
   async store(token: AccessToken): Promise<void> {
     try {
-      const shopId = token.shop_id;
-      if (!shopId) {
+      if (token.shop_id != null && token.shop_id !== this.shopId) {
         logger.warn(
-          "[Shopee TokenStorage] No shop_id in token, skipping store",
+          `[Shopee TokenStorage] Refusing token for shop_id=${token.shop_id} in storage bound to shop_id=${this.shopId}.`,
         );
         return;
       }
 
       // Find existing shop record by shopId (Shopee's numeric ID)
       const existing = await prisma.shopeeShop.findFirst({
-        where: { shopId: Number(shopId) },
+        where: { shopId: this.shopId },
         select: { id: true },
       });
 
@@ -93,7 +93,7 @@ export class PrismaTokenStorage implements TokenStorage {
         });
       } else {
         logger.warn(
-          `[Shopee TokenStorage] No ShopeeShop record found for shop_id=${shopId}. Token not persisted.`,
+          `[Shopee TokenStorage] No ShopeeShop record found for shop_id=${this.shopId}. Token not persisted.`,
         );
       }
     } catch (error) {
@@ -103,56 +103,13 @@ export class PrismaTokenStorage implements TokenStorage {
   }
 
   /**
-   * Retrieve the stored token for the active shop.
+   * Retrieve the stored token for this storage's shop.
    * The SDK calls this before every authenticated request.
-   * Uses the active shop ID set by setActiveShop() to return the correct token.
    */
   async get(): Promise<AccessToken | null> {
     try {
-      const activeId = getActiveShopId();
-
-      let shop;
-      if (activeId) {
-        // Shop-aware: find the specific shop
-        shop = await prisma.shopeeShop.findFirst({
-          where: { shopId: activeId },
-          select: {
-            shopId: true,
-            accessToken: true,
-            refreshToken: true,
-            tokenExpiry: true,
-          },
-        });
-      } else {
-        // Fallback: first connected shop (for cron, etc.)
-        shop = await prisma.shopeeShop.findFirst({
-          orderBy: { updatedAt: "desc" },
-          select: {
-            shopId: true,
-            accessToken: true,
-            refreshToken: true,
-            tokenExpiry: true,
-          },
-        });
-      }
-
-      if (!shop) return null;
-
-      return toAccessToken(shop);
-    } catch (error) {
-      logger.error("[Shopee TokenStorage] Failed to get token:", error);
-      return null;
-    }
-  }
-
-  /**
-   * Get token for a specific shop by shop_id.
-   * Used when we need to interact with a specific shop directly.
-   */
-  async getByShopId(shopId: number): Promise<AccessToken | null> {
-    try {
       const shop = await prisma.shopeeShop.findFirst({
-        where: { shopId },
+        where: { shopId: this.shopId },
         select: {
           shopId: true,
           accessToken: true,
@@ -165,10 +122,7 @@ export class PrismaTokenStorage implements TokenStorage {
 
       return toAccessToken(shop);
     } catch (error) {
-      logger.error(
-        `[Shopee TokenStorage] Failed to get token for shop ${shopId}:`,
-        error,
-      );
+      logger.error("[Shopee TokenStorage] Failed to get token:", error);
       return null;
     }
   }
@@ -178,44 +132,8 @@ export class PrismaTokenStorage implements TokenStorage {
    */
   async clear(): Promise<void> {
     try {
-      const activeId = getActiveShopId();
-
-      let shop;
-      if (activeId) {
-        shop = await prisma.shopeeShop.findFirst({
-          where: { shopId: activeId },
-          select: { id: true },
-        });
-      } else {
-        shop = await prisma.shopeeShop.findFirst({
-          orderBy: { updatedAt: "desc" },
-          select: { id: true },
-        });
-      }
-
-      if (shop) {
-        await prisma.shopeeShop.update({
-          where: { id: shop.id },
-          data: {
-            accessToken: "",
-            refreshToken: "",
-            tokenExpiry: null,
-            updatedAt: new Date(),
-          },
-        });
-      }
-    } catch (error) {
-      logger.error("[Shopee TokenStorage] Failed to clear token:", error);
-    }
-  }
-
-  /**
-   * Clear token for a specific shop.
-   */
-  async clearByShopId(shopId: number): Promise<void> {
-    try {
       const shop = await prisma.shopeeShop.findFirst({
-        where: { shopId },
+        where: { shopId: this.shopId },
         select: { id: true },
       });
 
@@ -231,10 +149,7 @@ export class PrismaTokenStorage implements TokenStorage {
         });
       }
     } catch (error) {
-      logger.error(
-        `[Shopee TokenStorage] Failed to clear token for shop ${shopId}:`,
-        error,
-      );
+      logger.error("[Shopee TokenStorage] Failed to clear token:", error);
     }
   }
 }

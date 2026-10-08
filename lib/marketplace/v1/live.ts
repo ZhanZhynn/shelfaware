@@ -106,8 +106,27 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
     page_size: query.limit,
     cursor: query.cursor ?? "",
   }) as unknown as { response?: { order_list?: unknown[]; more?: boolean; next_cursor?: string } }).response;
-  const orders = (response?.order_list ?? []).map((item) => {
-    const value = record(item);
+  const listedOrders = response?.order_list ?? [];
+  const orderSns = listedOrders
+    .map((item) => String(record(item).order_sn ?? ""))
+    .filter(Boolean);
+  // get_order_list may omit status and timestamps. Enrich the bounded page with
+  // get_order_detail rather than exposing misleading null operational fields.
+  const detailsResponse = orderSns.length
+    ? (await sdk.order.getOrdersDetail({
+      order_sn_list: orderSns,
+      response_optional_fields: "total_amount,shipping_carrier,package_list",
+    }) as unknown as { response?: { order_list?: unknown[] } }).response
+    : undefined;
+  const details = new Map(
+    (detailsResponse?.order_list ?? []).map((item) => {
+      const value = record(item);
+      return [String(value.order_sn ?? ""), value] as const;
+    }),
+  );
+  const orders = listedOrders.map((item) => {
+    const listed = record(item);
+    const value = details.get(String(listed.order_sn ?? "")) ?? listed;
     return { shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: typeof value.order_status === "string" ? value.order_status : null, createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time) };
   }).filter((item) => item.externalId);
   return { data: query.status ? orders.filter((item) => item.status === query.status) : orders, page: { limit: query.limit, nextCursor: response?.more && response.next_cursor ? response.next_cursor : null } };

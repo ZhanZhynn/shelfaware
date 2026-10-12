@@ -1,4 +1,5 @@
 import { prisma } from "@/prisma/client";
+import { getMarketplaceCapabilities, type CapabilityState } from "./capabilities";
 import type { MarketplacePlatform } from "./types";
 
 export type MarketplaceReconciliationStatus = {
@@ -12,6 +13,8 @@ export type MarketplaceReconciliationStatus = {
     updatedAt: string;
   } | null;
   recordsProvisional: boolean;
+  financialCoverage: { state: "complete" | "partial" | "unavailable"; latestObservedAt: string | null; reason: string | null };
+  providerCapabilities: { finance: CapabilityState; settlements: CapabilityState };
 };
 
 export function recordsAreProvisional(importedLedgerCount: number, certifiedReconciliationCount: number) {
@@ -21,7 +24,7 @@ export function recordsAreProvisional(importedLedgerCount: number, certifiedReco
 /** Returns reconciliation evidence metadata only; it never totals ledger amounts. */
 export async function getMarketplaceReconciliationStatus(platform: MarketplacePlatform, shopId: string, now = new Date()): Promise<MarketplaceReconciliationStatus> {
   const certificationWhere = { platform, shopId, decision: "approved", expiresAt: { gt: now } };
-  const [importedLedgerCount, linkedOrderCount, unmatchedOrderCount, certifiedReconciliationCount, latestAutomaticReconciliation] = await Promise.all([
+  const [importedLedgerCount, linkedOrderCount, unmatchedOrderCount, certifiedReconciliationCount, latestAutomaticReconciliation, latestFinancialRecord, capabilities] = await Promise.all([
     prisma.marketplaceFinancialRecord.count({ where: { platform, shopId } }),
     prisma.marketplaceFinancialRecord.count({ where: { platform, shopId, orderLinkState: "linked" } }),
     prisma.marketplaceFinancialRecord.count({ where: { platform, shopId, orderLinkState: "unmatched" } }),
@@ -31,6 +34,8 @@ export async function getMarketplaceReconciliationStatus(platform: MarketplacePl
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       select: { decision: true, periodEnd: true, updatedAt: true },
     }),
+    prisma.marketplaceFinancialRecord.findFirst({ where: { platform, shopId }, orderBy: [{ sourceObservedAt: "desc" }, { updatedAt: "desc" }], select: { sourceObservedAt: true, updatedAt: true, amountMinor: true } }),
+    getMarketplaceCapabilities(platform, [shopId]),
   ]);
 
   return {
@@ -44,5 +49,11 @@ export async function getMarketplaceReconciliationStatus(platform: MarketplacePl
       updatedAt: latestAutomaticReconciliation.updatedAt.toISOString(),
     },
     recordsProvisional: recordsAreProvisional(importedLedgerCount, certifiedReconciliationCount),
+    financialCoverage: {
+      state: importedLedgerCount === 0 ? "unavailable" : latestFinancialRecord?.amountMinor ? "partial" : "unavailable",
+      latestObservedAt: (latestFinancialRecord?.sourceObservedAt ?? latestFinancialRecord?.updatedAt)?.toISOString() ?? null,
+      reason: importedLedgerCount === 0 ? "No financial records have been synchronized." : latestFinancialRecord?.amountMinor ? "Financial values are imported but remain unreconciled." : "Financial records exist but contain no usable amounts.",
+    },
+    providerCapabilities: { finance: capabilities.finance, settlements: capabilities.settlements },
   };
 }

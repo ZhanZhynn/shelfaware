@@ -14,9 +14,9 @@ import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
 
-function failure(requestId: string, code: string, message: string, status: number) {
+function failure(requestId: string, code: string, message: string, status: number, details?: Record<string, unknown>) {
   return NextResponse.json(
-    { error: { code, message, requestId } },
+    { error: { code, message, requestId, ...(details ? { details } : {}) } },
     { status, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
   );
 }
@@ -30,7 +30,7 @@ export async function financeMarketplaceGet(resource: FinanceResource, request: 
   try {
     actor = await requireApiActor(request, ["marketplace:finance"]);
   } catch (error) {
-    if (error instanceof ApiScopeError) return failure(requestId, "FORBIDDEN", "Forbidden", 403);
+    if (error instanceof ApiScopeError) return failure(requestId, "TOKEN_SCOPE_REQUIRED", "This endpoint requires marketplace finance access", 403, { requiredScopes: ["marketplace:finance"], guidance: "Create or use an API token that includes marketplace:finance." });
     if (error instanceof ApiTokenAuthenticationError) return failure(requestId, "UNAUTHORIZED", "Unauthorized", 401);
     return failure(requestId, "INTERNAL_ERROR", "Marketplace request failed", 500);
   }

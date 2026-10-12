@@ -1,13 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
+  count: vi.fn(),
+  aggregate: vi.fn(),
   accessibleMarketplaceShops: vi.fn(),
   getMarketplaceReconciliationStatus: vi.fn(),
   getProfitDetail: vi.fn(),
 }));
 
-vi.mock("@/prisma/client", () => ({ prisma: { marketplaceFinancialRecord: { findMany: mocks.findMany } } }));
+vi.mock("@/prisma/client", () => ({ prisma: { marketplaceFinancialRecord: { findMany: mocks.findMany, count: mocks.count, aggregate: mocks.aggregate } } }));
 vi.mock("@/lib/marketplace/shops", () => ({ accessibleMarketplaceShops: mocks.accessibleMarketplaceShops }));
 vi.mock("@/lib/marketplace/analytics/reconciliation-status", () => ({ getMarketplaceReconciliationStatus: mocks.getMarketplaceReconciliationStatus }));
 vi.mock("@/lib/marketplace/analytics/profit-detail", () => ({ getProfitDetail: mocks.getProfitDetail }));
@@ -21,6 +23,10 @@ import {
 } from "./finance";
 
 describe("v1 marketplace finance queries", () => {
+	beforeEach(() => {
+		mocks.count.mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+		mocks.aggregate.mockResolvedValue({ _max: { sourceObservedAt: new Date("2026-01-01"), occurredAt: null } });
+	});
   it("requires canonical internal shop IDs and rejects duplicate or unknown filters", () => {
     expect(() => parseMarketplaceFinanceQuery(new URLSearchParams({ shopId: "provider-shop-id" }), "financial-records")).toThrow(MarketplaceFinanceValidationError);
     expect(() => parseMarketplaceFinanceQuery(new URLSearchParams(`shopId=${"a".repeat(24)}&shopId=${"a".repeat(24)}`), "reconciliation-status")).toThrow(MarketplaceFinanceValidationError);

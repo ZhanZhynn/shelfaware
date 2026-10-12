@@ -159,8 +159,8 @@ describe("Shopee escrow finance observations", () => {
         orderExternalId: "ORDER-1",
         financialQuality: "unknown",
         unknownReason: "source_observed_unverified",
-        amount: null,
-        amountMinor: null,
+        amount: 42.5,
+        amountMinor: "4250",
         rawPayload: expect.not.objectContaining({ buyer_user_name: expect.anything() }),
       }),
     }));

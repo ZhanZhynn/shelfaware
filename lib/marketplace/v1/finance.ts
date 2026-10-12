@@ -81,6 +81,25 @@ export async function assertMarketplaceFinanceShop(platform: MarketplacePlatform
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
+export async function getMarketplaceFinancialCoverage(platform: MarketplacePlatform, shopId: string) {
+  const [totalRecords, usableRecords, verifiedRecords, latestObservedAt] = await Promise.all([
+    prisma.marketplaceFinancialRecord.count({ where: { platform, shopId } }),
+    prisma.marketplaceFinancialRecord.count({ where: { platform, shopId, amountMinor: { not: null } } }),
+    prisma.marketplaceFinancialRecord.count({ where: { platform, shopId, financialQuality: { in: ["verified", "derived"] } } }),
+    prisma.marketplaceFinancialRecord.aggregate({ where: { platform, shopId }, _max: { sourceObservedAt: true, occurredAt: true } }),
+  ]);
+  const latest = latestObservedAt._max.sourceObservedAt ?? latestObservedAt._max.occurredAt;
+  return {
+    state: usableRecords > 0 ? (verifiedRecords === totalRecords && usableRecords === totalRecords ? "complete" : "partial") : "unavailable",
+    totalRecords,
+    usableRecords,
+    verifiedRecords,
+    excludedUnknownRecords: totalRecords - usableRecords,
+    latestObservedAt: iso(latest),
+    reason: usableRecords > 0 ? null : "No usable financial records have been synchronized for this shop.",
+  };
+}
+
 export async function listMarketplaceFinancialRecords(platform: MarketplacePlatform, query: FinancialRecordsQuery) {
   const cursor = decodeFinancialRecordsCursor(platform, query);
   const rows = await prisma.marketplaceFinancialRecord.findMany({
@@ -107,6 +126,7 @@ export async function listMarketplaceFinancialRecords(platform: MarketplacePlatf
       limit: query.limit,
       nextCursor: rows.length > query.limit && data.length ? encodeFinancialRecordsCursor(platform, query, data[data.length - 1]!.id) : null,
     },
+    coverage: await getMarketplaceFinancialCoverage(platform, query.shopId),
   };
 }
 

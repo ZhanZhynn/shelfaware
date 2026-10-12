@@ -40,6 +40,20 @@ export type LiveListResult = { data: Array<Record<string, unknown>>; page: { lim
 
 export class MarketplaceLiveValidationError extends Error {}
 export class MarketplaceLiveNotFoundError extends Error {}
+export class MarketplaceLiveProviderError extends Error {
+  constructor(readonly code: "LIVE_PROVIDER_AUTH_REQUIRED" | "LIVE_PROVIDER_RATE_LIMITED" | "LIVE_PROVIDER_TEMPORARY" | "LIVE_PROVIDER_UNSUPPORTED", readonly retryable: boolean, readonly retryAfterSeconds?: number) {
+    super(code);
+  }
+}
+
+export function classifyLiveProviderError(error: unknown) {
+  const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) : 0;
+  const message = error instanceof Error ? error.message : String(error);
+  if (status === 401 || status === 403 || /unauthori[sz]ed|forbidden|permission|token.*(?:expired|invalid)/i.test(message)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_AUTH_REQUIRED", false);
+  if (status === 429 || /rate.?limit|too many requests/i.test(message)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_RATE_LIMITED", true, 60);
+  if (status === 404 || /not supported|unsupported/i.test(message)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_UNSUPPORTED", false);
+  return new MarketplaceLiveProviderError("LIVE_PROVIDER_TEMPORARY", true, 30);
+}
 
 function duplicateQueryKey(params: URLSearchParams) {
   const seen = new Set<string>();
@@ -127,7 +141,16 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   const orders = listedOrders.map((item) => {
     const listed = record(item);
     const value = details.get(String(listed.order_sn ?? "")) ?? listed;
-    return { shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: typeof value.order_status === "string" ? value.order_status : null, createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time) };
+    const totalAmount = finiteNumber(value.total_amount);
+    const buyerPaidShipping = finiteNumber(value.buyer_paid_shipping_fee ?? value.estimated_shipping_fee);
+    const discount = finiteNumber(value.total_discount ?? value.seller_discount ?? value.voucher_from_seller);
+    return {
+      shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: typeof value.order_status === "string" ? value.order_status : null,
+      totalAmount, discountAmount: discount, shippingAmount: buyerPaidShipping, currency: typeof value.currency === "string" ? value.currency : null,
+      // Shopee settlement fees and seller payout come from escrow details, not getOrdersDetail.
+      settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Escrow settlement is only available after Shopee publishes escrow details." },
+      createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time),
+    };
   }).filter((item) => item.externalId);
   return { data: query.status ? orders.filter((item) => item.status === query.status) : orders, page: { limit: query.limit, nextCursor: response?.more && response.next_cursor ? response.next_cursor : null } };
 }

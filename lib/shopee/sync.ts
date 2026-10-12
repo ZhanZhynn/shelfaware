@@ -558,6 +558,9 @@ async function storeEscrowFinancialRecords(input: {
   for (const [orderSn, escrowDetail] of input.escrowDetails) {
     try {
       const orderDetail = input.orderDetails.get(orderSn);
+      const orderIncome = (escrowDetail.order_income ?? {}) as Record<string, unknown>;
+      const escrowAmount = parseSourceNumber(orderIncome.escrow_amount, "shopee.escrow.order_income.escrow_amount");
+      const amountMinor = escrowAmount.value == null ? null : String(Math.round(escrowAmount.value * 100));
       const createdAt = orderDetail?.create_time;
       const occurredAt = typeof createdAt === "number" || typeof createdAt === "string"
         ? new Date(Number(createdAt) * 1000)
@@ -579,22 +582,22 @@ async function storeEscrowFinancialRecords(input: {
           transactionType: "order_escrow",
           feeType: "escrow_detail",
           feeName: "Shopee order escrow detail",
-          amount: null,
-          amountMinor: null,
+          amount: escrowAmount.value,
+          amountMinor,
           amountScale: 2,
-          financialQuality: "unknown",
-          unknownReason: "source_observed_unverified",
+          financialQuality: escrowAmount.quality,
+          unknownReason: escrowAmount.unknownReason ?? null,
           currency: typeof orderDetail?.currency === "string" ? orderDetail.currency : null,
           occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
           sourceObservedAt: new Date(),
           rawPayload: sanitizeMarketplaceRawPayload(escrowDetail),
         },
         update: {
-          amount: null,
-          amountMinor: null,
+          amount: escrowAmount.value,
+          amountMinor,
           amountScale: 2,
-          financialQuality: "unknown",
-          unknownReason: "source_observed_unverified",
+          financialQuality: escrowAmount.quality,
+          unknownReason: escrowAmount.unknownReason ?? null,
           currency: typeof orderDetail?.currency === "string" ? orderDetail.currency : null,
           occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
           sourceObservedAt: new Date(),

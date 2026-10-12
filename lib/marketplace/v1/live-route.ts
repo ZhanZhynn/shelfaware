@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { ApiScopeError, requireApiActor } from "@/lib/auth/require-api-scope";
 import { ApiTokenAuthenticationError } from "@/lib/auth/api-token";
 import { defaultRateLimits, withRateLimit } from "@/lib/api/rate-limit";
-import { listMarketplaceLive, MarketplaceLiveNotFoundError, MarketplaceLiveValidationError, parseLiveQuery, type LiveResource } from "./live";
+import { classifyLiveProviderError, listMarketplaceLive, MarketplaceLiveNotFoundError, MarketplaceLiveProviderError, MarketplaceLiveValidationError, parseLiveQuery, type LiveResource } from "./live";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
 
 export async function liveMarketplaceGet(resource: LiveResource, request: NextRequest, { params }: { params: Promise<{ platform: string }> }) {
   const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
-  const fail = (code: string, message: string, status: number) => NextResponse.json({ error: { code, message, requestId } }, { status, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+  const fail = (code: string, message: string, status: number, details?: Record<string, unknown>) => NextResponse.json({ error: { code, message, requestId, ...(details ? { details } : {}) } }, { status, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
   const { platform } = await params;
   if (!platforms.has(platform as MarketplacePlatform)) return fail("NOT_FOUND", "Not found", 404);
   let actor;
@@ -23,10 +23,11 @@ export async function liveMarketplaceGet(resource: LiveResource, request: NextRe
   try {
     const query = parseLiveQuery(new URL(request.url).searchParams, resource);
     const result = await listMarketplaceLive(platform as MarketplacePlatform, actor.user, resource, query);
-    return NextResponse.json({ apiVersion: "2026-marketplace-v1", ...result, meta: { requestId, platform, source: "live" } }, { headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+    return NextResponse.json({ apiVersion: "2026-marketplace-v1", ...result, meta: { requestId, platform, source: "live", asOf: new Date().toISOString() } }, { headers: { "x-request-id": requestId, "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof MarketplaceLiveValidationError) return fail("INVALID_QUERY", error.message, 422);
     if (error instanceof MarketplaceLiveNotFoundError) return fail("NOT_FOUND", "Shop not found", 404);
-    return fail("LIVE_PROVIDER_UNAVAILABLE", "Live provider unavailable", 502);
+    const providerError = error instanceof MarketplaceLiveProviderError ? error : classifyLiveProviderError(error);
+    return fail(providerError.code, "Live provider request could not be completed", providerError.code === "LIVE_PROVIDER_AUTH_REQUIRED" ? 403 : providerError.code === "LIVE_PROVIDER_UNSUPPORTED" ? 422 : 502, { platform, retryable: providerError.retryable, retryAfterSeconds: providerError.retryAfterSeconds ?? null, guidance: providerError.code === "LIVE_PROVIDER_AUTH_REQUIRED" ? "Reconnect the marketplace shop and confirm its provider permissions." : providerError.retryable ? "Retry after the suggested delay." : "This live query is not available for this provider or request." });
   }
 }

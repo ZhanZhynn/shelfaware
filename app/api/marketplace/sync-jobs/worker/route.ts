@@ -57,6 +57,8 @@ export async function POST(request: NextRequest) {
   try {
     const workerId = request.headers.get("upstash-message-id") ?? crypto.randomUUID();
     const result = await dispatchMarketplaceSyncJob(jobId, workerId);
+    // Keep worker outcomes visible in deployment logs without provider payloads.
+    console.info("Marketplace sync worker dispatch", { jobId, workerId, status: result.status });
     if (result.status === "retrying") {
       const queued = result.nextAttemptAt
         ? await enqueueMarketplaceSyncJob(jobId, { notBefore: result.nextAttemptAt })

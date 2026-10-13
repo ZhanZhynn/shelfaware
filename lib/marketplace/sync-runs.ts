@@ -249,6 +249,47 @@ export async function completeMarketplaceSyncTask(id: string, workerId: string, 
   return settled;
 }
 
+/** Persist completed work within a long stream and schedule the same task's
+ * next bounded window. Attempts reset because the limit applies per window,
+ * while progress remains visible through the checkpoint metrics. */
+export async function checkpointMarketplaceSyncTask(input: {
+  id: string;
+  workerId: string;
+  checkpoint: Prisma.InputJsonValue;
+  metrics: Prisma.InputJsonValue;
+  dedupeKey: string;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const task = await getClaimedMarketplaceSyncTask(input.id, input.workerId, now);
+  if (!task) return { settled: false as const };
+  const settled = await prisma.$transaction(async (tx) => {
+    const checkpointed = await tx.marketplaceSyncTask.updateMany({
+      where: { id: input.id, status: "running", leaseOwner: input.workerId, leaseExpiresAt: { gt: now } },
+      data: {
+        status: "pending",
+        attempts: 0,
+        checkpoint: input.checkpoint,
+        metrics: input.metrics,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        nextAttemptAt: null,
+        lastError: null,
+      },
+    });
+    if (checkpointed.count !== 1) return { settled: false as const };
+    await tx.marketplaceSyncDeliveryOutbox.upsert({
+      where: { taskId_dedupeKey: { taskId: input.id, dedupeKey: input.dedupeKey } },
+      create: { taskId: input.id, dedupeKey: input.dedupeKey },
+      update: {},
+    });
+    return { settled: true as const };
+  });
+  if (!settled.settled) return settled;
+  await releaseShopLease(task);
+  return settled;
+}
+
 export async function retryMarketplaceSyncTask(id: string, workerId: string, error: string, now = new Date()) {
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
   if (!task) return { settled: false as const };

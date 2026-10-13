@@ -38,10 +38,11 @@ serverless execution limit.
 orders-and-escrow -> products -> ads
 ```
 
-Each stream is a separately delivered task. Subsequent work will split each
-stream further by provider cursor and date window. The initial graph removes the
-most harmful behavior: products, orders, and ads no longer compete inside a
-single five-minute invocation.
+Each stream is a separately delivered task. `orders_and_escrow` checkpoints
+24-hour creation-time windows and republishes itself between windows; provider
+cursor checkpoints are the next step only if a high-volume day exceeds the
+worker budget. The initial graph removes the most harmful behavior: products,
+orders, and ads no longer compete inside a single five-minute invocation.
 
 ## Operational Limits
 

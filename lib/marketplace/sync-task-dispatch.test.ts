@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  claim: vi.fn(), complete: vi.fn(), fail: vi.fn(), claimed: vi.fn(), renew: vi.fn(), retry: vi.fn(),
+  checkpoint: vi.fn(), claim: vi.fn(), complete: vi.fn(), fail: vi.fn(), claimed: vi.fn(), renew: vi.fn(), retry: vi.fn(),
   invalidateCache: vi.fn(), invalidateMarketplaceAnalytics: vi.fn(),
   shopeeShop: { findUnique: vi.fn() },
   syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(),
 }));
 
 vi.mock("./sync-runs", () => ({
+  checkpointMarketplaceSyncTask: mocks.checkpoint,
   claimMarketplaceSyncTask: mocks.claim,
   completeMarketplaceSyncTask: mocks.complete,
   failMarketplaceSyncTask: mocks.fail,
@@ -37,20 +38,41 @@ beforeEach(() => {
   mocks.claimed.mockResolvedValue(task());
   mocks.renew.mockResolvedValue(true);
   mocks.complete.mockResolvedValue({ settled: true, nextTaskId: "c".repeat(24) });
+  mocks.checkpoint.mockResolvedValue({ settled: true });
   mocks.shopeeShop.findUnique.mockResolvedValue({ shopId: 123, userId: "shop-owner" });
-  mocks.syncShopeeOrders.mockResolvedValue({ synced: 1 });
+  mocks.syncShopeeOrders.mockResolvedValue({ synced: 1, created: 0, updated: 0, errors: [] });
   mocks.invalidateCache.mockResolvedValue(undefined);
   mocks.invalidateMarketplaceAnalytics.mockResolvedValue(undefined);
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
-  it("runs only the orders-and-escrow stream under the task lease and returns the next task", async () => {
-    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toEqual({ status: "completed", nextTaskId: "c".repeat(24) });
+  it("checkpoints a completed 24-hour orders window and republishes the same task", async () => {
+    const now = new Date("2026-10-13T00:00:00.000Z");
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a", now)).resolves.toEqual({ status: "checkpointed", nextTaskId: "a".repeat(24) });
 
-    expect(mocks.syncShopeeOrders).toHaveBeenCalledWith(123, "shop-owner", undefined, undefined, "requester");
+    expect(mocks.syncShopeeOrders).toHaveBeenCalledWith(123, "shop-owner", 1790553600, 1790640000, "requester");
     expect(mocks.syncShopeeProducts).not.toHaveBeenCalled();
     expect(mocks.syncShopeeAds).not.toHaveBeenCalled();
     expect(mocks.renew).toHaveBeenCalledTimes(2);
+    expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({
+      id: "a".repeat(24),
+      workerId: "worker-a",
+      checkpoint: { from: 1790640000, end: 1791849600, windowsCompleted: 1, windowSeconds: 86400 },
+      metrics: { windowsCompleted: 1, ordersSynced: 1, ordersCreated: 0, ordersUpdated: 0, orderErrors: 0 },
+      dedupeKey: "window-1",
+      now,
+    }));
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it("completes the graph only after the final orders window", async () => {
+    const now = new Date("2026-10-13T00:00:00.000Z");
+    mocks.claimed.mockResolvedValue(task({ checkpoint: { from: 1791763200, end: 1791849600, windowsCompleted: 14 } }));
+
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a", now)).resolves.toEqual({ status: "completed", nextTaskId: "c".repeat(24) });
+
+    expect(mocks.syncShopeeOrders).toHaveBeenCalledWith(123, "shop-owner", 1791763200, 1791849600, "requester");
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
     expect(mocks.complete).toHaveBeenCalledWith("a".repeat(24), "worker-a");
   });
 

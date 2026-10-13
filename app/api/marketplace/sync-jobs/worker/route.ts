@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
     if (typeof taskId === "string" && objectId.test(taskId)) {
       const result = await dispatchMarketplaceSyncTask(taskId, workerId);
       const deliveryTaskId = result.status === "completed" ? result.nextTaskId
+        : result.status === "checkpointed" ? result.nextTaskId
         : result.status === "retrying" ? result.nextTaskId
           : result.status === "skipped" ? await getMarketplaceSyncTaskRecoveryDelivery(taskId)
             : undefined;

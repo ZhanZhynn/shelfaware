@@ -99,11 +99,13 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
         checkpoint: { from: window.to, end: window.end, windowsCompleted: metrics.windowsCompleted, windowSeconds: ORDER_WINDOW_SECONDS },
         metrics,
         dedupeKey: `window-${metrics.windowsCompleted}`,
-        now,
       });
       return checkpointed.settled ? { status: "checkpointed", nextTaskId: id } : { status: "skipped" };
     }
-    const settled = await completeMarketplaceSyncTask(id, workerId);
+    const metrics = window
+      ? ordersWindowMetrics(task.metrics, window, result as { synced: number; created: number; updated: number; errors: string[] })
+      : undefined;
+    const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {
     if (error instanceof PermanentTaskDispatchError) {

@@ -224,13 +224,13 @@ async function settleExpiredMarketplaceSyncTask(id: string, now: Date) {
   await finalizeMarketplaceSyncRun(task.runId, now);
 }
 
-export async function completeMarketplaceSyncTask(id: string, workerId: string, now = new Date()) {
+export async function completeMarketplaceSyncTask(id: string, workerId: string, now = new Date(), metrics?: Prisma.InputJsonValue) {
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
   if (!task) return { settled: false as const };
   const settled = await prisma.$transaction(async (tx) => {
     const completed = await tx.marketplaceSyncTask.updateMany({
       where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } },
-      data: { status: "completed", completedAt: now, leaseOwner: null, leaseExpiresAt: null, nextAttemptAt: null, lastError: null },
+      data: { status: "completed", completedAt: now, leaseOwner: null, leaseExpiresAt: null, nextAttemptAt: null, lastError: null, ...(metrics === undefined ? {} : { metrics }) },
     });
     if (completed.count !== 1) return { settled: false as const };
     const next = await tx.marketplaceSyncTask.findFirst({ where: { runId: task.runId, sequence: task.sequence + 1 }, select: { id: true } });

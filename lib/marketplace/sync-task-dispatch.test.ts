@@ -60,7 +60,6 @@ describe("dispatchMarketplaceSyncTask", () => {
       checkpoint: { from: 1790640000, end: 1791849600, windowsCompleted: 1, windowSeconds: 86400 },
       metrics: { windowsCompleted: 1, ordersSynced: 1, ordersCreated: 0, ordersUpdated: 0, orderErrors: 0 },
       dedupeKey: "window-1",
-      now,
     }));
     expect(mocks.complete).not.toHaveBeenCalled();
   });
@@ -73,7 +72,13 @@ describe("dispatchMarketplaceSyncTask", () => {
 
     expect(mocks.syncShopeeOrders).toHaveBeenCalledWith(123, "shop-owner", 1791763200, 1791849600, "requester");
     expect(mocks.checkpoint).not.toHaveBeenCalled();
-    expect(mocks.complete).toHaveBeenCalledWith("a".repeat(24), "worker-a");
+    expect(mocks.complete).toHaveBeenCalledWith("a".repeat(24), "worker-a", undefined, {
+      windowsCompleted: 15,
+      ordersSynced: 1,
+      ordersCreated: 0,
+      ordersUpdated: 0,
+      orderErrors: 0,
+    });
   });
 
   it("retries only the failed task and never advances the graph", async () => {

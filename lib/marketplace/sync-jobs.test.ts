@@ -108,6 +108,19 @@ describe("MarketplaceSyncJob", () => {
     }));
   });
 
+  it("claims a new pending job when nullable lease fields are omitted", async () => {
+    mocks.marketplaceSyncJob.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimMarketplaceSyncJob("a".repeat(24), "worker-a", now)).resolves.toBe(true);
+
+    expect(mocks.marketplaceSyncJob.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: "a".repeat(24), status: "pending", attempts: { lt: MAX_MARKETPLACE_SYNC_ATTEMPTS } },
+    }));
+  });
+
   it("will not complete after its lease has been lost", async () => {
     mocks.marketplaceSyncJob.updateMany.mockResolvedValue({ count: 0 });
 

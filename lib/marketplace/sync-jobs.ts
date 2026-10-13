@@ -103,6 +103,14 @@ export async function claimMarketplaceSyncJob(id: string, workerId: string, now 
     where: { id, status: "running", attempts: { gte: MAX_MARKETPLACE_SYNC_ATTEMPTS }, leaseExpiresAt: { lte: now } },
     data: { status: "failed", completedAt: now, lastError: "ATTEMPTS_EXHAUSTED", leaseOwner: null, leaseExpiresAt: null },
   });
+  const data = {
+    status: "running",
+    attempts: { increment: 1 },
+    leaseOwner: workerId,
+    leaseExpiresAt: new Date(now.getTime() + leaseMs),
+    startedAt: now,
+    nextAttemptAt: null,
+  };
   const result = await prisma.marketplaceSyncJob.updateMany({
     where: {
       id,
@@ -113,16 +121,18 @@ export async function claimMarketplaceSyncJob(id: string, workerId: string, now 
         { OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lte: now } }] },
       ],
     },
-    data: {
-      status: "running",
-      attempts: { increment: 1 },
-      leaseOwner: workerId,
-      leaseExpiresAt: new Date(now.getTime() + leaseMs),
-      startedAt: now,
-      nextAttemptAt: null,
-    },
+    data,
   });
-  return result.count === 1;
+  if (result.count === 1) return true;
+
+  // New MongoDB documents can omit nullable fields rather than persist null.
+  // A pending job has no active lease by invariant, so this fallback safely
+  // claims only brand-new pending work when the strict nullable filter misses it.
+  const pending = await prisma.marketplaceSyncJob.updateMany({
+    where: { id, status: "pending", attempts: { lt: MAX_MARKETPLACE_SYNC_ATTEMPTS } },
+    data,
+  });
+  return pending.count === 1;
 }
 
 /** A worker can extend only a lease it still owns. */

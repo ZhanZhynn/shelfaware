@@ -3,13 +3,18 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   dispatchMarketplaceSyncJob: vi.fn(),
+  dispatchMarketplaceSyncTask: vi.fn(),
   enqueueMarketplaceSyncJob: vi.fn(),
+  deliverMarketplaceSyncTaskOutbox: vi.fn(),
+  getMarketplaceSyncTaskRecoveryDelivery: vi.fn(),
   isQStashConfigured: vi.fn(),
   verifyQStashWebhook: vi.fn(),
 }));
 
 vi.mock("@/lib/marketplace/sync-dispatch", () => ({ dispatchMarketplaceSyncJob: mocks.dispatchMarketplaceSyncJob }));
+vi.mock("@/lib/marketplace/sync-task-dispatch", () => ({ dispatchMarketplaceSyncTask: mocks.dispatchMarketplaceSyncTask }));
 vi.mock("@/lib/marketplace/sync-enqueue", () => ({ enqueueMarketplaceSyncJob: mocks.enqueueMarketplaceSyncJob }));
+vi.mock("@/lib/marketplace/sync-runs", () => ({ deliverMarketplaceSyncTaskOutbox: mocks.deliverMarketplaceSyncTaskOutbox, getMarketplaceSyncTaskRecoveryDelivery: mocks.getMarketplaceSyncTaskRecoveryDelivery }));
 vi.mock("@/lib/queue/qstash", () => ({ isQStashConfigured: mocks.isQStashConfigured }));
 vi.mock("@/lib/queue/qstash-webhook", () => ({ verifyQStashWebhook: mocks.verifyQStashWebhook }));
 
@@ -25,7 +30,10 @@ beforeEach(() => {
   process.env.MARKETPLACE_SYNC_WORKER_SECRET = "worker-secret";
   mocks.isQStashConfigured.mockReturnValue(false);
   mocks.dispatchMarketplaceSyncJob.mockResolvedValue({ status: "completed" });
+  mocks.dispatchMarketplaceSyncTask.mockResolvedValue({ status: "completed", nextTaskId: "b".repeat(24) });
   mocks.enqueueMarketplaceSyncJob.mockResolvedValue({ scheduled: true });
+  mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: true });
+  mocks.getMarketplaceSyncTaskRecoveryDelivery.mockResolvedValue(null);
 });
 
 describe("marketplace sync worker route", () => {
@@ -82,5 +90,15 @@ describe("marketplace sync worker route", () => {
     expect(response.status).toBe(200);
     expect(mocks.enqueueMarketplaceSyncJob).toHaveBeenCalledWith(jobId, { notBefore: nextAttemptAt });
     expect(await response.json()).toMatchObject({ status: "retrying", nextAttemptAt: nextAttemptAt.toISOString() });
+  });
+
+  it("accepts a task delivery and wakes the next bounded task only after it settles", async () => {
+    const taskId = "c".repeat(24);
+    const response = await POST(request({ authorization: "Bearer worker-secret" }, JSON.stringify({ taskId })));
+
+    expect(response.status).toBe(200);
+    expect(mocks.dispatchMarketplaceSyncTask).toHaveBeenCalledWith(taskId, expect.any(String));
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("b".repeat(24));
+    expect(mocks.dispatchMarketplaceSyncJob).not.toHaveBeenCalled();
   });
 });

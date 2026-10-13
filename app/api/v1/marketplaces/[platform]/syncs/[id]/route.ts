@@ -3,6 +3,7 @@ import { ApiTokenAuthenticationError } from "@/lib/auth/api-token";
 import { ApiScopeError, requireApiActor } from "@/lib/auth/require-api-scope";
 import { defaultRateLimits, withRateLimit } from "@/lib/api/rate-limit";
 import { getMarketplaceSyncJob, marketplaceSyncJobResponse, MarketplaceSyncJobNotFoundError } from "@/lib/marketplace/sync-jobs";
+import { getMarketplaceSyncRun, marketplaceSyncRunResponse, MarketplaceSyncRunNotFoundError } from "@/lib/marketplace/sync-runs";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
@@ -30,13 +31,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (limited) return limited;
 
   try {
-    const job = await getMarketplaceSyncJob(platform as MarketplacePlatform, id, actor.user);
+    let data;
+    try {
+      const run = await getMarketplaceSyncRun(platform as MarketplacePlatform, id, actor.user);
+      data = marketplaceSyncRunResponse(run);
+    } catch (error) {
+      if (!(error instanceof MarketplaceSyncRunNotFoundError)) throw error;
+      const job = await getMarketplaceSyncJob(platform as MarketplacePlatform, id, actor.user);
+      data = marketplaceSyncJobResponse(job);
+    }
     return NextResponse.json(
-      { apiVersion: "2026-marketplace-v1", data: marketplaceSyncJobResponse(job), meta: { requestId, platform } },
+      { apiVersion: "2026-marketplace-v1", data, meta: { requestId, platform } },
       { headers: { "x-request-id": requestId, "cache-control": "no-store" } },
     );
   } catch (error) {
-    if (error instanceof MarketplaceSyncJobNotFoundError) return failure(requestId, "NOT_FOUND", "Not found", 404);
+    if (error instanceof MarketplaceSyncJobNotFoundError || error instanceof MarketplaceSyncRunNotFoundError) return failure(requestId, "NOT_FOUND", "Not found", 404);
     return failure(requestId, "INTERNAL_ERROR", "Marketplace request failed", 500);
   }
 }

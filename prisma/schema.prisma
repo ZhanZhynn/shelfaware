@@ -2309,6 +2309,94 @@ model MarketplaceSyncJob {
   @@index([status, nextAttemptAt, leaseExpiresAt])
 }
 
+// A run is the user-visible request.  It is intentionally separate from the
+// legacy MarketplaceSyncJob so the existing single-stream APIs keep their
+// durable identity and behaviour while Shopee's `all` graph is rolled out.
+model MarketplaceSyncRun {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  platform          String
+  shopId            String    @db.ObjectId
+  syncType          String    // Initial slice: shopee/all only.
+  requestedByUserId String    @db.ObjectId
+  idempotencyKey    String?
+  input             Json?
+  status            String    @default("pending") // pending | running | completed | completed_with_warnings | failed | cancelled
+  lastError         String?
+  errors            Json?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now()) @db.Date
+  updatedAt         DateTime  @updatedAt
+  tasks             MarketplaceSyncTask[]
+
+  @@index([platform, shopId, createdAt])
+  @@index([requestedByUserId, createdAt])
+  @@index([platform, shopId, idempotencyKey])
+}
+
+// One provider stream per bounded worker request.  A task is only delivered
+// after its predecessor settles, and has its own lease and retry state.
+model MarketplaceSyncTask {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  runId          String    @db.ObjectId
+  platform       String
+  shopId         String    @db.ObjectId
+  stream         String    // orders_and_escrow | products | ads
+  sequence       Int
+  required       Boolean   @default(true)
+  status         String    @default("pending") // pending | running | retrying | completed | failed | cancelled
+  checkpoint     Json?
+  metrics        Json?
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  attempts       Int       @default(0)
+  lastError      String?
+  errors         Json?
+  nextAttemptAt  DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now()) @db.Date
+  updatedAt      DateTime  @updatedAt
+  run            MarketplaceSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  outbox         MarketplaceSyncDeliveryOutbox[]
+
+  @@unique([runId, sequence])
+  @@index([platform, shopId, status, nextAttemptAt, leaseExpiresAt])
+}
+
+// The outbox makes queue publication recoverable.  A QStash duplicate is safe:
+// delivery only wakes a task and the task's database lease decides execution.
+model MarketplaceSyncDeliveryOutbox {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  taskId         String    @db.ObjectId
+  dedupeKey      String
+  status         String    @default("pending") // pending | publishing | delivered | retrying
+  attempts       Int       @default(0)
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  publishedAt    DateTime?
+  createdAt      DateTime  @default(now()) @db.Date
+  updatedAt      DateTime  @updatedAt
+  task           MarketplaceSyncTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dedupeKey])
+  @@index([status, leaseExpiresAt])
+}
+
+// This permanent per-shop record supplies the cross-run serialization that a
+// task lease alone cannot provide.  Terminal runs remain historical records.
+model MarketplaceSyncShopLease {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  platform       String
+  shopId         String    @db.ObjectId
+  holderTaskId   String?
+  leaseExpiresAt DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([platform, shopId])
+}
+
 // ─── Marketplace Analytics State ──────────────────────────────────────────
 
 model MarketplaceAnalyticsCapability {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), getMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), getMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), getMarketplaceSyncRun: vi.fn(), marketplaceSyncRunResponse: vi.fn(), MarketplaceSyncRunNotFoundError: class MarketplaceSyncRunNotFoundError extends Error {} }));
 vi.mock("@/lib/auth/require-api-scope", () => ({
   requireApiActor: mocks.requireApiActor,
   ApiScopeError: class ApiScopeError extends Error {},
@@ -13,6 +13,11 @@ vi.mock("@/lib/marketplace/sync-jobs", () => ({
   marketplaceSyncJobResponse: mocks.marketplaceSyncJobResponse,
   MarketplaceSyncJobNotFoundError: class MarketplaceSyncJobNotFoundError extends Error {},
 }));
+vi.mock("@/lib/marketplace/sync-runs", () => ({
+  getMarketplaceSyncRun: mocks.getMarketplaceSyncRun,
+  marketplaceSyncRunResponse: mocks.marketplaceSyncRunResponse,
+  MarketplaceSyncRunNotFoundError: mocks.MarketplaceSyncRunNotFoundError,
+}));
 
 import { GET } from "./route";
 
@@ -22,6 +27,7 @@ beforeEach(() => {
   mocks.withRateLimit.mockResolvedValue(null);
   mocks.getMarketplaceSyncJob.mockResolvedValue({ id: "a".repeat(24) });
   mocks.marketplaceSyncJobResponse.mockReturnValue({ id: "a".repeat(24), status: "pending" });
+  mocks.getMarketplaceSyncRun.mockRejectedValue(new mocks.MarketplaceSyncRunNotFoundError());
 });
 
 describe("v1 marketplace sync status", () => {

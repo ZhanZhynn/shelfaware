@@ -2,11 +2,13 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { dispatchMarketplaceSyncJob } from "@/lib/marketplace/sync-dispatch";
 import { enqueueMarketplaceSyncJob } from "@/lib/marketplace/sync-enqueue";
+import { dispatchMarketplaceSyncTask } from "@/lib/marketplace/sync-task-dispatch";
+import { deliverMarketplaceSyncTaskOutbox, getMarketplaceSyncTaskRecoveryDelivery } from "@/lib/marketplace/sync-runs";
 import { isQStashConfigured } from "@/lib/queue/qstash";
 import { verifyQStashWebhook } from "@/lib/queue/qstash-webhook";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 240;
 
 const objectId = /^[a-f\d]{24}$/i;
 
@@ -35,7 +37,8 @@ async function isAuthorized(request: NextRequest, rawBody: string) {
 
 /**
  * Authenticated durable sync worker. QStash signatures are preferred whenever
- * configured; self-hosted schedulers may POST { jobId } with the worker secret.
+ * configured; self-hosted schedulers may POST { jobId } or { taskId } with the
+ * worker secret. Job delivery remains for existing sync APIs.
  */
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
@@ -45,17 +48,34 @@ export async function POST(request: NextRequest) {
   }
 
   let jobId: unknown;
+  let taskId: unknown;
   try {
-    jobId = (JSON.parse(rawBody) as { jobId?: unknown }).jobId;
+    const payload = JSON.parse(rawBody) as { jobId?: unknown; taskId?: unknown };
+    jobId = payload.jobId;
+    taskId = payload.taskId;
   } catch {
     return NextResponse.json({ error: "Invalid job payload" }, { status: 400 });
   }
-  if (typeof jobId !== "string" || !objectId.test(jobId)) {
+  if ((typeof jobId !== "string" || !objectId.test(jobId)) && (typeof taskId !== "string" || !objectId.test(taskId))) {
     return NextResponse.json({ error: "Invalid job payload" }, { status: 400 });
   }
 
   try {
     const workerId = request.headers.get("upstash-message-id") ?? crypto.randomUUID();
+    if (typeof taskId === "string" && objectId.test(taskId)) {
+      const result = await dispatchMarketplaceSyncTask(taskId, workerId);
+      const deliveryTaskId = result.status === "completed" ? result.nextTaskId
+        : result.status === "retrying" ? result.nextTaskId
+          : result.status === "skipped" ? await getMarketplaceSyncTaskRecoveryDelivery(taskId)
+            : undefined;
+      const queued = deliveryTaskId ? await deliverMarketplaceSyncTaskOutbox(deliveryTaskId) : { scheduled: true };
+      console.info("Marketplace sync task worker dispatch", { taskId, workerId, status: result.status });
+      if (deliveryTaskId && !queued.scheduled && isQStashConfigured()) return NextResponse.json({ error: "Task delivery scheduling failed" }, { status: 500 });
+      return NextResponse.json({ status: result.status, nextAttemptAt: result.status === "retrying" ? result.nextAttemptAt?.toISOString() ?? null : undefined });
+    }
+    // The payload validation above guarantees this branch is the legacy job
+    // shape; keep the explicit guard so TypeScript and future edits agree.
+    if (typeof jobId !== "string" || !objectId.test(jobId)) return NextResponse.json({ error: "Invalid job payload" }, { status: 400 });
     const result = await dispatchMarketplaceSyncJob(jobId, workerId);
     // Keep worker outcomes visible in deployment logs without provider payloads.
     console.info("Marketplace sync worker dispatch", { jobId, workerId, status: result.status });

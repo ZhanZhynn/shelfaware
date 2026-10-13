@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), assertMarketplaceSyncShop: vi.fn(), createMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), enqueueMarketplaceSyncJob: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), assertMarketplaceSyncShop: vi.fn(), createMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), enqueueMarketplaceSyncJob: vi.fn(), createShopeeAllSyncRun: vi.fn(), deliverMarketplaceSyncTaskOutbox: vi.fn(), marketplaceSyncRunResponse: vi.fn() }));
 vi.mock("@/lib/auth/require-api-scope", () => ({
   requireApiActor: mocks.requireApiActor,
   ApiScopeError: class ApiScopeError extends Error {},
@@ -16,6 +16,11 @@ vi.mock("@/lib/marketplace/sync-jobs", () => ({
   MarketplaceSyncJobNotFoundError: class MarketplaceSyncJobNotFoundError extends Error {},
 }));
 vi.mock("@/lib/marketplace/sync-enqueue", () => ({ enqueueMarketplaceSyncJob: mocks.enqueueMarketplaceSyncJob }));
+vi.mock("@/lib/marketplace/sync-runs", () => ({
+  createShopeeAllSyncRun: mocks.createShopeeAllSyncRun,
+  deliverMarketplaceSyncTaskOutbox: mocks.deliverMarketplaceSyncTaskOutbox,
+  marketplaceSyncRunResponse: mocks.marketplaceSyncRunResponse,
+}));
 
 import { POST } from "./route";
 
@@ -26,6 +31,9 @@ beforeEach(() => {
   mocks.createMarketplaceSyncJob.mockResolvedValue({ job: { id: "a".repeat(24) }, coalesced: false });
   mocks.marketplaceSyncJobResponse.mockReturnValue({ id: "a".repeat(24), status: "pending" });
   mocks.enqueueMarketplaceSyncJob.mockResolvedValue({ scheduled: false });
+  mocks.createShopeeAllSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
+  mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: false });
+  mocks.marketplaceSyncRunResponse.mockReturnValue({ id: "d".repeat(24), status: "pending", tasks: [] });
 });
 
 describe("v1 marketplace sync creation", () => {
@@ -57,6 +65,19 @@ describe("v1 marketplace sync creation", () => {
 
     expect((await response.json()).meta.execution).toBe("scheduled");
     expect(mocks.enqueueMarketplaceSyncJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates only Shopee all as a run with an initial durable task delivery", async () => {
+    mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: true });
+    const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/shopee/syncs", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all" }),
+    }), { params: Promise.resolve({ platform: "shopee" }) });
+
+    expect(response.status).toBe(202);
+    expect(mocks.createShopeeAllSyncRun).toHaveBeenCalledWith(expect.objectContaining({ shopId: "b".repeat(24), requestedByUserId: "c".repeat(24) }));
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("e".repeat(24));
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect((await response.json()).meta.execution).toBe("scheduled");
   });
 
   it("rejects malformed internal shop IDs before querying a shop", async () => {

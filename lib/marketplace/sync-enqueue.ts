@@ -43,3 +43,21 @@ export async function enqueueMarketplaceSyncJob(id: string, options: { notBefore
     return { scheduled: false };
   }
 }
+
+/** Wake one bounded task. Correctness remains in the task/database lease. */
+export async function enqueueMarketplaceSyncTask(id: string, options: { notBefore?: Date } = {}): Promise<MarketplaceSyncEnqueueResult> {
+  if (!isQStashConfigured()) return { scheduled: false };
+  const qstash = getQStash();
+  const url = workerUrl();
+  if (!qstash || !url) {
+    logger.error("Marketplace sync queue is configured but worker delivery is unavailable");
+    return { scheduled: false };
+  }
+  try {
+    await qstash.publishJSON({ url, body: { taskId: id }, notBefore: options.notBefore ? Math.ceil(options.notBefore.getTime() / 1000) : undefined, retries: 3 });
+    return { scheduled: true, notBefore: options.notBefore };
+  } catch {
+    logger.error("Failed to enqueue marketplace sync task");
+    return { scheduled: false };
+  }
+}

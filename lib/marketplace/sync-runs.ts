@@ -173,6 +173,18 @@ export async function claimMarketplaceSyncTask(id: string, workerId: string, now
     await prisma.marketplaceSyncRun.updateMany({ where: { id: task.runId, status: "pending" }, data: { status: "running", startedAt: now } });
     return true;
   }
+  // MongoDB may omit nullable fields on a new document, which makes the
+  // strict due/lease predicate above miss an otherwise claimable pending task.
+  // Pending tasks have no active worker by invariant, so this cannot steal a
+  // live lease from retrying or running work.
+  const pending = await prisma.marketplaceSyncTask.updateMany({
+    where: { id, status: "pending", attempts: { lt: MAX_MARKETPLACE_SYNC_ATTEMPTS } },
+    data: { status: "running", attempts: { increment: 1 }, leaseOwner: workerId, leaseExpiresAt: new Date(now.getTime() + TASK_LEASE_MS), startedAt: now, nextAttemptAt: null },
+  });
+  if (pending.count === 1) {
+    await prisma.marketplaceSyncRun.updateMany({ where: { id: task.runId, status: "pending" }, data: { status: "running", startedAt: now } });
+    return true;
+  }
   await releaseShopLease(task);
   return false;
 }

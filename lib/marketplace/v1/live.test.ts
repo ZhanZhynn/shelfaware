@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MarketplaceLiveValidationError, parseLiveQuery } from "./live";
+import { liveRevenue, MarketplaceLiveValidationError, parseLiveQuery } from "./live";
 
 describe("live marketplace query parsing", () => {
   it("requires the canonical internal shop ID and materializes a bounded order window", () => {
@@ -14,5 +14,13 @@ describe("live marketplace query parsing", () => {
     expect(() => parseLiveQuery(new URLSearchParams({ shopId: "provider-shop-id" }), "products")).toThrow(MarketplaceLiveValidationError);
     expect(() => parseLiveQuery(new URLSearchParams(`shopId=${"a".repeat(24)}&status=ACTIVE&status=DRAFT`), "products")).toThrow(MarketplaceLiveValidationError);
     expect(() => parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), createdAfter: "2026-01-01T00:00:00.000Z", createdBefore: "2026-02-02T00:00:00.000Z" }), "orders")).toThrow("Date range must not exceed 31 days");
+  });
+});
+
+describe("live revenue eligibility", () => {
+  it("never counts cancelled or unpaid gross order values as revenue", () => {
+    expect(liveRevenue("CANCELLED", 16.57)).toMatchObject({ revenueEligible: false, revenueAmount: 0 });
+    expect(liveRevenue("UNPAID", 36.4)).toMatchObject({ revenueEligible: false, revenueAmount: 0 });
+    expect(liveRevenue("READY_TO_SHIP", 20.93)).toMatchObject({ revenueEligible: true, revenueAmount: 20.93, revenueBasis: "gross_order_value" });
   });
 });

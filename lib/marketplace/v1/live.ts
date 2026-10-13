@@ -98,6 +98,17 @@ const record = (value: unknown): Record<string, unknown> => value && typeof valu
 const defaultFrom = () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 const defaultTo = () => new Date().toISOString();
 
+/** Gross order value remains auditable; cancelled, unpaid, and failed orders are never revenue eligible. */
+export function liveRevenue(status: unknown, totalAmount: number | null) {
+  const normalized = typeof status === "string" ? status.toUpperCase() : "";
+  const revenueEligible = totalAmount != null && !/(CANCEL|UNPAID|FAIL)/.test(normalized);
+  return {
+    revenueEligible,
+    revenueAmount: revenueEligible ? totalAmount : 0,
+    revenueBasis: "gross_order_value" as const,
+  };
+}
+
 function nextOffset(cursor: string | undefined) {
   if (!cursor) return 0;
   const offset = Number(cursor);
@@ -144,9 +155,11 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
     const totalAmount = finiteNumber(value.total_amount);
     const buyerPaidShipping = finiteNumber(value.buyer_paid_shipping_fee ?? value.estimated_shipping_fee);
     const discount = finiteNumber(value.total_discount ?? value.seller_discount ?? value.voucher_from_seller);
+    const orderStatus = typeof value.order_status === "string" ? value.order_status : null;
     return {
-      shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: typeof value.order_status === "string" ? value.order_status : null,
+      shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: orderStatus,
       totalAmount, discountAmount: discount, shippingAmount: buyerPaidShipping, currency: typeof value.currency === "string" ? value.currency : null,
+      ...liveRevenue(orderStatus, totalAmount),
       // Shopee settlement fees and seller payout come from escrow details, not getOrdersDetail.
       settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Escrow settlement is only available after Shopee publishes escrow details." },
       createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time),
@@ -180,7 +193,7 @@ async function lazadaOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   const shop = await prisma.lazadaShop.findFirst({ where: { id: query.shopId, userId: { in: ownerIds } } });
   if (!shop) throw new MarketplaceLiveNotFoundError("Shop not found");
   const rows = await getOrdersCustom(createLazadaShopContext(shop), { created_after: query.createdAfter ?? defaultFrom(), created_before: query.createdBefore ?? defaultTo(), status: query.status, limit: query.limit, offset: nextOffset(query.cursor), sort_by: "created_at", sort_direction: "DESC" });
-  const data = rows.map((item) => ({ shopId: query.shopId, externalId: String(item.order_id), reference: item.order_number || null, status: item.statuses?.[0] ?? null, totalAmount: finiteNumber(item.price), shippingAmount: finiteNumber(item.shipping_fee), createdAt: item.created_at || null, updatedAt: item.updated_at || null }));
+  const data = rows.map((item) => { const totalAmount = finiteNumber(item.price); const orderStatus = item.statuses?.[0] ?? null; return { shopId: query.shopId, externalId: String(item.order_id), reference: item.order_number || null, status: orderStatus, totalAmount, shippingAmount: finiteNumber(item.shipping_fee), ...liveRevenue(orderStatus, totalAmount), createdAt: item.created_at || null, updatedAt: item.updated_at || null }; });
   return { data, page: { limit: query.limit, nextCursor: rows.length === query.limit ? String(nextOffset(query.cursor) + rows.length) : null } };
 }
 
@@ -199,7 +212,7 @@ async function tiktokOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   const shop = await prisma.tikTokShop.findFirst({ where: { id: query.shopId, userId: { in: ownerIds } }, select: { accessToken: true, shopCipher: true } });
   if (!shop) throw new MarketplaceLiveNotFoundError("Shop not found");
   const response = await searchOrders(shop.accessToken, shop.shopCipher, { order_status: query.status, create_time_ge: Math.floor(new Date(query.createdAfter ?? defaultFrom()).getTime() / 1000), create_time_lt: Math.floor(new Date(query.createdBefore ?? defaultTo()).getTime() / 1000) }, query.limit, query.cursor, "CREATE_TIME", "DESC");
-  return { data: (response.orders ?? []).map((item) => ({ shopId: query.shopId, externalId: item.id, status: item.status, totalAmount: finiteNumber(item.payment?.total_amount), currency: item.payment?.currency ?? null, fulfillmentStatus: item.fulfillment_type ?? null, shippingType: item.shipping_type ?? null, createdAt: isoSeconds(item.create_time), updatedAt: isoSeconds(item.update_time) })), page: { limit: query.limit, nextCursor: response.next_page_token || null } };
+  return { data: (response.orders ?? []).map((item) => { const totalAmount = finiteNumber(item.payment?.total_amount); return { shopId: query.shopId, externalId: item.id, status: item.status, totalAmount, ...liveRevenue(item.status, totalAmount), currency: item.payment?.currency ?? null, fulfillmentStatus: item.fulfillment_type ?? null, shippingType: item.shipping_type ?? null, createdAt: isoSeconds(item.create_time), updatedAt: isoSeconds(item.update_time) }; }), page: { limit: query.limit, nextCursor: response.next_page_token || null } };
 }
 
 async function tiktokProducts(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {
@@ -226,7 +239,7 @@ async function shopifyOrders(query: LiveQuery, ownerIds: string[]): Promise<Live
   if (query.createdBefore) filters.push(`created_at:<=${query.createdBefore}`);
   if (query.status) filters.push(`status:${query.status}`);
   const response = await shopifyGraphQL<{ orders: { nodes: Array<Record<string, any>>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }>(shop.shopDomain, shop.accessToken, LIVE_ORDERS_QUERY, { first: query.limit, after: query.cursor ?? null, query: filters.join(" ") });
-  return { data: response.orders.nodes.map((item) => ({ shopId: query.shopId, externalId: item.id, reference: item.name ?? null, status: item.cancelledAt ? "CANCELLED" : item.closed ? "CLOSED" : "OPEN", paymentStatus: item.displayFinancialStatus ?? null, fulfillmentStatus: item.displayFulfillmentStatus ?? null, totalAmount: finiteNumber(item.totalPriceSet?.shopMoney?.amount), currency: item.currencyCode ?? item.totalPriceSet?.shopMoney?.currencyCode ?? null, createdAt: item.createdAt ?? null, updatedAt: item.updatedAt ?? null })), page: { limit: query.limit, nextCursor: response.orders.pageInfo.hasNextPage ? response.orders.pageInfo.endCursor : null } };
+  return { data: response.orders.nodes.map((item) => { const orderStatus = item.cancelledAt ? "CANCELLED" : item.closed ? "CLOSED" : "OPEN"; const totalAmount = finiteNumber(item.totalPriceSet?.shopMoney?.amount); return { shopId: query.shopId, externalId: item.id, reference: item.name ?? null, status: orderStatus, paymentStatus: item.displayFinancialStatus ?? null, fulfillmentStatus: item.displayFulfillmentStatus ?? null, totalAmount, ...liveRevenue(orderStatus, totalAmount), currency: item.currencyCode ?? item.totalPriceSet?.shopMoney?.currencyCode ?? null, createdAt: item.createdAt ?? null, updatedAt: item.updatedAt ?? null }; }), page: { limit: query.limit, nextCursor: response.orders.pageInfo.hasNextPage ? response.orders.pageInfo.endCursor : null } };
 }
 
 const adapters = {

@@ -91,6 +91,8 @@ const isoSeconds = (value: unknown) => {
   return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : null;
 };
 const finiteNumber = (value: unknown) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || !value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -100,11 +102,12 @@ const defaultTo = () => new Date().toISOString();
 
 /** Gross order value remains auditable; cancelled, unpaid, and failed orders are never revenue eligible. */
 export function liveRevenue(status: unknown, totalAmount: number | null) {
-  const normalized = typeof status === "string" ? status.toUpperCase() : "";
-  const revenueEligible = totalAmount != null && !/(CANCEL|UNPAID|FAIL)/.test(normalized);
+  const normalized = typeof status === "string" ? status.trim().toUpperCase() : "";
+  const hasAmount = totalAmount !== null && Number.isFinite(totalAmount);
+  const revenueEligible = hasAmount && !!normalized && !/^(UNKNOWN|UNSPECIFIED)$/.test(normalized) && !/(CANCEL|UNPAID|FAIL)/.test(normalized);
   return {
     revenueEligible,
-    revenueAmount: revenueEligible ? totalAmount : 0,
+    revenueAmount: revenueEligible ? totalAmount : hasAmount ? 0 : null,
     revenueBasis: "gross_order_value" as const,
   };
 }
@@ -151,17 +154,29 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   );
   const orders = listedOrders.map((item) => {
     const listed = record(item);
-    const value = details.get(String(listed.order_sn ?? "")) ?? listed;
+    const value = { ...listed, ...details.get(String(listed.order_sn ?? "")) };
     const totalAmount = finiteNumber(value.total_amount);
     const buyerPaidShipping = finiteNumber(value.buyer_paid_shipping_fee ?? value.estimated_shipping_fee);
     const discount = finiteNumber(value.total_discount ?? value.seller_discount ?? value.voucher_from_seller);
     const orderStatus = typeof value.order_status === "string" ? value.order_status : null;
+    const carrier = typeof value.shipping_carrier === "string" ? value.shipping_carrier : null;
+    const packages = Array.isArray(value.package_list) ? value.package_list.map((item) => {
+      const pkg = record(item);
+      return {
+        packageNumber: typeof pkg.package_number === "string" ? pkg.package_number : null,
+        fulfillmentStatus: typeof pkg.fulfillment_status === "string" ? pkg.fulfillment_status : null,
+        logisticsStatus: typeof pkg.logistics_status === "string" ? pkg.logistics_status : null,
+        trackingNumber: typeof pkg.tracking_number === "string" ? pkg.tracking_number : null,
+        carrier: typeof pkg.shipping_carrier === "string" ? pkg.shipping_carrier : null,
+      };
+    }) : [];
     return {
       shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: orderStatus,
       totalAmount, discountAmount: discount, shippingAmount: buyerPaidShipping, currency: typeof value.currency === "string" ? value.currency : null,
       ...liveRevenue(orderStatus, totalAmount),
-      // Shopee settlement fees and seller payout come from escrow details, not getOrdersDetail.
-      settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Escrow settlement is only available after Shopee publishes escrow details." },
+      carrier, packages,
+      // Escrow detail is intentionally not requested by this read-only endpoint.
+      settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Unavailable because this endpoint does not request Shopee escrow details." },
       createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time),
     };
   }).filter((item) => item.externalId);

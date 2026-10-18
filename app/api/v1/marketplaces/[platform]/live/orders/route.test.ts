@@ -19,7 +19,7 @@ beforeEach(() => {
   mocks.requireApiActor.mockResolvedValue({ user: { id: "user-1", role: "admin" }, authType: "api_token", tokenId: "token-1" });
   mocks.withRateLimit.mockResolvedValue(null);
   mocks.parseLiveQuery.mockReturnValue({ shopId: "a".repeat(24), limit: 10, status: "READY_TO_SHIP" });
-  mocks.listMarketplaceLive.mockResolvedValue({ data: [{ shopId: "a".repeat(24), externalId: "order-1", status: "READY_TO_SHIP", totalAmount: 12 }], page: { limit: 10, nextCursor: null } });
+  mocks.listMarketplaceLive.mockResolvedValue({ data: [{ shopId: "a".repeat(24), externalId: "order-1", status: "READY_TO_SHIP", totalAmount: 12, carrier: "Shopee Xpress", packages: [{ packageNumber: "PACKAGE-1", fulfillmentStatus: "LOGISTICS_READY", trackingNumber: null, carrier: null }] }], page: { limit: 10, nextCursor: null } });
 });
 
 describe("live marketplace orders", () => {
@@ -31,7 +31,7 @@ describe("live marketplace orders", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.requireApiActor).toHaveBeenCalledWith(expect.any(NextRequest), ["marketplace:live"]);
     expect(mocks.listMarketplaceLive).toHaveBeenCalledWith("shopee", expect.objectContaining({ id: "user-1" }), "orders", expect.objectContaining({ shopId: "a".repeat(24) }));
-    expect(body).toMatchObject({ data: [{ externalId: "order-1", status: "READY_TO_SHIP" }], meta: { platform: "shopee", source: "live" } });
+    expect(body).toMatchObject({ data: [{ externalId: "order-1", status: "READY_TO_SHIP", carrier: "Shopee Xpress", packages: [{ packageNumber: "PACKAGE-1", fulfillmentStatus: "LOGISTICS_READY" }] }], meta: { platform: "shopee", source: "live" } });
     expect(JSON.stringify(body)).not.toMatch(/email|address|phone|buyer/i);
   });
 

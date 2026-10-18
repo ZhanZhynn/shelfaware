@@ -1,11 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { AnalyticsValidationError, buildOperationalCoverage, isFinancialAnalyticsEligible, isFinancialAnalyticsReady, paginateAnalyticsValues, parseAnalyticsDateRange, parseAnalyticsPagination, resolveReportingCurrency, validateReportingCurrency } from "./server";
+import { AnalyticsValidationError, buildAnalyticsFreshness, buildOperationalCoverage, isFinancialAnalyticsEligible, isFinancialAnalyticsReady, paginateAnalyticsValues, parseAnalyticsDateRange, parseAnalyticsPagination, resolveReportingCurrency, validateReportingCurrency } from "./server";
 import { requestsMarketplaceAnalyticsV1, staticStatsContract } from "./http";
 
 describe("analytics request validation", () => {
   it("rejects invalid and inverted dates", () => {
     expect(() => parseAnalyticsDateRange(new URLSearchParams("dateFrom=not-a-date"))).toThrow(AnalyticsValidationError);
     expect(() => parseAnalyticsDateRange(new URLSearchParams("dateFrom=2026-02-02&dateTo=2026-02-01"))).toThrow("dateFrom must not be after dateTo");
+  });
+
+  it("keeps a same-day calendar range inclusive and independent of server timezone", () => {
+    const range = parseAnalyticsDateRange(new URLSearchParams({ dateFrom: "2026-10-18", dateTo: "2026-10-18" }));
+    expect(range?.gte?.toISOString()).toBe("2026-10-18T00:00:00.000Z");
+    expect(range?.lte?.toISOString()).toBe("2026-10-18T23:59:59.999Z");
+  });
+
+  it("accepts explicit local-day timestamp boundaries without expanding their upper bound", () => {
+    const range = parseAnalyticsDateRange(new URLSearchParams({ dateFrom: "2026-10-18T00:00:00+08:00", dateTo: "2026-10-18T23:59:59.999+08:00" }));
+    expect(range?.gte?.toISOString()).toBe("2026-10-17T16:00:00.000Z");
+    expect(range?.lte?.toISOString()).toBe("2026-10-18T15:59:59.999Z");
+    expect(parseAnalyticsDateRange(new URLSearchParams({ dateTo: "2026-10-18T12:00:00Z" }))?.lte?.toISOString()).toBe("2026-10-18T12:00:00.000Z");
+  });
+
+  it("rejects offset-free, invalid, and inverted timestamp boundaries", () => {
+    for (const dateFrom of ["2026-10-18T00:00:00", "2026-02-30T00:00:00+08:00", "2026-10-18T25:00:00Z", "2026-10-18T00:00:00+25:00"]) {
+      expect(() => parseAnalyticsDateRange(new URLSearchParams({ dateFrom }))).toThrow(AnalyticsValidationError);
+    }
+    expect(() => parseAnalyticsDateRange(new URLSearchParams({ dateFrom: "2026-10-18T00:00:00Z", dateTo: "2026-10-18T00:00:00+08:00" }))).toThrow("dateFrom must not be after dateTo");
   });
 
   it("does not permit mixed currencies or invented conversions", () => {
@@ -52,5 +72,26 @@ describe("analytics request validation", () => {
     const coverage = buildOperationalCoverage([{ createdAt: new Date("2026-01-02"), currency: "MYR", status: "", buyerId: null, items: [{ quantity: null }] }] as never, "available");
     expect(coverage).toMatchObject({ state: "partial", rawOrderCount: 1, unknownStatusCount: 1, unknownQuantityCount: 1, unknownIdentityCount: 1, sourceCurrencies: ["MYR"] });
     expect(coverage).not.toHaveProperty("financialCoveragePercent");
+  });
+
+  it("does not equate empty local history with zero provider orders", () => {
+    const coverage = buildOperationalCoverage([], "unknown");
+    expect(coverage).toMatchObject({ state: "unavailable", availability: "no_data", rawOrderCount: 0 });
+    expect(coverage.reason).toContain("does not establish zero live orders");
+  });
+
+  it("reports observation and shop sync times without claiming complete history", () => {
+    const computedAt = new Date("2026-10-18T13:00:00Z");
+    const freshness = buildAnalyticsFreshness(
+      [{ id: "shop-a", lastSyncedAt: "2026-10-18T12:00:00.000Z" }, { id: "shop-b", lastSyncedAt: null }],
+      [null, new Date("2026-10-18T11:00:00Z"), new Date("2026-10-18T12:30:00Z")],
+      computedAt,
+    );
+    expect(freshness).toEqual({
+      source: "local", computedAt: computedAt.toISOString(), historyCompleteness: "unknown",
+      latestMatchingOrderObservedAt: "2026-10-18T12:30:00.000Z",
+      shops: [{ shopId: "shop-a", lastShopSyncAt: "2026-10-18T12:00:00.000Z" }, { shopId: "shop-b", lastShopSyncAt: null }],
+    });
+    expect(buildAnalyticsFreshness([], [null], computedAt).latestMatchingOrderObservedAt).toBeNull();
   });
 });

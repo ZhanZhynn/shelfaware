@@ -10,7 +10,7 @@ export class MarketplaceV1ValidationError extends Error {}
 export class MarketplaceV1NotFoundError extends Error {}
 
 type Resource = "orders" | "products";
-type LocalQuery = { shopId?: string; status?: string; search?: string; createdAfter?: string; createdBefore?: string; limit: number; cursor?: string };
+type LocalQuery = { shopId?: string; status?: string; search?: string; createdAfter?: string; createdBefore?: string; dateBasis?: "source" | "ingested"; limit: number; cursor?: string };
 
 const common = {
   shopId: z.string().regex(objectId, "shopId must be an internal shop ID").optional(),
@@ -19,7 +19,7 @@ const common = {
   cursor: z.string().min(1).max(2048).optional(),
 };
 
-const orderSchema = z.object({ ...common, createdAfter: z.string().datetime({ offset: true }).optional(), createdBefore: z.string().datetime({ offset: true }).optional() }).strict();
+const orderSchema = z.object({ ...common, createdAfter: z.string().datetime({ offset: true }).optional(), createdBefore: z.string().datetime({ offset: true }).optional(), dateBasis: z.enum(["source", "ingested"]).optional() }).strict();
 const productSchema = z.object({ ...common, search: z.string().trim().min(1).max(200).optional() }).strict();
 
 function duplicateQueryKey(params: URLSearchParams) {
@@ -44,7 +44,9 @@ export function parseLocalQuery(params: URLSearchParams, resource: Resource): Lo
 }
 
 function fingerprint(platform: MarketplacePlatform, resource: Resource, query: LocalQuery) {
-  return JSON.stringify({ platform, resource, shopId: query.shopId ?? null, status: query.status ?? null, search: query.search ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null });
+  // Keep the shipped default/ingested fingerprint stable; source filtering has
+  // different membership and must not reuse an ingestion-date cursor.
+  return JSON.stringify({ platform, resource, shopId: query.shopId ?? null, status: query.status ?? null, search: query.search ?? null, createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, ...(query.dateBasis === "source" ? { dateBasis: "source" } : {}) });
 }
 
 export function encodeMarketplaceCursor(platform: MarketplacePlatform, resource: Resource, query: LocalQuery, id: string) {
@@ -83,6 +85,19 @@ async function authorizeShop(platform: MarketplacePlatform, shopId: string | und
 }
 
 const iso = (value: Date | null | undefined) => value?.toISOString() ?? null;
+const sourceCreatedAtField: Record<MarketplacePlatform, "shopeeCreatedAt" | "lazadaCreatedAt" | "tiktokCreatedAt" | "shopifyCreatedAt"> = {
+  shopee: "shopeeCreatedAt",
+  lazada: "lazadaCreatedAt",
+  tiktok: "tiktokCreatedAt",
+  shopify: "shopifyCreatedAt",
+};
+const orderDateFilter = (platform: MarketplacePlatform, query: LocalQuery) => {
+  if (!query.createdAfter && !query.createdBefore) return {};
+  const range = { ...(query.createdAfter ? { gte: new Date(query.createdAfter) } : {}), ...(query.createdBefore ? { lte: new Date(query.createdBefore) } : {}) };
+  if (query.dateBasis !== "source") return { createdAt: range };
+  const field = sourceCreatedAtField[platform];
+  return { OR: [{ [field]: range }, { [field]: null, createdAt: range }] };
+};
 const page = <T extends { id: string }>(rows: T[], limit: number, platform: MarketplacePlatform, resource: Resource, query: LocalQuery) => {
   const data = rows.slice(0, limit);
   return { data, page: { limit, nextCursor: rows.length > limit && data.length ? encodeMarketplaceCursor(platform, resource, query, data[data.length - 1]!.id) : null } };
@@ -93,12 +108,12 @@ export async function listMarketplaceOrders(platform: MarketplacePlatform, user:
   const ownerIds = await marketplaceOwnerIds(user);
   const shopId = await authorizeShop(platform, query.shopId, ownerIds);
   const cursor = decodeMarketplaceCursor(platform, "orders", query, query.cursor);
-  const where: Record<string, unknown> = { userId: { in: ownerIds }, ...(shopId ? { shopId } : {}), ...(query.status ? { orderStatus: query.status } : {}), ...(query.createdAfter || query.createdBefore ? { createdAt: { ...(query.createdAfter ? { gte: new Date(query.createdAfter) } : {}), ...(query.createdBefore ? { lte: new Date(query.createdBefore) } : {}) } } : {}) };
+  const where: Record<string, unknown> = { userId: { in: ownerIds }, ...(shopId ? { shopId } : {}), ...(query.status ? { orderStatus: query.status } : {}), ...orderDateFilter(platform, query) };
   const options = { where, orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), take: query.limit + 1 };
 
   if (platform === "shopee") {
-    const rows = await prisma.shopeeOrder.findMany({ ...options, select: { id: true, shopId: true, shopeeOrderId: true, orderStatus: true, paymentStatus: true, totalAmount: true, currency: true, trackingNumber: true, trackingCarrier: true, createdAt: true, updatedAt: true, shopeeCreatedAt: true, shopeeUpdatedAt: true } });
-    return page(rows.map((row) => ({ id: row.id, shopId: row.shopId, externalId: row.shopeeOrderId, status: row.orderStatus, paymentStatus: row.paymentStatus, totalAmount: row.totalAmount, currency: row.currency, tracking: { number: row.trackingNumber, carrier: row.trackingCarrier }, createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.shopeeCreatedAt), sourceUpdatedAt: iso(row.shopeeUpdatedAt) })), query.limit, platform, "orders", query);
+    const rows = await prisma.shopeeOrder.findMany({ ...options, select: { id: true, shopId: true, shopeeOrderId: true, orderStatus: true, paymentStatus: true, totalAmount: true, currency: true, trackingNumber: true, trackingCarrier: true, shipByDate: true, packageNumber: true, fulfillmentStatus: true, daysToShip: true, createdAt: true, updatedAt: true, shopeeCreatedAt: true, shopeeUpdatedAt: true } });
+    return page(rows.map((row) => ({ id: row.id, shopId: row.shopId, externalId: row.shopeeOrderId, status: row.orderStatus, paymentStatus: row.paymentStatus, fulfillmentStatus: row.fulfillmentStatus, totalAmount: row.totalAmount, currency: row.currency, tracking: { number: row.trackingNumber, carrier: row.trackingCarrier }, shipByDate: iso(row.shipByDate), packageNumber: row.packageNumber, daysToShip: row.daysToShip, createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.shopeeCreatedAt), sourceUpdatedAt: iso(row.shopeeUpdatedAt) })), query.limit, platform, "orders", query);
   }
   if (platform === "lazada") {
     const rows = await prisma.lazadaOrder.findMany({ ...options, select: { id: true, shopId: true, lazadaOrderId: true, orderNumber: true, orderStatus: true, paymentStatus: true, totalAmount: true, shippingFee: true, currency: true, trackingNumber: true, trackingCarrier: true, createdAt: true, updatedAt: true, lazadaCreatedAt: true, lazadaUpdatedAt: true } });
@@ -151,12 +166,13 @@ export async function getMarketplaceOrder(platform: MarketplacePlatform, user: {
   const where = { id: parseMarketplaceRecordId(id), userId: { in: ownerIds } };
 
   if (platform === "shopee") {
-    const row = await prisma.shopeeOrder.findFirst({ where, select: { id: true, shopId: true, shopeeOrderId: true, orderStatus: true, paymentStatus: true, totalAmount: true, currency: true, trackingNumber: true, trackingCarrier: true, logisticsStatus: true, shippingFee: true, fulfillmentStatus: true, createdAt: true, updatedAt: true, shopeeCreatedAt: true, shopeeUpdatedAt: true, paidAt: true, shippedAt: true, deliveredAt: true, completedAt: true, cancelledAt: true, items: { select: { id: true, shopeeItemId: true, shopeeModelId: true, productName: true, sku: true, quantity: true, price: true, subtotal: true } } } });
+    const row = await prisma.shopeeOrder.findFirst({ where, select: { id: true, shopId: true, shopeeOrderId: true, orderStatus: true, paymentStatus: true, totalAmount: true, currency: true, trackingNumber: true, trackingCarrier: true, logisticsStatus: true, shippingFee: true, shipByDate: true, packageNumber: true, fulfillmentStatus: true, daysToShip: true, createdAt: true, updatedAt: true, shopeeCreatedAt: true, shopeeUpdatedAt: true, paidAt: true, shippedAt: true, deliveredAt: true, completedAt: true, cancelledAt: true, items: { select: { id: true, shopeeItemId: true, shopeeModelId: true, productName: true, sku: true, quantity: true, price: true, subtotal: true } } } });
     if (!row) throw new MarketplaceV1NotFoundError("Order not found");
     return {
       id: row.id, shopId: row.shopId, externalId: row.shopeeOrderId, reference: null, status: row.orderStatus, paymentStatus: row.paymentStatus, fulfillmentStatus: row.fulfillmentStatus,
       totalAmount: row.totalAmount, subtotalAmount: null, shippingAmount: row.shippingFee, taxAmount: null, currency: row.currency,
       tracking: { number: row.trackingNumber, carrier: row.trackingCarrier, status: row.logisticsStatus },
+      shipByDate: iso(row.shipByDate), packageNumber: row.packageNumber, daysToShip: row.daysToShip,
       createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.shopeeCreatedAt), sourceUpdatedAt: iso(row.shopeeUpdatedAt), paidAt: iso(row.paidAt), shippedAt: iso(row.shippedAt), deliveredAt: iso(row.deliveredAt), completedAt: iso(row.completedAt), cancelledAt: iso(row.cancelledAt),
       lineItems: row.items.map((item) => ({ id: item.id, externalLineId: null, productExternalId: item.shopeeItemId?.toString() ?? null, variantExternalId: item.shopeeModelId?.toString() ?? null, title: item.productName, variantTitle: null, sku: item.sku, quantity: item.quantity, unitPrice: item.price, originalUnitPrice: null, subtotal: item.subtotal, discountAmount: null, taxAmount: null, currency: row.currency, status: null, imageUrl: null, isGift: false })),
     };

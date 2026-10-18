@@ -1,7 +1,7 @@
 import { prisma } from "@/prisma/client";
 import { getCache, setCache } from "@/lib/cache/cache-utils";
 import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
-import { accessibleMarketplaceShops } from "@/lib/marketplace/shops";
+import { accessibleMarketplaceShops, type MarketplaceShop } from "@/lib/marketplace/shops";
 import { marketplaceAnalyticsCacheKey } from "./cache";
 import { getMarketplaceCapabilities, getMarketplaceFinancialReadiness } from "./capabilities";
 import { calculateBuyerMetrics, calculateClvMetrics, calculateProfit, calculateProvisionalProfitFromOrders } from "./calculators";
@@ -9,6 +9,7 @@ import type { MarketplacePlatform, NormalizedOrderFinancials, OperationalCoverag
 import type { CapabilityState } from "./capabilities";
 import { createHmac } from "crypto";
 import { marketplaceFinancialDisplayEligible } from "./rollout";
+import { z } from "zod";
 
 export const ANALYTICS_CALCULATION_VERSION = "v5-operational-catalog-sku";
 
@@ -71,14 +72,16 @@ export function parseAnalyticsDateRange(params: URLSearchParams) {
   const from = params.get("dateFrom");
   const to = params.get("dateTo");
   const parse = (value: string, name: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new AnalyticsValidationError(`${name} must be YYYY-MM-DD`);
-    const date = new Date(`${value}T00:00:00.000Z`);
-    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw new AnalyticsValidationError(`${name} is invalid`);
+    const calendarDate = /^\d{4}-\d{2}-\d{2}$/.test(value);
+    if (!calendarDate && !z.string().datetime({ offset: true }).safeParse(value).success) throw new AnalyticsValidationError(`${name} must be YYYY-MM-DD or RFC3339 with an explicit offset`);
+    const date = new Date(calendarDate ? `${value}T00:00:00.000Z` : value);
+    if (Number.isNaN(date.getTime()) || (calendarDate && date.toISOString().slice(0, 10) !== value)) throw new AnalyticsValidationError(`${name} is invalid`);
+    if (calendarDate && name === "dateTo") date.setUTCHours(23, 59, 59, 999);
     return date;
   };
   const value: { gte?: Date; lte?: Date } = {};
   if (from) value.gte = parse(from, "dateFrom");
-  if (to) { const end = parse(to, "dateTo"); end.setUTCHours(23, 59, 59, 999); value.lte = end; }
+  if (to) value.lte = parse(to, "dateTo");
   if (value.gte && value.lte && value.gte > value.lte) throw new AnalyticsValidationError("dateFrom must not be after dateTo");
   return Object.keys(value).length ? value : undefined;
 }
@@ -100,7 +103,20 @@ type MarketplaceAnalyticsResult = ReturnType<typeof buildResponse> & {
   page: AnalyticsPage | null;
   operationalCoverage: OperationalCoverage;
   financialCoverage: ReturnType<typeof buildResponse>["profit"]["coverage"];
+  freshness: ReturnType<typeof buildAnalyticsFreshness>;
 };
+
+export function buildAnalyticsFreshness(shops: Pick<MarketplaceShop, "id" | "lastSyncedAt">[], observationTimes: (Date | null)[], computedAt = new Date()) {
+  const observed = observationTimes.flatMap((value) => value ? [value.getTime()] : []);
+  return {
+    source: "local" as const,
+    computedAt: computedAt.toISOString(),
+    latestMatchingOrderObservedAt: observed.length ? new Date(observed.reduce((latest, value) => Math.max(latest, value))).toISOString() : null,
+    shops: shops.map((shop) => ({ shopId: shop.id, lastShopSyncAt: shop.lastSyncedAt })),
+    // A shop sync can concern products or only part of order history.
+    historyCompleteness: "unknown" as const,
+  };
+}
 
 export async function getMarketplaceAnalytics(platform: MarketplacePlatform, session: Parameters<typeof marketplaceOwnerIds>[0], params: URLSearchParams, metric = "summary"): Promise<MarketplaceAnalyticsResult> {
   const ownerIds = await marketplaceOwnerIds(session);
@@ -120,12 +136,14 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
   if (cached) return cached;
 
   let orders: NormalizedOrderFinancials[] = [];
+  let observationTimes: (Date | null)[] = [];
   let shopCount = 0;
   const fallbackDateFilter = (field: string) => range ? { OR: [{ [field]: range }, { [field]: null, createdAt: range }] } : {};
   if (platform === "shopee") {
     const shops = await prisma.shopeeShop.findMany({ where: { userId: { in: ownerIds }, id: { in: selectedShops.map((shop) => shop.id) } }, select: { id: true } });
     shopCount = shops.length;
     const rows = await prisma.shopeeOrder.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) }, ...fallbackDateFilter("shopeeCreatedAt") }, include: { items: true } });
+    observationTimes = rows.map((row) => row.sourceObservedAt);
     orders = rows.map((row) => { const buyerId = row.buyerUsername ?? row.buyerEmail; return { id: row.id, shopId: row.shopId, platform, currency: row.currency ?? "unknown", createdAt: orderDate(row), status: row.orderStatus, buyerId, buyerDisplayName: buyerPseudonym(row.shopId, buyerId), financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"], grossSales: row.totalAmount, sellerDiscount: null, platformDiscount: null, refund: null, buyerShippingCredit: null, platformSubsidy: null, marketplaceFees: row.commissionFee === null || row.serviceFee === null ? null : row.commissionFee + row.serviceFee, paymentFees: row.sellerTxnFee, sellerShipping: row.shippingFee, returnShipping: null, otherCharges: null, settledProceeds: row.sellerIncome, settledProceedsVerified: false, items: row.items.map((item) => ({ id: item.id, productId: item.variantId ?? item.productId, productName: item.productName, sku: item.sku, imageUrl: null, quantity: item.quantity, grossSales: item.subtotal, refund: null, financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"] })) }; });
   } else if (platform === "lazada") {
     const shops = await prisma.lazadaShop.findMany({ where: { userId: { in: ownerIds }, id: { in: selectedShops.map((shop) => shop.id) } }, select: { id: true } });
@@ -134,6 +152,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
       prisma.lazadaOrder.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) }, ...fallbackDateFilter("lazadaCreatedAt") }, include: { items: true } }),
       prisma.lazadaProduct.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) } }, select: { shopId: true, lazadaItemId: true, sellerSku: true, itemName: true, imageUrl: true } }),
     ]);
+    observationTimes = rows.map((row) => row.sourceObservedAt);
     const productKey = (shopId: string, value: string | number) => `${shopId}:${String(value).trim().toLocaleLowerCase()}`;
     const imagesByItemId = new Map(products.map((product) => [productKey(product.shopId, product.lazadaItemId), product.imageUrl]));
     const skusByItemId = new Map(products.map((product) => [productKey(product.shopId, product.lazadaItemId), product.sellerSku]));
@@ -153,6 +172,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
     const shops = await prisma.tikTokShop.findMany({ where: { userId: { in: ownerIds }, id: { in: selectedShops.map((shop) => shop.id) } }, select: { id: true } });
     shopCount = shops.length;
     const rows = await prisma.tikTokOrder.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) }, ...fallbackDateFilter("tiktokCreatedAt") }, include: { items: true } });
+    observationTimes = rows.map((row) => row.sourceObservedAt);
     orders = rows.map((row) => { const buyerId = row.buyerUserId ?? row.buyerEmail; return { id: row.id, shopId: row.shopId, platform, currency: (row.payment as { currency?: string } | null)?.currency ?? row.currency ?? "unknown", createdAt: orderDate(row), status: row.orderStatus, buyerId, buyerDisplayName: buyerPseudonym(row.shopId, buyerId), financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"], grossSales: (row.payment as { total_product_price?: number } | null)?.total_product_price ?? null, sellerDiscount: null, platformDiscount: null, refund: null, buyerShippingCredit: null, platformSubsidy: null, marketplaceFees: null, paymentFees: null, sellerShipping: null, returnShipping: null, otherCharges: null, settledProceeds: null, settledProceedsVerified: false, items: row.items.map((item) => ({ id: item.tiktokOrderLineItemId, productId: item.skuId ?? item.productId, productName: item.productName, sku: item.sellerSku, imageUrl: item.productImageUrl, quantity: item.quantity, grossSales: item.subtotalAmount ?? (item.price === null || item.quantity === null ? null : item.price * item.quantity), refund: item.refundAmount, financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"] })) }; });
   } else {
     const shops = await prisma.shopifyShop.findMany({ where: { userId: { in: ownerIds }, id: { in: selectedShops.map((shop) => shop.id) } }, select: { id: true } });
@@ -161,6 +181,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
       prisma.shopifyOrder.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) }, test: false, ...fallbackDateFilter("shopifyCreatedAt") }, include: { items: true } }),
       prisma.shopifyProductVariant.findMany({ where: { product: { shopId: { in: shops.map((shop) => shop.id) } } }, select: { id: true, product: { select: { featuredImageUrl: true } } } }),
     ]);
+    observationTimes = rows.map((row) => row.sourceObservedAt);
     const images = new Map(variants.map((variant) => [variant.id, variant.product.featuredImageUrl]));
     orders = rows.map((row) => { const buyerId = row.customerEmail; return { id: row.id, shopId: row.shopId, platform, currency: row.currency, createdAt: orderDate(row), status: row.orderStatus, buyerId, buyerDisplayName: buyerPseudonym(row.shopId, buyerId), financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"], grossSales: row.subtotalAmount, sellerDiscount: null, platformDiscount: null, refund: null, buyerShippingCredit: null, platformSubsidy: null, marketplaceFees: null, paymentFees: null, sellerShipping: null, returnShipping: null, otherCharges: null, settledProceeds: null, settledProceedsVerified: false, items: row.items.map((item) => ({ id: item.shopifyLineId, productId: item.variantId, productName: item.name, sku: item.sku, imageUrl: item.variantId ? images.get(item.variantId) ?? null : null, quantity: item.currentQuantity, grossSales: (item.discountedPrice ?? item.price) * item.currentQuantity, refund: null, financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"] })) }; });
   }
@@ -189,7 +210,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
     built.buyers.topBuyers = result.values;
     page = result.page;
   }
-  const response = { ...built, operationalCoverage, financialCoverage: built.profit.coverage, filters: { shopIds, dateFrom: params.get("dateFrom"), dateTo: params.get("dateTo"), currency, granularity: metric === "revenue-trend" ? requestedGranularity : null }, capabilities, page };
+  const response = { ...built, operationalCoverage, financialCoverage: built.profit.coverage, freshness: buildAnalyticsFreshness(selectedShops, observationTimes), filters: { shopIds, dateFrom: params.get("dateFrom"), dateTo: params.get("dateTo"), currency, granularity: metric === "revenue-trend" ? requestedGranularity : null }, capabilities, page };
   await setCache(cacheKey, response, 120);
   return response;
 }
@@ -202,7 +223,7 @@ export function buildOperationalCoverage(orders: NormalizedOrderFinancials[], or
   const availability = orderCapability === "unauthorized" ? "not_authorized" : orderCapability === "unavailable" ? "unsupported" : orderCapability === "pending" ? "backfilling" : orders.length ? "available" : "no_data";
   const firstObserved = dates.at(0);
   const lastObserved = dates.at(-1);
-  return { state: availability === "available" ? (unknownQuantityCount || unknownStatusCount ? "partial" : "ready") : "unavailable", availability, reason: availability === "available" ? null : availability === "no_data" ? "No observed orders match these filters." : availability === "backfilling" ? "Order history is being backfilled." : availability === "not_authorized" ? "Order access is not authorized." : "Order analytics is unavailable for this connection.", observedDateRange: firstObserved && lastObserved ? { from: firstObserved.toISOString().slice(0, 10), to: lastObserved.toISOString().slice(0, 10) } : null, rawOrderCount: orders.length, rawItemCount: orders.reduce((count, order) => count + order.items.length, 0), unknownStatusCount, unknownQuantityCount, unknownIdentityCount, sourceCurrencies: [...new Set(orders.map((order) => order.currency))].sort() };
+  return { state: availability === "available" ? (unknownQuantityCount || unknownStatusCount ? "partial" : "ready") : "unavailable", availability, reason: availability === "available" ? null : availability === "no_data" ? "No locally observed orders match these filters. Synchronization coverage is unverified; this does not establish zero live orders." : availability === "backfilling" ? "Order history is being backfilled." : availability === "not_authorized" ? "Order access is not authorized." : "Order analytics is unavailable for this connection.", observedDateRange: firstObserved && lastObserved ? { from: firstObserved.toISOString().slice(0, 10), to: lastObserved.toISOString().slice(0, 10) } : null, rawOrderCount: orders.length, rawItemCount: orders.reduce((count, order) => count + order.items.length, 0), unknownStatusCount, unknownQuantityCount, unknownIdentityCount, sourceCurrencies: [...new Set(orders.map((order) => order.currency))].sort() };
 }
 
 function buildResponse(orders: NormalizedOrderFinancials[], currency: string, shopCount: number, granularity: "daily" | "weekly" | "monthly", metric: string, financeReady: boolean) {

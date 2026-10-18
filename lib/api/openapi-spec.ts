@@ -308,8 +308,8 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           tags: ["Marketplace v1"],
           security: marketplaceReadSecurity,
           "x-requiredApiTokenScopes": ["marketplace:read"],
-          parameters: [platformParameter, { name: "shopId", in: "query", schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, { name: "status", in: "query", schema: { type: "string" } }, { name: "createdAfter", in: "query", schema: { type: "string", format: "date-time" } }, { name: "createdBefore", in: "query", schema: { type: "string", format: "date-time" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
-          responses: { "200": { description: "Paginated local order catalog" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read" }, "422": { description: "Invalid query" } },
+          parameters: [platformParameter, { name: "shopId", in: "query", schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, { name: "status", in: "query", schema: { type: "string" } }, { name: "createdAfter", in: "query", schema: { type: "string", format: "date-time" }, description: "Inclusive UTC/RFC3339 lower bound." }, { name: "createdBefore", in: "query", schema: { type: "string", format: "date-time" }, description: "Inclusive UTC/RFC3339 upper bound." }, { name: "dateBasis", in: "query", schema: { type: "string", enum: ["ingested", "source"] }, description: "Defaults to ingested, filtering persisted createdAt. source filters the platform source-created timestamp and uses persisted createdAt only when that source timestamp is null." }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
+          responses: { "200": { description: "Paginated local order catalog. Shopee orders may include persisted shipByDate, packageNumber, fulfillmentStatus, and daysToShip; unavailable values are null." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read" }, "422": { description: "Invalid query" } },
         },
       },
       "/api/v1/marketplaces/{platform}/products/{id}": {
@@ -326,7 +326,7 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
       "/api/v1/marketplaces/{platform}/orders/{id}": {
         get: {
           summary: "Get a locally synchronized marketplace order",
-          description: "Reads the persisted catalog only; it never calls a marketplace provider.",
+          description: "Reads the persisted catalog only; it never calls a marketplace provider. Shopee results may include persisted shipByDate, packageNumber, fulfillmentStatus, and daysToShip when known.",
           tags: ["Marketplace v1"],
           security: marketplaceReadSecurity,
           "x-requiredApiTokenScopes": ["marketplace:read"],
@@ -348,7 +348,7 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
       "/api/v1/marketplaces/{platform}/live/orders": {
         get: {
           summary: "Read orders directly from a marketplace provider",
-          description: "Live reads require a shop ID. Omitted date bounds default to the most recent seven days; the maximum range is 31 days.",
+          description: "Live reads require a shop ID. Omitted date bounds default to the most recent seven days; the maximum range is 31 days. Shopee may include its returned carrier and package operational facts; no escrow settlement detail is requested.",
           tags: ["Marketplace v1"],
           security: marketplaceLiveSecurity,
           "x-requiredApiTokenScopes": ["marketplace:live"],
@@ -400,8 +400,8 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           tags: ["Marketplace v1"],
           security: marketplaceReadSecurity,
           "x-requiredApiTokenScopes": ["marketplace:read"],
-          parameters: [platformParameter, { name: "metric", in: "path", required: true, schema: { type: "string", enum: ["summary", "revenue-trend", "products", "buyers", "clv", "profit"] } }, { name: "shopId", in: "query", schema: { type: "string" } }, { name: "dateFrom", in: "query", schema: { type: "string", format: "date", description: "YYYY-MM-DD" } }, { name: "dateTo", in: "query", schema: { type: "string", format: "date", description: "YYYY-MM-DD" } }, { name: "currency", in: "query", schema: { type: "string", default: "native" } }, { name: "granularity", in: "query", schema: { type: "string", enum: ["day", "week", "month"], default: "day" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
-          responses: { "200": { description: "Analytics metric" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read or shop access" }, "409": { description: "Currency conversion or aggregation conflict" }, "422": { description: "Invalid query" } },
+          parameters: [platformParameter, { name: "metric", in: "path", required: true, schema: { type: "string", enum: ["summary", "revenue-trend", "products", "buyers", "clv", "profit"] } }, { name: "shopId", in: "query", schema: { type: "string" } }, { name: "dateFrom", in: "query", schema: { type: "string" }, description: "Inclusive lower bound: YYYY-MM-DD at UTC midnight, or an RFC3339 timestamp with an explicit offset." }, { name: "dateTo", in: "query", schema: { type: "string" }, description: "Inclusive upper bound: YYYY-MM-DD through 23:59:59.999 UTC, or the exact RFC3339 timestamp with an explicit offset. Trend buckets remain UTC." }, { name: "currency", in: "query", schema: { type: "string", default: "native" } }, { name: "granularity", in: "query", schema: { type: "string", enum: ["day", "week", "month"], default: "day" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
+          responses: { "200": { description: "Analytics metric from local data with freshness.source, computedAt, latestMatchingOrderObservedAt, per-shop lastShopSyncAt, and historyCompleteness=unknown. A shop synchronization time is not proof of complete order-window ingestion." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read or shop access" }, "409": { description: "Currency conversion or aggregation conflict" }, "422": { description: "Invalid query" } },
         },
       },
       "/api/v1/marketplaces/{platform}/financial-records": {

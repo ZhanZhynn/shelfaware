@@ -24,7 +24,7 @@ describe("v1 local marketplace detail mappings", () => {
   it("uses an owned canonical ID and emits normalized, PII-redacted order line items", async () => {
     mocks.shopeeOrderFindFirst.mockResolvedValue({
       id: "a".repeat(24), shopId: "b".repeat(24), shopeeOrderId: "ORDER-1", orderStatus: "SHIPPED", paymentStatus: "PAID", totalAmount: 42, currency: "MYR",
-      trackingNumber: "TRACK-1", trackingCarrier: "Carrier", logisticsStatus: "DELIVERED", shippingFee: 3, fulfillmentStatus: "FULFILLED",
+      trackingNumber: "TRACK-1", trackingCarrier: "Carrier", logisticsStatus: "DELIVERED", shippingFee: 3, shipByDate: new Date("2026-01-03T00:00:00.000Z"), packageNumber: "PACKAGE-1", fulfillmentStatus: "FULFILLED", daysToShip: 2,
       createdAt: new Date("2026-01-01T00:00:00.000Z"), updatedAt: null, shopeeCreatedAt: null, shopeeUpdatedAt: null, paidAt: null, shippedAt: null, deliveredAt: null, completedAt: null, cancelledAt: null,
       // These values emulate fields on the underlying record. The endpoint must
       // neither select nor serialize them.
@@ -39,7 +39,8 @@ describe("v1 local marketplace detail mappings", () => {
     expect(select).not.toHaveProperty("buyerEmail");
     expect(select).not.toHaveProperty("buyerUsername");
     expect(select).not.toHaveProperty("shippingAddress");
-    expect(result).toMatchObject({ externalId: "ORDER-1", lineItems: [{ externalLineId: null, productExternalId: "12", variantExternalId: "34", sku: "WIDGET-RED", subtotal: 40 }] });
+    expect(result).toMatchObject({ externalId: "ORDER-1", shipByDate: "2026-01-03T00:00:00.000Z", packageNumber: "PACKAGE-1", fulfillmentStatus: "FULFILLED", daysToShip: 2, lineItems: [{ externalLineId: null, productExternalId: "12", variantExternalId: "34", sku: "WIDGET-RED", subtotal: 40 }] });
+    expect(select).toMatchObject({ shipByDate: true, packageNumber: true, fulfillmentStatus: true, daysToShip: true });
     expect(result).not.toHaveProperty("buyerEmail");
     expect(result).not.toHaveProperty("shippingAddress");
   });

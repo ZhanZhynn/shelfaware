@@ -22,7 +22,7 @@ beforeEach(() => {
   mocks.requireApiActor.mockResolvedValue({ user: { id: "user-1", role: "admin" }, authType: "api_token", tokenId: "token-1" });
   mocks.withRateLimit.mockResolvedValue(null);
   mocks.parseLocalQuery.mockReturnValue({ limit: 50 });
-  mocks.listMarketplaceOrders.mockResolvedValue({ data: [{ id: "order-1", externalId: "external-1", status: "READY_TO_SHIP" }], page: { limit: 50, nextCursor: null } });
+  mocks.listMarketplaceOrders.mockResolvedValue({ data: [{ id: "order-1", externalId: "external-1", status: "READY_TO_SHIP", shipByDate: "2026-01-03T00:00:00.000Z", packageNumber: "PACKAGE-1", fulfillmentStatus: "LOGISTICS_READY", daysToShip: 2 }], page: { limit: 50, nextCursor: null } });
 });
 
 describe("v1 marketplace orders", () => {
@@ -33,7 +33,7 @@ describe("v1 marketplace orders", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireApiActor).toHaveBeenCalledWith(expect.any(NextRequest), ["marketplace:read"]);
     expect(mocks.withRateLimit).toHaveBeenCalledWith(expect.any(NextRequest), expect.anything(), "api-token:token-1");
-    expect(body).toMatchObject({ apiVersion: "2026-marketplace-v1", data: [{ id: "order-1", externalId: "external-1" }], meta: { platform: "shopee", source: "local" } });
+    expect(body).toMatchObject({ apiVersion: "2026-marketplace-v1", data: [{ id: "order-1", externalId: "external-1", shipByDate: "2026-01-03T00:00:00.000Z", packageNumber: "PACKAGE-1", fulfillmentStatus: "LOGISTICS_READY", daysToShip: 2 }], meta: { platform: "shopee", source: "local" } });
   });
 
   it("returns the limiter response before querying orders", async () => {

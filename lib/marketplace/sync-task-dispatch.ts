@@ -1,5 +1,5 @@
 import { cacheKeys, invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
-import { syncShopeeAds, syncShopeeOrders, syncShopeeProducts } from "@/lib/shopee";
+import { syncShopeeAds, syncShopeeOrders, syncShopeePayoutStatements, syncShopeeProducts, syncShopeeReturns } from "@/lib/shopee";
 import { prisma } from "@/prisma/client";
 import {
   checkpointMarketplaceSyncTask,
@@ -10,6 +10,7 @@ import {
   renewMarketplaceSyncTaskLease,
   retryMarketplaceSyncTask,
 } from "./sync-runs";
+import { marketplaceSyncDateRange } from "./sync-jobs";
 
 export type MarketplaceSyncTaskDispatchResult =
   | { status: "skipped" }
@@ -25,24 +26,33 @@ class PermanentTaskDispatchError extends Error {
 }
 
 const ORDER_WINDOW_SECONDS = 24 * 60 * 60;
+const FINANCIAL_WINDOW_SECONDS = 15 * 24 * 60 * 60;
 const ORDER_LOOKBACK_SECONDS = 15 * ORDER_WINDOW_SECONDS;
 
-type OrdersWindow = { from: number; to: number; end: number; windowsCompleted: number };
+type SyncWindow = { from: number; to: number; end: number; windowsCompleted: number; windowSeconds: number; inclusive: boolean };
 
-function ordersWindow(checkpoint: unknown, now: Date): OrdersWindow {
-  const value = checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint)
-    ? checkpoint as Record<string, unknown>
+function taskWindow(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, now: Date): SyncWindow | undefined {
+  const windowSeconds = task.stream === "orders_and_escrow" ? ORDER_WINDOW_SECONDS
+    : task.stream === "returns" || task.stream === "payouts" ? FINANCIAL_WINDOW_SECONDS
+      : undefined;
+  if (!windowSeconds) return undefined;
+  const value = task.checkpoint && typeof task.checkpoint === "object" && !Array.isArray(task.checkpoint)
+    ? task.checkpoint as Record<string, unknown>
     : null;
+  const range = marketplaceSyncDateRange(task.run.input);
+  // Old all-run checkpoints overlap their boundary. Keep that cursor contract;
+  // explicit date ranges are inclusive and advance past each completed second.
+  const inclusive = range !== null || value?.inclusive === true;
   const end = typeof value?.end === "number" && Number.isInteger(value.end)
     ? value.end
-    : Math.floor(now.getTime() / 1000);
+    : range?.timeTo ?? Math.floor(now.getTime() / 1000);
   const from = typeof value?.from === "number" && Number.isInteger(value.from)
     ? value.from
-    : end - ORDER_LOOKBACK_SECONDS;
+    : range?.timeFrom ?? end - ORDER_LOOKBACK_SECONDS;
   const windowsCompleted = typeof value?.windowsCompleted === "number" && Number.isInteger(value.windowsCompleted)
     ? value.windowsCompleted
     : 0;
-  return { from, to: Math.min(from + ORDER_WINDOW_SECONDS, end), end, windowsCompleted };
+  return { from, to: Math.min(from + windowSeconds - (inclusive ? 1 : 0), end), end, windowsCompleted, windowSeconds, inclusive };
 }
 
 function numberMetric(value: unknown, key: string) {
@@ -51,34 +61,35 @@ function numberMetric(value: unknown, key: string) {
   return typeof metric === "number" ? metric : 0;
 }
 
-function ordersWindowMetrics(previous: unknown, window: OrdersWindow, result: { synced: number; created: number; updated: number; errors: string[] }) {
+function windowMetrics(previous: unknown, window: SyncWindow, result: { synced: number; created?: number; updated?: number; errors: string[] }) {
   return {
     windowsCompleted: window.windowsCompleted + 1,
     ordersSynced: numberMetric(previous, "ordersSynced") + result.synced,
-    ordersCreated: numberMetric(previous, "ordersCreated") + result.created,
-    ordersUpdated: numberMetric(previous, "ordersUpdated") + result.updated,
+    ordersCreated: numberMetric(previous, "ordersCreated") + (result.created ?? 0),
+    ordersUpdated: numberMetric(previous, "ordersUpdated") + (result.updated ?? 0),
     orderErrors: numberMetric(previous, "orderErrors") + result.errors.length,
   };
 }
 
-async function runShopeeTask(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, window?: OrdersWindow) {
+async function runShopeeTask(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, window?: SyncWindow) {
   const shop = await prisma.shopeeShop.findUnique({ where: { id: task.shopId }, select: { shopId: true, userId: true } });
   if (!shop) throw new PermanentTaskDispatchError("SHOP_NOT_FOUND");
-  // Preserve the prior `all` semantics: orders have no date window and ads
-  // use the established 30-day default. Each provider call is now isolated.
+  // Preserve the prior `all` products/ads defaults while isolating provider calls.
   switch (task.stream) {
     case "orders_and_escrow": return syncShopeeOrders(shop.shopId, shop.userId, window?.from, window?.to, task.run.requestedByUserId);
+    case "returns": return syncShopeeReturns(shop.shopId, shop.userId, window?.from, window?.to, task.run.requestedByUserId);
+    case "payouts": return syncShopeePayoutStatements(shop.shopId, shop.userId, window ? { timeFrom: window.from, timeTo: window.to } : undefined, task.run.requestedByUserId);
     case "products": return syncShopeeProducts(shop.shopId, shop.userId, task.run.requestedByUserId);
     case "ads": return syncShopeeAds(shop.shopId, shop.userId, 30, task.run.requestedByUserId);
     default: throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
   }
 }
 
-/** Claim, execute, and settle one bounded Shopee `all` stream task. */
+/** Claim, execute, and settle one bounded Shopee stream task. */
 export async function dispatchMarketplaceSyncTask(id: string, workerId: string, now = new Date()): Promise<MarketplaceSyncTaskDispatchResult> {
   if (!(await claimMarketplaceSyncTask(id, workerId, now))) return { status: "skipped" };
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
-  if (!task || task.platform !== "shopee" || task.run.syncType !== "all") {
+  if (!task || task.platform !== "shopee" || !["all", "orders", "finance", "returns", "payouts"].includes(task.run.syncType)) {
     await failMarketplaceSyncTask(id, workerId, "TASK_STREAM_UNSUPPORTED", now);
     return { status: "failed" };
   }
@@ -87,23 +98,24 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     // Renew immediately before and after the bounded provider call. A task
     // cannot settle after it loses its durable four-minute lease.
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
-    const window = task.stream === "orders_and_escrow" ? ordersWindow(task.checkpoint, now) : undefined;
+    const window = taskWindow(task, now);
     const result = await runShopeeTask(task, window);
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
+    if (result.errors.length) throw new Error("PROVIDER_RETURNED_ERRORS");
     await Promise.all([invalidateCache(cacheKeys.shopee.pattern), invalidateMarketplaceAnalytics("shopee")]);
     if (window && window.to < window.end) {
-      const metrics = ordersWindowMetrics(task.metrics, window, result as { synced: number; created: number; updated: number; errors: string[] });
+      const metrics = windowMetrics(task.metrics, window, result);
       const checkpointed = await checkpointMarketplaceSyncTask({
         id,
         workerId,
-        checkpoint: { from: window.to, end: window.end, windowsCompleted: metrics.windowsCompleted, windowSeconds: ORDER_WINDOW_SECONDS },
+        checkpoint: { from: window.to + (window.inclusive ? 1 : 0), end: window.end, windowsCompleted: metrics.windowsCompleted, windowSeconds: window.windowSeconds, inclusive: window.inclusive },
         metrics,
         dedupeKey: `window-${metrics.windowsCompleted}`,
       });
       return checkpointed.settled ? { status: "checkpointed", nextTaskId: id } : { status: "skipped" };
     }
     const metrics = window
-      ? ordersWindowMetrics(task.metrics, window, result as { synced: number; created: number; updated: number; errors: string[] })
+      ? windowMetrics(task.metrics, window, result)
       : undefined;
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };

@@ -16,6 +16,13 @@ export const shopeeAllTaskGraph = [
   { stream: "ads", required: false },
 ] as const;
 
+const shopeeBoundedTaskStreams = {
+  orders: "orders_and_escrow",
+  finance: "orders_and_escrow",
+  returns: "returns",
+  payouts: "payouts",
+} as const;
+
 export class MarketplaceSyncRunNotFoundError extends Error {}
 
 type MarketplaceActor = Parameters<typeof marketplaceOwnerIds>[0];
@@ -65,6 +72,42 @@ export async function createShopeeAllSyncRun(input: {
     })));
     await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: tasks[0]!.id, dedupeKey: "initial" } });
     return { ...created, tasks };
+  });
+  return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
+}
+
+/** Date-scoped Shopee streams are always executed as checkpointed tasks. */
+export async function createShopeeBoundedSyncRun(input: {
+  shopId: string;
+  requestedByUserId: string;
+  syncType: keyof typeof shopeeBoundedTaskStreams;
+  idempotencyKey?: string;
+  input: MarketplaceSyncInput;
+}) {
+  if (input.idempotencyKey) {
+    const existing = await prisma.marketplaceSyncRun.findFirst({
+      where: { platform: "shopee", shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
+      include: { tasks: { orderBy: { sequence: "asc" } } },
+    });
+    if (existing) return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
+  }
+
+  const run = await prisma.$transaction(async (tx) => {
+    const created = await tx.marketplaceSyncRun.create({
+      data: {
+        platform: "shopee",
+        shopId: input.shopId,
+        syncType: input.syncType,
+        requestedByUserId: input.requestedByUserId,
+        idempotencyKey: input.idempotencyKey ?? null,
+        input: input.input,
+      },
+    });
+    const task = await tx.marketplaceSyncTask.create({
+      data: { runId: created.id, platform: "shopee", shopId: input.shopId, stream: shopeeBoundedTaskStreams[input.syncType], sequence: 0, required: true },
+    });
+    await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: task.id, dedupeKey: "initial" } });
+    return { ...created, tasks: [task] };
   });
   return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
 }

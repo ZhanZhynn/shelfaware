@@ -12,11 +12,14 @@ import {
   MarketplaceSyncJobNotFoundError,
 } from "@/lib/marketplace/sync-jobs";
 import { enqueueMarketplaceSyncJob } from "@/lib/marketplace/sync-enqueue";
-import { createShopeeAllSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
+import { createShopeeAllSyncRun, createShopeeBoundedSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
 const objectId = /^[a-f\d]{24}$/i;
+const rfc3339WithOffset = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const maxRangeMs = 365 * 24 * 60 * 60 * 1000;
+const dateTimeSchema = z.string().datetime({ offset: true });
 const bodySchema = z.object({
   shopId: z.string().regex(objectId, "shopId must be an internal shop ID"),
   syncType: z.enum(marketplaceSyncTypes),
@@ -25,6 +28,23 @@ const bodySchema = z.object({
 
 function failure(requestId: string, code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message, requestId } }, { status, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+}
+
+function dateRangeError(platform: string, syncType: string, input: Record<string, unknown> | undefined, now = Date.now()) {
+  const hasDateFrom = input && Object.hasOwn(input, "dateFrom");
+  const hasDateTo = input && Object.hasOwn(input, "dateTo");
+  if (!hasDateFrom && !hasDateTo) return null;
+  if (platform !== "shopee" || !["orders", "finance", "returns", "payouts", "all"].includes(syncType)) return "Date ranges are not supported for this platform or sync type";
+  const dateFrom = input?.dateFrom;
+  const dateTo = input?.dateTo;
+  if (typeof dateFrom !== "string" || typeof dateTo !== "string" || !rfc3339WithOffset.test(dateFrom) || !rfc3339WithOffset.test(dateTo) || !dateTimeSchema.safeParse(dateFrom).success || !dateTimeSchema.safeParse(dateTo).success) return "dateFrom and dateTo must be paired RFC3339 timestamps with an offset";
+  const from = Date.parse(dateFrom);
+  const to = Date.parse(dateTo);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from % 1000 !== 0 || to % 1000 !== 0) return "dateFrom and dateTo must be valid whole-second RFC3339 timestamps";
+  if (from > to) return "dateFrom must be before or equal to dateTo";
+  if (to > now) return "dateTo must not be in the future";
+  if (to - from > maxRangeMs) return "Date ranges may not exceed 365 days";
+  return null;
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ platform: string }> }) {
@@ -59,6 +79,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!parsed.success) return failure(requestId, "INVALID_BODY", "shopId and syncType are required", 422);
   try {
     const body = parsed.data;
+    const rangeError = dateRangeError(platform, body.syncType, body.input);
+    if (rangeError) return failure(requestId, "INVALID_DATE_RANGE", rangeError, 422);
     await assertMarketplaceSyncShop(platform as MarketplacePlatform, body.shopId, actor.user);
     // The first bounded graph is intentionally narrow. All other platforms and
     // stream-specific requests retain their existing MarketplaceSyncJob path.
@@ -68,6 +90,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         requestedByUserId: actor.user.id,
         idempotencyKey,
         input: body.input as MarketplaceSyncInput | undefined,
+      });
+      const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
+      return NextResponse.json(
+        {
+          apiVersion: "2026-marketplace-v1",
+          data: marketplaceSyncRunResponse(result.run),
+          meta: { requestId, platform, execution: queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced },
+        },
+        { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
+      );
+    }
+    if (platform === "shopee" && body.input && Object.hasOwn(body.input, "dateFrom")) {
+      const result = await createShopeeBoundedSyncRun({
+        shopId: body.shopId,
+        requestedByUserId: actor.user.id,
+        syncType: body.syncType as "orders" | "finance" | "returns" | "payouts",
+        idempotencyKey,
+        input: body.input as MarketplaceSyncInput,
       });
       const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
       return NextResponse.json(

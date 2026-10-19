@@ -79,3 +79,41 @@ The 2026-10-18 export reconciliation matched all 36 exported order IDs and
 Grand Total values. That does not make Grand Total seller payout. Detailed
 escrow/fee reporting remains separate and finance-scoped; the live endpoint
 explicitly says that it does not request escrow details.
+
+## Historical And Financial Evidence Controls
+
+Shopee v1 sync requests can include paired `input.dateFrom` / `input.dateTo`
+whole-second RFC3339 timestamps. Ranges are inclusive, at most 365 days, and
+cannot end in the future. Historical orders/finance execute through checkpointed
+daily tasks; returns/payouts execute in bounded 15-day windows. An explicit
+`all` window applies to orders/escrow only; products/ads keep their existing
+defaults, and returns/payouts remain separate requests. A returned provider
+error cannot be interpreted as a successfully completed stream.
+
+The finance records and reconciliation-status endpoints accept UTC date or
+RFC3339 `dateFrom` / `dateTo`, `dateBasis=occurred|observed`, transaction type,
+financial quality, link state, and currency filters. Counts, freshness, and
+cursors use the same persisted-record scope. Numeric coverage is not certified
+coverage; link partitions include unknown and invalid classifications.
+Period-scoped certification must cover the entire occurrence-time interval.
+Observation-time filters do not define certified accounting periods.
+
+Shopee profit detail preserves null monetary components and reports field-level
+known/missing counts, source quality, and exact applied date bounds. It cannot
+infer seller income from absent fees. Product source/list subtotals are separate
+from unavailable paid-line revenue and profit. Product grouping uses stable
+identities; the dashboard and CSV renderer display unknowns without numeric
+coercion or null dereferences.
+
+Return observations are exposed as `refundEvidence`, scoped to matching
+shop/order pairs. Request values are not final refund postings, and unknown
+history never implies zero refunds. Provisional net/profit derivations require
+all necessary components. Cache versioning prevents old incomplete-but-numeric
+derived values from being served under the corrected contract.
+
+Remaining work requires provider evidence: released order income (distinct
+from bank payout), signed adjustments, fee/tax inclusion semantics, and verified
+amount units. SDK payment methods exist, but their numeric response types alone
+do not establish those accounting contracts. No automatic certification or
+statement balancing entries were introduced. Full implementation and verification
+details are in the sibling CLI's `docs/AUGUST_FINANCE_IMPLEMENTATION_PLAN.md`.

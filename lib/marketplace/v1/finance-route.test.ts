@@ -38,7 +38,21 @@ describe("v1 marketplace finance route", () => {
     expect(mocks.requireApiActor).toHaveBeenCalledWith(expect.any(NextRequest), ["marketplace:finance"]);
     expect(mocks.withRateLimit).toHaveBeenCalledWith(expect.any(NextRequest), expect.anything(), "api-token:token-1");
     expect(mocks.assertMarketplaceFinanceShop).toHaveBeenCalledWith("shopee", expect.anything(), "a".repeat(24));
-    expect(body).toMatchObject({ apiVersion: "2026-marketplace-v1", data: [{ id: "ledger-1" }], page: { limit: 25 }, meta: { platform: "shopee", source: "local" } });
+    expect(body).toMatchObject({ apiVersion: "2026-marketplace-v1", data: [{ id: "ledger-1" }], page: { limit: 25 }, filters: { shopId: "a".repeat(24), dateBasis: "occurred" }, warnings: [], meta: { platform: "shopee", source: "local" } });
+  });
+
+  it("exposes reconciliation filters and warnings at the top level for CLI clients", async () => {
+    mocks.parseMarketplaceFinanceQuery.mockReturnValue({ shopId: "a".repeat(24), dateBasis: "observed", dateRange: { gte: new Date("2026-01-01") }, linkState: "unclassified" });
+    mocks.getMarketplaceFinanceResult.mockResolvedValue({ warnings: ["Some matching financial records have no link-state classification."] });
+
+    const response = await financeMarketplaceGet("reconciliation-status", new NextRequest(`http://localhost/api/v1/marketplaces/shopee/reconciliation-status?shopId=${"a".repeat(24)}`), { params: Promise.resolve({ platform: "shopee" }) });
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      data: { warnings: ["Some matching financial records have no link-state classification."] },
+      filters: { shopId: "a".repeat(24), dateBasis: "observed", dateFrom: "2026-01-01T00:00:00.000Z", linkState: "unclassified" },
+      warnings: ["Some matching financial records have no link-state classification."],
+    });
   });
 
   it("does not query finance data when rate limited", async () => {

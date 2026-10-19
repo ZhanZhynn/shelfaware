@@ -11,6 +11,7 @@ import {
   type FinanceResource,
 } from "./finance";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
+import { normalizedFinanceFilters, type FinanceFilters } from "@/lib/marketplace/finance-filter";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
 
@@ -19,6 +20,23 @@ function failure(requestId: string, code: string, message: string, status: numbe
     { error: { code, message, requestId, ...(details ? { details } : {}) } },
     { status, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
   );
+}
+
+function responseFilters(resource: FinanceResource, query: Record<string, unknown>) {
+  if (resource === "profit") return { shopId: query.shopId ?? null, dateFrom: query.dateFrom ?? null, dateTo: query.dateTo ?? null };
+  const filters = query as FinanceFilters & { shopId: string };
+  return { shopId: filters.shopId, ...normalizedFinanceFilters(filters) };
+}
+
+function responseWarnings(resource: FinanceResource, result: unknown): string[] {
+  if (resource === "financial-records") return ((result as { coverage?: { warnings?: string[] } }).coverage?.warnings ?? []);
+  if (resource === "reconciliation-status") return ((result as { warnings?: string[] }).warnings ?? []);
+  const profit = result as { coverage?: { state?: string; missingCostCategories?: string[] }; refundEvidence?: { warning?: string } };
+  return [
+    ...(profit.coverage?.state !== "ready" ? ["Financial coverage is incomplete or provisional; this report is not a verified settlement or net-profit statement."] : []),
+    ...(profit.coverage?.missingCostCategories?.length ? [`Missing cost categories: ${profit.coverage.missingCostCategories.join(", ")}.`] : []),
+    ...(profit.refundEvidence?.warning ? [profit.refundEvidence.warning] : []),
+  ];
 }
 
 export async function financeMarketplaceGet(resource: FinanceResource, request: NextRequest, { params }: { params: Promise<{ platform: string }> }) {
@@ -48,7 +66,7 @@ export async function financeMarketplaceGet(resource: FinanceResource, request: 
     const result = await getMarketplaceFinanceResult(platform as MarketplacePlatform, actor.user, resource, query);
     const payload = resource === "financial-records" ? result : { data: result };
     return NextResponse.json(
-      { apiVersion: "2026-marketplace-v1", ...payload, meta: { requestId, platform, source: "local" } },
+      { apiVersion: "2026-marketplace-v1", ...payload, filters: responseFilters(resource, query as Record<string, unknown>), warnings: responseWarnings(resource, result), meta: { requestId, platform, source: "local" } },
       { headers: { "x-request-id": requestId, "cache-control": "no-store" } },
     );
   } catch (error) {

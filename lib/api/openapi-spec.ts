@@ -24,6 +24,15 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
     required: true,
     schema: { type: "string", enum: ["shopee", "lazada", "tiktok", "shopify"] },
   };
+  const financeFilterParameters = [
+    { name: "dateFrom", in: "query", schema: { type: "string" }, description: "Inclusive lower bound: YYYY-MM-DD UTC or RFC3339 with an explicit offset." },
+    { name: "dateTo", in: "query", schema: { type: "string" }, description: "Inclusive upper bound: a UTC date through 23:59:59.999, or an exact RFC3339 instant." },
+    { name: "dateBasis", in: "query", schema: { type: "string", enum: ["occurred", "observed"], default: "occurred" }, description: "Selects recorded occurredAt or sourceObservedAt. An escrow occurredAt may be the order creation time, not an income release." },
+    { name: "transactionType", in: "query", schema: { type: "string", maxLength: 128 } },
+    { name: "financialQuality", in: "query", schema: { type: "string", enum: ["unknown", "verified", "derived", "legacy-unverified"] } },
+    { name: "linkState", in: "query", schema: { type: "string", enum: ["linked", "unmatched", "not_applicable", "unclassified"] }, description: "linked requires an internal order ID; unclassified includes missing/null classifications." },
+    { name: "currency", in: "query", schema: { type: "string", pattern: "^[A-Z]{3}$" } },
+  ];
 
   return {
     openapi: "3.0.3",
@@ -359,7 +368,7 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
       "/api/v1/marketplaces/{platform}/syncs": {
         post: {
           summary: "Queue a marketplace synchronization job",
-          description: "Creates durable work only; it never invokes a marketplace provider in the request. Supply an optional Idempotency-Key header to coalesce duplicate requests.",
+          description: "Creates durable work only; it never invokes a marketplace provider in the request. Supply an optional Idempotency-Key header to coalesce duplicate requests. Shopee orders, finance, returns, payouts, and all accept paired input.dateFrom/dateTo whole-second RFC3339 boundaries, at most 365 days and not in the future. Historical orders/finance execute in checkpointed daily tasks; returns/payouts use bounded provider windows. For all, the dates bound orders/escrow only; product and ads defaults are unchanged.",
           tags: ["Marketplace v1"],
           security: marketplaceSyncSecurity,
           "x-requiredApiTokenScopes": ["marketplace:sync"],
@@ -375,13 +384,16 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
                   properties: {
                     shopId: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
                     syncType: { type: "string", enum: ["products", "orders", "finance", "returns", "ads", "payouts", "all"] },
-                    input: { type: "object", additionalProperties: true },
+                    input: { type: "object", additionalProperties: true, properties: {
+                      dateFrom: { type: "string", format: "date-time", description: "Paired with dateTo; explicit offset and whole seconds required." },
+                      dateTo: { type: "string", format: "date-time", description: "Inclusive end, paired with dateFrom; no future bounds." },
+                    } },
                   },
                 },
               },
             },
           },
-          responses: { "202": { description: "Sync job queued or coalesced" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:sync" }, "404": { description: "Shop not found" }, "422": { description: "Invalid body or idempotency key" } },
+          responses: { "202": { description: "Sync job/run queued or coalesced; pending execution is not proof of completion" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:sync" }, "404": { description: "Shop not found" }, "422": { description: "Invalid body, historical date range, unsupported date-scoped stream, or idempotency key" } },
         },
       },
       "/api/v1/marketplaces/{platform}/syncs/{id}": {
@@ -410,8 +422,8 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           tags: ["Marketplace v1"],
           security: marketplaceFinanceSecurity,
           "x-requiredApiTokenScopes": ["marketplace:finance"],
-          parameters: [platformParameter, { name: "shopId", in: "query", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
-          responses: { "200": { description: "Paginated financial records" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:finance" }, "404": { description: "Shop not found" }, "422": { description: "Invalid query" } },
+          parameters: [platformParameter, { name: "shopId", in: "query", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, ...financeFilterParameters, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
+          responses: { "200": { description: "Paginated financial records, normalized filters, warnings, and coverage scoped to identical filters. Numeric amount coverage is distinct from verified provenance. amountMinor and amountScale define exact presentation; null amounts are unknown." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:finance" }, "404": { description: "Shop not found" }, "422": { description: "Invalid query or cursor/filter mismatch" } },
         },
       },
       "/api/v1/marketplaces/{platform}/reconciliation-status": {
@@ -420,8 +432,8 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           tags: ["Marketplace v1"],
           security: marketplaceFinanceSecurity,
           "x-requiredApiTokenScopes": ["marketplace:finance"],
-          parameters: [platformParameter, { name: "shopId", in: "query", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }],
-          responses: { "200": { description: "Reconciliation status" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:finance" }, "404": { description: "Shop not found" }, "422": { description: "Invalid query" } },
+          parameters: [platformParameter, { name: "shopId", in: "query", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, ...financeFilterParameters],
+          responses: { "200": { description: "Filter-scoped aggregate reconciliation coverage, full link-state counts, matching observation freshness, and warnings. Scoped certifications must cover the requested occurred-time interval; observation-time filters do not imply a certified accounting period." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:finance" }, "404": { description: "Shop not found" }, "422": { description: "Invalid query" } },
         },
       },
       "/api/v1/marketplaces/{platform}/profit": {
@@ -430,8 +442,8 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           tags: ["Marketplace v1"],
           security: marketplaceFinanceSecurity,
           "x-requiredApiTokenScopes": ["marketplace:finance"],
-          parameters: [platformParameter, { name: "shopId", in: "query", schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, { name: "dateFrom", in: "query", schema: { type: "string", format: "date", description: "YYYY-MM-DD" } }, { name: "dateTo", in: "query", schema: { type: "string", format: "date", description: "YYYY-MM-DD" } }],
-          responses: { "200": { description: "Profit detail" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:finance" }, "404": { description: "Shop not found" }, "422": { description: "Invalid query" } },
+          parameters: [platformParameter, { name: "shopId", in: "query", schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }, { name: "dateFrom", in: "query", schema: { type: "string" }, description: "UTC YYYY-MM-DD or RFC3339 instant with offset; order-based report, not settlement-release month." }, { name: "dateTo", in: "query", schema: { type: "string" }, description: "Inclusive UTC date end or exact RFC3339 instant with offset." }],
+          responses: { "200": { description: "Profit detail with nullable monetary fields, field-level completeness, provenance, normalized date basis, and warnings. Shopee source item subtotals are separate from unavailable paid-line revenue/profit. Observed return requests are not settled refund postings." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:finance" }, "404": { description: "Shop not found" }, "422": { description: "Invalid query" } },
         },
       },
     },

@@ -55,7 +55,9 @@ export async function marketplaceStatsResponse(request: NextRequest, platform: M
     const key = metric === "summary" ? "summary" : metric === "revenue-trend" ? "revenueTrend" : metric;
     const warnings = result.operationalCoverage.reason ? [result.operationalCoverage.reason] : [];
     if (result.freshness.shops.some((shop) => shop.lastShopSyncAt === null)) warnings.push("One or more selected shops have no recorded synchronization time. Local order history may be incomplete.");
-    return NextResponse.json({ apiVersion: "2026-analytics-v1", calculationVersion: ANALYTICS_CALCULATION_VERSION, requestId, platform, metric, filters: result.filters, data: result[key as keyof typeof result], operationalCoverage: result.operationalCoverage, financialCoverage: result.financialCoverage, freshness: result.freshness, capabilities: result.capabilities, warnings, page: result.page }, { headers: { "x-request-id": requestId } });
+    if (metric === "profit" && result.financialCoverage.state !== "ready") warnings.push("Financial reporting is incomplete or provisional; missing components must not be treated as zero.");
+    if (result.refundEvidence) warnings.push(result.refundEvidence.warning);
+    return NextResponse.json({ apiVersion: "2026-analytics-v1", calculationVersion: ANALYTICS_CALCULATION_VERSION, requestId, platform, metric, filters: result.filters, data: result[key as keyof typeof result], operationalCoverage: result.operationalCoverage, financialCoverage: result.financialCoverage, freshness: result.freshness, refundEvidence: result.refundEvidence, capabilities: result.capabilities, warnings, page: result.page }, { headers: { "x-request-id": requestId } });
   } catch (error) {
     if (error instanceof AnalyticsValidationError) {
       return respondError(error.code, error.message, error.code === "MIXED_CURRENCY" || error.code === "CONVERSION_UNAVAILABLE" ? 409 : error.code === "FORBIDDEN" ? 403 : 422, { class: "validation" });

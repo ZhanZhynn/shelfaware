@@ -10,6 +10,12 @@ export const MAX_MARKETPLACE_SYNC_ATTEMPTS = 5;
 export type MarketplaceSyncType = (typeof marketplaceSyncTypes)[number];
 export type MarketplaceSyncJobStatus = (typeof marketplaceSyncJobStatuses)[number];
 export type MarketplaceSyncInput = Prisma.InputJsonObject;
+export type MarketplaceSyncDateRange = {
+  dateFrom: string;
+  dateTo: string;
+  timeFrom: number;
+  timeTo: number;
+};
 
 export class MarketplaceSyncJobNotFoundError extends Error {}
 
@@ -57,6 +63,22 @@ function isUniqueViolation(error: unknown) {
 
 export function isMarketplaceSyncType(value: string): value is MarketplaceSyncType {
   return (marketplaceSyncTypes as readonly string[]).includes(value);
+}
+
+/** Date ranges are stored as RFC3339 strings but Shopee APIs accept seconds. */
+export function marketplaceSyncDateRange(input: unknown): MarketplaceSyncDateRange | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const value = input as Record<string, unknown>;
+  if (typeof value.dateFrom !== "string" || typeof value.dateTo !== "string") return null;
+  const from = Date.parse(value.dateFrom);
+  const to = Date.parse(value.dateTo);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from % 1000 !== 0 || to % 1000 !== 0) return null;
+  return {
+    dateFrom: value.dateFrom,
+    dateTo: value.dateTo,
+    timeFrom: from / 1000,
+    timeTo: to / 1000,
+  };
 }
 
 /**

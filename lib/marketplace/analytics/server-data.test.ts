@@ -4,11 +4,13 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   marketplaceOwnerIds: vi.fn(), accessibleMarketplaceShops: vi.fn(),
   shopFindMany: vi.fn(), orderFindMany: vi.fn(), getCache: vi.fn(), setCache: vi.fn(),
+  returnFindMany: vi.fn(),
   getMarketplaceCapabilities: vi.fn(), getMarketplaceFinancialReadiness: vi.fn(),
   requireApiActor: vi.fn(), withRateLimit: vi.fn(),
 }));
 vi.mock("@/prisma/client", () => ({ prisma: {
   shopeeShop: { findMany: mocks.shopFindMany }, shopeeOrder: { findMany: mocks.orderFindMany },
+  shopeeReturn: { findMany: mocks.returnFindMany },
 } }));
 vi.mock("@/lib/marketplace/access", () => ({ marketplaceOwnerIds: mocks.marketplaceOwnerIds, marketplaceCacheScope: () => "test-owner" }));
 vi.mock("@/lib/marketplace/shops", () => ({ accessibleMarketplaceShops: mocks.accessibleMarketplaceShops }));
@@ -31,7 +33,7 @@ beforeEach(() => {
   mocks.accessibleMarketplaceShops.mockResolvedValue([shop]);
   mocks.shopFindMany.mockResolvedValue([{ id: shop.id }]);
   mocks.orderFindMany.mockResolvedValue([{
-    id: "order-1", shopId: shop.id, currency: "MYR", orderStatus: "READY_TO_SHIP", totalAmount: 20,
+    id: "order-1", shopeeOrderId: "shopee-order-1", shopId: shop.id, currency: "MYR", orderStatus: "READY_TO_SHIP", totalAmount: 20,
     shopeeCreatedAt: new Date("2026-10-17T17:00:00Z"), createdAt: new Date("2026-10-18T12:00:00Z"),
     sourceObservedAt: new Date("2026-10-18T12:00:00Z"), buyerUsername: null, buyerEmail: null,
     financialQuality: "unknown", commissionFee: null, serviceFee: null, sellerTxnFee: null,
@@ -42,6 +44,7 @@ beforeEach(() => {
   mocks.getMarketplaceFinancialReadiness.mockResolvedValue(false);
   mocks.requireApiActor.mockResolvedValue({ user, authType: "session" });
   mocks.withRateLimit.mockResolvedValue(null);
+  mocks.returnFindMany.mockResolvedValue([]);
 });
 
 describe("analytics source dates and freshness", () => {
@@ -85,5 +88,16 @@ describe("analytics source dates and freshness", () => {
     expect(cached.freshness).toEqual(first.freshness);
     expect(mocks.orderFindMany).toHaveBeenCalledTimes(1);
     expect(mocks.setCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps observed return requests distinct from settled refunds and net sales", async () => {
+    mocks.getMarketplaceCapabilities.mockResolvedValue({ orders: "unknown", finance: "available" });
+    mocks.returnFindMany.mockResolvedValue([{ shopId: shop.id, orderSn: "shopee-order-1", status: "COMPLETED", refundAmount: 20, currency: "MYR", sourceObservedAt: null }]);
+    const response = await marketplaceStatsResponse(new NextRequest("http://localhost/api/v1/marketplaces/shopee/analytics/profit"), "shopee", "profit");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.refundEvidence).toMatchObject({ returnRequestCount: 1, observedRequestAmount: 20, settledRefundAmount: null });
+    expect(body.data).toMatchObject({ grossSales: 20, netSales: null, refunds: null, estimatedProfit: null });
+    expect(body.warnings).toEqual(expect.arrayContaining([expect.stringContaining("not refund-adjusted net sales")]));
   });
 });

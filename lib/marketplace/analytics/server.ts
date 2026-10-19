@@ -10,6 +10,7 @@ import type { CapabilityState } from "./capabilities";
 import { createHmac } from "crypto";
 import { marketplaceFinancialDisplayEligible } from "./rollout";
 import { z } from "zod";
+import { getShopeeRefundEvidence } from "./refund-evidence";
 
 export const ANALYTICS_CALCULATION_VERSION = "v5-operational-catalog-sku";
 
@@ -104,6 +105,7 @@ type MarketplaceAnalyticsResult = ReturnType<typeof buildResponse> & {
   operationalCoverage: OperationalCoverage;
   financialCoverage: ReturnType<typeof buildResponse>["profit"]["coverage"];
   freshness: ReturnType<typeof buildAnalyticsFreshness>;
+  refundEvidence: Awaited<ReturnType<typeof getShopeeRefundEvidence>> | null;
 };
 
 export function buildAnalyticsFreshness(shops: Pick<MarketplaceShop, "id" | "lastSyncedAt">[], observationTimes: (Date | null)[], computedAt = new Date()) {
@@ -137,6 +139,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
 
   let orders: NormalizedOrderFinancials[] = [];
   let observationTimes: (Date | null)[] = [];
+  let refundEvidence: Awaited<ReturnType<typeof getShopeeRefundEvidence>> | null = null;
   let shopCount = 0;
   const fallbackDateFilter = (field: string) => range ? { OR: [{ [field]: range }, { [field]: null, createdAt: range }] } : {};
   if (platform === "shopee") {
@@ -144,6 +147,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
     shopCount = shops.length;
     const rows = await prisma.shopeeOrder.findMany({ where: { shopId: { in: shops.map((shop) => shop.id) }, ...fallbackDateFilter("shopeeCreatedAt") }, include: { items: true } });
     observationTimes = rows.map((row) => row.sourceObservedAt);
+    if (metric === "profit") refundEvidence = await getShopeeRefundEvidence(rows);
     orders = rows.map((row) => { const buyerId = row.buyerUsername ?? row.buyerEmail; return { id: row.id, shopId: row.shopId, platform, currency: row.currency ?? "unknown", createdAt: orderDate(row), status: row.orderStatus, buyerId, buyerDisplayName: buyerPseudonym(row.shopId, buyerId), financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"], grossSales: row.totalAmount, sellerDiscount: null, platformDiscount: null, refund: null, buyerShippingCredit: null, platformSubsidy: null, marketplaceFees: row.commissionFee === null || row.serviceFee === null ? null : row.commissionFee + row.serviceFee, paymentFees: row.sellerTxnFee, sellerShipping: row.shippingFee, returnShipping: null, otherCharges: null, settledProceeds: row.sellerIncome, settledProceedsVerified: false, items: row.items.map((item) => ({ id: item.id, productId: item.variantId ?? item.productId, productName: item.productName, sku: item.sku, imageUrl: null, quantity: item.quantity, grossSales: item.subtotal, refund: null, financialQuality: row.financialQuality as NormalizedOrderFinancials["financialQuality"] })) }; });
   } else if (platform === "lazada") {
     const shops = await prisma.lazadaShop.findMany({ where: { userId: { in: ownerIds }, id: { in: selectedShops.map((shop) => shop.id) } }, select: { id: true } });
@@ -210,7 +214,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
     built.buyers.topBuyers = result.values;
     page = result.page;
   }
-  const response = { ...built, operationalCoverage, financialCoverage: built.profit.coverage, freshness: buildAnalyticsFreshness(selectedShops, observationTimes), filters: { shopIds, dateFrom: params.get("dateFrom"), dateTo: params.get("dateTo"), currency, granularity: metric === "revenue-trend" ? requestedGranularity : null }, capabilities, page };
+  const response = { ...built, operationalCoverage, financialCoverage: built.profit.coverage, freshness: buildAnalyticsFreshness(selectedShops, observationTimes), refundEvidence, filters: { shopIds, dateFrom: params.get("dateFrom"), dateTo: params.get("dateTo"), currency, granularity: metric === "revenue-trend" ? requestedGranularity : null }, capabilities, page };
   await setCache(cacheKey, response, 120);
   return response;
 }

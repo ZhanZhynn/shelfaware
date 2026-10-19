@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   syncLazadaProducts: vi.fn(), syncLazadaOrders: vi.fn(), syncLazadaFinance: vi.fn(), syncLazadaPayoutStatements: vi.fn(), syncLazadaAll: vi.fn(),
   syncTikTokProducts: vi.fn(), syncTikTokOrders: vi.fn(), syncTikTokFinance: vi.fn(), syncTikTokPayoutStatements: vi.fn(), syncTikTokAll: vi.fn(),
   syncShopifyProducts: vi.fn(), syncShopifyOrders: vi.fn(), syncShopifyFinance: vi.fn(), syncShopifyAll: vi.fn(),
+  marketplaceSyncDateRange: vi.fn(),
 }));
 
 vi.mock("@/lib/marketplace/sync-jobs", () => ({
@@ -26,6 +27,7 @@ vi.mock("@/lib/marketplace/sync-jobs", () => ({
   getClaimedMarketplaceSyncJob: mocks.claimed,
   getMarketplaceSyncJobNextAttempt: mocks.nextAttempt,
   retryMarketplaceSyncJob: mocks.retry,
+  marketplaceSyncDateRange: mocks.marketplaceSyncDateRange,
 }));
 vi.mock("@/prisma/client", () => ({ prisma: {
   shopeeShop: mocks.shopeeShop,
@@ -73,6 +75,7 @@ beforeEach(() => {
   mocks.invalidateCache.mockResolvedValue(1);
   mocks.invalidateMarketplaceAnalytics.mockResolvedValue(undefined);
   mocks.syncShopeeOrders.mockResolvedValue({});
+  mocks.marketplaceSyncDateRange.mockReturnValue(null);
 });
 
 describe("dispatchMarketplaceSyncJob", () => {
@@ -122,6 +125,26 @@ describe("dispatchMarketplaceSyncJob", () => {
     expect(mocks.retry).toHaveBeenCalledWith("a".repeat(24), "worker-a", "SYNC_ATTEMPT_FAILED");
     expect(JSON.stringify(mocks.retry.mock.calls)).not.toContain("secret-from-provider");
     expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it("retries a persisted Shopee all job when a nested stream reports errors", async () => {
+    mocks.claimed.mockResolvedValue(job({ syncType: "all" }));
+    mocks.shopeeShop.findUnique.mockResolvedValue({ shopId: 123, userId: "shop-owner" });
+    mocks.syncShopeeAll.mockResolvedValue({
+      products: { errors: [] },
+      orders: { errors: ["provider permission denied"] },
+      ads: { errors: [] },
+    });
+    mocks.retry.mockResolvedValue(true);
+    mocks.nextAttempt.mockResolvedValue({ nextAttemptAt: new Date("2026-10-06T12:01:00.000Z") });
+
+    await expect(dispatchMarketplaceSyncJob("a".repeat(24), "worker-a", now)).resolves.toEqual({ status: "retrying", nextAttemptAt: new Date("2026-10-06T12:01:00.000Z") });
+
+    expect(mocks.retry).toHaveBeenCalledWith("a".repeat(24), "worker-a", "SYNC_ATTEMPT_FAILED");
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.invalidateCache).not.toHaveBeenCalled();
+    expect(mocks.invalidateMarketplaceAnalytics).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.retry.mock.calls)).not.toContain("provider permission denied");
   });
 
   it("fails unsupported work without repeatedly calling a provider", async () => {

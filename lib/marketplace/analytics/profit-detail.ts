@@ -4,18 +4,19 @@ import { accessibleMarketplaceShops } from "@/lib/marketplace/shops";
 import { getMarketplaceCapabilities, getMarketplaceFinancialReadiness } from "./capabilities";
 import { isFinancialAnalyticsEligible, parseAnalyticsDateRange } from "./server";
 import type { MarketplacePlatform } from "./types";
+import { getShopeeRefundEvidence } from "./refund-evidence";
 
 // ── Response types ──────────────────────────────────────────────────────────
 
 export type ProfitDetailSummary = {
-  totalRevenue: number;
-  totalFees: number;
-  totalShipping: number;
-  sellerIncome: number;
-  overallMargin: number;
+  totalRevenue: number | null;
+  totalFees: number | null;
+  totalShipping: number | null;
+  sellerIncome: number | null;
+  overallMargin: number | null;
   totalOrders: number;
-  avgOrderValue: number;
-  avgFeePerOrder: number;
+  avgOrderValue: number | null;
+  avgFeePerOrder: number | null;
 };
 
 export type FeeBreakdownItem = {
@@ -26,12 +27,20 @@ export type FeeBreakdownItem = {
 
 export type ProductProfitRow = {
   productName: string;
-  revenue: number;
-  quantitySold: number;
+  productId?: string | null;
+  variantId?: string | null;
+  sku?: string | null;
+  sourceProductKey?: string;
+  // This is only populated where a paid line amount is explicitly available.
+  revenue: number | null;
+  revenueBasis?: "item_source_subtotal" | "paid_line_amount";
+  itemSourceSubtotal?: number | null;
+  quantitySold: number | null;
+  quantitySourceConfidence?: "observed" | "partial";
   orderCount: number;
-  estimatedFees: number;
-  estimatedProfit: number;
-  margin: number;
+  estimatedFees: number | null;
+  estimatedProfit: number | null;
+  margin: number | null;
 };
 
 export type ShippingDiscrepancySummary = {
@@ -61,18 +70,51 @@ export type ProfitDetailResponse = {
     summary: ShippingDiscrepancySummary;
     products: ShippingDiscrepancyProduct[];
   };
-  coverage: { state: "ready" | "provisional" | "unavailable"; basis: string; exclusions: string[] };
+  coverage: {
+    state: "ready" | "provisional" | "unavailable";
+    basis: string;
+    exclusions: string[];
+    provisional: boolean;
+    sourceQualityBasis: string;
+    fieldCoverage: Record<string, { known: number; missing: number }>;
+    missingCostCategories: string[];
+    unavailableReasons: string[];
+    dateBasis: { field: string; from: string | null; to: string | null; appliedFrom: string | null; appliedTo: string | null };
+  };
   currency: string;
+  refundEvidence?: Awaited<ReturnType<typeof getShopeeRefundEvidence>>;
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const round = (v: number) => Math.round(v * 100) / 100;
+const standardExclusions = ["COGS", "advertising", "payroll", "overhead"];
 
 type Session = Parameters<typeof marketplaceOwnerIds>[0];
 
 function fallbackDateFilter(field: string, range?: { gte?: Date; lte?: Date }) {
   return range ? { OR: [{ [field]: range }, { [field]: null, createdAt: range }] } : {};
+}
+
+function profitCoverage(
+  state: "ready" | "provisional" | "unavailable",
+  basis: string,
+  sourceQualityBasis: string,
+  fieldCoverage: Record<string, { known: number; missing: number }> = {},
+  missingCostCategories: string[] = [],
+  unavailableReasons: string[] = [],
+): ProfitDetailResponse["coverage"] {
+  return {
+    state,
+    basis,
+    exclusions: standardExclusions,
+    provisional: state === "provisional",
+    sourceQualityBasis,
+    fieldCoverage,
+    missingCostCategories,
+    unavailableReasons,
+    dateBasis: { field: "source order timestamp", from: null, to: null, appliedFrom: null, appliedTo: null },
+  };
 }
 
 /** Proportional fee allocation: each product's share of total fees by revenue. */
@@ -112,110 +154,122 @@ async function getShopeeProfitDetail(
   });
 
   const nonCancelled = orders.filter((o) => !/cancel|fail/i.test(o.orderStatus));
+  const refundEvidence = await getShopeeRefundEvidence(orders);
   const currency = orders[0]?.currency ?? "MYR";
 
-  // Aggregate totals
-  let totalRevenue = 0;
-  let totalCommission = 0;
-  let totalServiceFee = 0;
-  let totalSellerTxnFee = 0;
-  let totalShipping = 0;
-  let totalSellerIncome = 0;
-  let totalEstimatedShipping = 0;
-  let hasAnyFee = false;
-
-  for (const o of nonCancelled) {
-    totalRevenue += o.totalAmount ?? 0;
-    if (o.commissionFee != null) { totalCommission += o.commissionFee; hasAnyFee = true; }
-    if (o.serviceFee != null) { totalServiceFee += o.serviceFee; hasAnyFee = true; }
-    if (o.sellerTxnFee != null) { totalSellerTxnFee += o.sellerTxnFee; hasAnyFee = true; }
-    if (o.shippingFee != null) totalShipping += o.shippingFee;
-    if (o.sellerIncome != null) totalSellerIncome += o.sellerIncome;
-    if (o.estimatedShippingFee != null) totalEstimatedShipping += o.estimatedShippingFee;
-  }
-
-  const totalFees = totalCommission + totalServiceFee + totalSellerTxnFee;
-  const sellerIncome = hasAnyFee ? totalSellerIncome : totalRevenue - totalShipping - totalFees;
+  const isKnownMoney = (value: number | null | undefined): value is number => typeof value === "number" && Number.isFinite(value);
+  const sumIfComplete = (values: Array<number | null | undefined>) => values.length > 0 && values.every(isKnownMoney)
+    ? round((values as number[]).reduce((sum, value) => sum + value, 0))
+    : null;
+  const fieldValues = {
+    totalRevenue: nonCancelled.map((order) => order.totalAmount),
+    commissionFee: nonCancelled.map((order) => order.commissionFee),
+    serviceFee: nonCancelled.map((order) => order.serviceFee),
+    sellerTxnFee: nonCancelled.map((order) => order.sellerTxnFee),
+    shippingFee: nonCancelled.map((order) => order.shippingFee),
+    sellerIncome: nonCancelled.map((order) => order.sellerIncome),
+  };
+  const fieldCoverage = Object.fromEntries(Object.entries(fieldValues).map(([field, values]) => [field, {
+    known: values.filter(isKnownMoney).length,
+    missing: values.filter((value) => !isKnownMoney(value)).length,
+  }]));
+  const totalRevenue = sumIfComplete(fieldValues.totalRevenue);
+  const totalCommission = sumIfComplete(fieldValues.commissionFee);
+  const totalServiceFee = sumIfComplete(fieldValues.serviceFee);
+  const totalSellerTxnFee = sumIfComplete(fieldValues.sellerTxnFee);
+  const totalShipping = sumIfComplete(fieldValues.shippingFee);
+  // Escrow income is a source fact. Never recreate it from partially observed fees.
+  const sellerIncome = sumIfComplete(fieldValues.sellerIncome);
+  const totalFees = totalCommission !== null && totalServiceFee !== null && totalSellerTxnFee !== null
+    ? round(totalCommission + totalServiceFee + totalSellerTxnFee)
+    : null;
+  const hasFinancialEvidence = Object.values(fieldValues).some((values) => values.some(isKnownMoney));
+  const allFieldsComplete = Object.values(fieldCoverage).every(({ missing }) => missing === 0);
+  const allFinancialQualityVerified = nonCancelled.length > 0 && nonCancelled.every((order) => order.financialQuality === "verified");
+  const missingCostCategories = (Object.entries({
+    "Commission Fee": fieldCoverage.commissionFee,
+    "Service Fee": fieldCoverage.serviceFee,
+    "Seller Transaction Fee": fieldCoverage.sellerTxnFee,
+    "Shipping Fee": fieldCoverage.shippingFee,
+  }) as Array<[string, { known: number; missing: number }]>)
+    .filter(([, coverage]) => coverage.missing > 0)
+    .map(([name]) => name);
+  const coverageState = !hasFinancialEvidence ? "unavailable" : allFieldsComplete && allFinancialQualityVerified ? "ready" : "provisional";
+  const sourceQualityBasis = allFinancialQualityVerified
+    ? "all included Shopee orders have verified financial provenance"
+    : "Shopee order monetary fields are observed but not fully verified";
 
   // Fee breakdown
   const feeBreakdown: FeeBreakdownItem[] = [
-    { name: "Commission Fee", amount: round(totalCommission), percentage: totalRevenue > 0 ? round((totalCommission / totalRevenue) * 100) : 0 },
-    { name: "Service Fee", amount: round(totalServiceFee), percentage: totalRevenue > 0 ? round((totalServiceFee / totalRevenue) * 100) : 0 },
-    { name: "Seller Transaction Fee", amount: round(totalSellerTxnFee), percentage: totalRevenue > 0 ? round((totalSellerTxnFee / totalRevenue) * 100) : 0 },
-    { name: "Shipping Fee", amount: round(totalShipping), percentage: totalRevenue > 0 ? round((totalShipping / totalRevenue) * 100) : 0 },
-  ].filter((f) => f.amount !== 0);
+    totalCommission === null ? null : { name: "Commission Fee", amount: totalCommission, percentage: totalRevenue !== null && totalRevenue > 0 ? round((totalCommission / totalRevenue) * 100) : 0 },
+    totalServiceFee === null ? null : { name: "Service Fee", amount: totalServiceFee, percentage: totalRevenue !== null && totalRevenue > 0 ? round((totalServiceFee / totalRevenue) * 100) : 0 },
+    totalSellerTxnFee === null ? null : { name: "Seller Transaction Fee", amount: totalSellerTxnFee, percentage: totalRevenue !== null && totalRevenue > 0 ? round((totalSellerTxnFee / totalRevenue) * 100) : 0 },
+    totalShipping === null ? null : { name: "Shipping Fee", amount: totalShipping, percentage: totalRevenue !== null && totalRevenue > 0 ? round((totalShipping / totalRevenue) * 100) : 0 },
+  ].filter((fee): fee is FeeBreakdownItem => fee !== null && fee.amount !== 0);
 
-  // Per-product aggregation
-  const productMap = new Map<string, { revenue: number; quantity: number; orders: Set<string> }>();
+  // Item subtotals are list/source values, not verified paid line amounts. Keep them
+  // separate and do not allocate order revenue, fees, or profit to product rows.
+  const productMap = new Map<string, { productName: string; productId: string | null; variantId: string | null; sku: string | null; sourceSubtotal: number; sourceSubtotalMissing: boolean; quantity: number; quantityMissing: boolean; orders: Set<string> }>();
   for (const o of nonCancelled) {
     for (const item of o.items) {
-      const name = item.productName || "Unknown Product";
-      const existing = productMap.get(name) ?? { revenue: 0, quantity: 0, orders: new Set() };
-      existing.revenue += item.subtotal ?? 0;
-      existing.quantity += item.quantity;
+      const sourceProductKey = item.variantId
+        ? `${o.shopId}:variant:${item.variantId}`
+        : item.shopeeItemId != null
+          ? `${o.shopId}:shopee-item:${item.shopeeItemId}:${item.shopeeModelId ?? "base"}`
+          : item.sku
+            ? `${o.shopId}:sku:${item.sku}`
+            : item.productId
+              ? `${o.shopId}:product:${item.productId}`
+              : `${o.shopId}:order-line:${o.id}:${item.id}`;
+      const existing = productMap.get(sourceProductKey) ?? {
+        productName: item.productName || "Unknown Product", productId: item.productId, variantId: item.variantId, sku: item.sku,
+        sourceSubtotal: 0, sourceSubtotalMissing: false, quantity: 0, quantityMissing: false, orders: new Set<string>(),
+      };
+      if (isKnownMoney(item.subtotal)) existing.sourceSubtotal += item.subtotal;
+      else existing.sourceSubtotalMissing = true;
+      if (typeof item.quantity === "number" && Number.isFinite(item.quantity)) existing.quantity += item.quantity;
+      else existing.quantityMissing = true;
       existing.orders.add(o.id);
-      productMap.set(name, existing);
+      productMap.set(sourceProductKey, existing);
     }
   }
 
-  const feesByProduct = allocateFeesByRevenue(productMap, totalFees);
   const byProduct: ProductProfitRow[] = [...productMap.entries()]
-    .map(([name, p]) => {
-      const fees = feesByProduct.get(name) ?? 0;
-      const profit = round(p.revenue - fees);
-      return {
-        productName: name,
-        revenue: round(p.revenue),
-        quantitySold: p.quantity,
+    .map(([sourceProductKey, p]) => ({
+        productName: p.productName,
+        productId: p.productId,
+        variantId: p.variantId,
+        sku: p.sku,
+        sourceProductKey,
+        revenue: null,
+        revenueBasis: "item_source_subtotal" as const,
+        itemSourceSubtotal: p.sourceSubtotalMissing ? null : round(p.sourceSubtotal),
+        quantitySold: p.quantityMissing ? null : p.quantity,
+        quantitySourceConfidence: p.quantityMissing ? "partial" as const : "observed" as const,
         orderCount: p.orders.size,
-        estimatedFees: fees,
-        estimatedProfit: profit,
-        margin: p.revenue > 0 ? round((profit / p.revenue) * 100) : 0,
-      };
-    })
-    .sort((a, b) => b.revenue - a.revenue);
+        estimatedFees: null,
+        estimatedProfit: null,
+        margin: null,
+    }))
+    .sort((a, b) => (b.itemSourceSubtotal ?? -Infinity) - (a.itemSourceSubtotal ?? -Infinity));
 
   // Shipping discrepancy
-  const productShipping = new Map<string, { orderCount: number; totalEstimated: number; totalActual: number; totalRevenue: number; totalQuantity: number }>();
   let ordersWithDiscrepancy = 0;
   let globalEstimated = 0;
   let globalActual = 0;
   let discrepancyOrders = 0;
 
   for (const o of nonCancelled) {
-    const estimated = o.estimatedShippingFee ?? 0;
-    const actual = o.shippingFee ?? 0;
-    if (estimated === 0 && actual === 0) continue;
+    const estimated = o.estimatedShippingFee;
+    const actual = o.shippingFee;
+    if (!isKnownMoney(estimated) || !isKnownMoney(actual)) continue;
     globalEstimated += estimated;
     globalActual += actual;
     discrepancyOrders++;
     const pct = estimated > 0 ? Math.abs((actual - estimated) / estimated) * 100 : 0;
     if (pct > 10) ordersWithDiscrepancy++;
 
-    for (const item of o.items) {
-      const name = item.productName || "Unknown Product";
-      const existing = productShipping.get(name) ?? { orderCount: 0, totalEstimated: 0, totalActual: 0, totalRevenue: 0, totalQuantity: 0 };
-      existing.orderCount++;
-      existing.totalEstimated += estimated;
-      existing.totalActual += actual;
-      existing.totalRevenue += item.subtotal ?? 0;
-      existing.totalQuantity += item.quantity;
-      productShipping.set(name, existing);
-    }
   }
-
-  const shippingProducts: ShippingDiscrepancyProduct[] = [...productShipping.entries()]
-    .map(([productName, d]) => ({
-      productName,
-      orderCount: d.orderCount,
-      totalEstimated: round(d.totalEstimated),
-      totalActual: round(d.totalActual),
-      avgDiscrepancy: d.orderCount > 0 ? round((d.totalActual - d.totalEstimated) / d.orderCount) : 0,
-      discrepancyPct: d.totalEstimated > 0 ? round(((d.totalActual - d.totalEstimated) / d.totalEstimated) * 100) : 0,
-      totalRevenue: round(d.totalRevenue),
-      totalQuantity: d.totalQuantity,
-    }))
-    .sort((a, b) => Math.abs(b.avgDiscrepancy) - Math.abs(a.avgDiscrepancy));
 
   const shippingDiscrepancy = discrepancyOrders > 0
     ? {
@@ -226,26 +280,35 @@ async function getShopeeProfitDetail(
           totalActual: round(globalActual),
           totalDiscrepancy: round(globalActual - globalEstimated),
         },
-        products: shippingProducts,
+        // No order shipping amount is allocated across multiple item lines.
+        products: [],
       }
     : undefined;
 
-  const margin = totalRevenue > 0 ? round((sellerIncome / totalRevenue) * 100) : 0;
+  const margin = totalRevenue !== null && totalRevenue > 0 && sellerIncome !== null ? round((sellerIncome / totalRevenue) * 100) : null;
   return {
     summary: {
-      totalRevenue: round(totalRevenue),
-      totalFees: round(totalFees),
-      totalShipping: round(totalShipping),
-      sellerIncome: round(sellerIncome),
+      totalRevenue,
+      totalFees,
+      totalShipping,
+      sellerIncome,
       overallMargin: margin,
       totalOrders: nonCancelled.length,
-      avgOrderValue: nonCancelled.length > 0 ? round(totalRevenue / nonCancelled.length) : 0,
-      avgFeePerOrder: nonCancelled.length > 0 ? round(totalFees / nonCancelled.length) : 0,
+      avgOrderValue: totalRevenue !== null && nonCancelled.length > 0 ? round(totalRevenue / nonCancelled.length) : null,
+      avgFeePerOrder: totalFees !== null && nonCancelled.length > 0 ? round(totalFees / nonCancelled.length) : null,
     },
     feeBreakdown,
     byProduct,
     shippingDiscrepancy,
-    coverage: { state: "ready", basis: "order-estimate", exclusions: ["COGS", "advertising", "payroll", "overhead"] },
+    refundEvidence,
+    coverage: profitCoverage(
+      coverageState,
+      "Shopee order escrow fields; no paid-line allocation",
+      sourceQualityBasis,
+      fieldCoverage,
+      missingCostCategories,
+      hasFinancialEvidence ? [] : ["no Shopee monetary fields were observed for included orders"],
+    ),
     currency,
   };
 }
@@ -480,7 +543,7 @@ async function getLazadaProfitDetail(
     feeBreakdown,
     byProduct,
     shippingDiscrepancy,
-    coverage: { state: "ready", basis: "imported-records", exclusions: ["COGS", "advertising", "payroll", "overhead"] },
+    coverage: profitCoverage("ready", "imported-records", "imported marketplace financial records"),
     currency,
   };
 }
@@ -695,7 +758,7 @@ async function getTikTokProfitDetail(
     feeBreakdown,
     byProduct,
     shippingDiscrepancy,
-    coverage: { state: "ready", basis: "imported-records", exclusions: ["COGS", "advertising", "payroll", "overhead"] },
+    coverage: profitCoverage("ready", "imported-records", "imported marketplace financial records"),
     currency,
   };
 }
@@ -773,7 +836,7 @@ async function getShopifyProfitDetail(
     },
     feeBreakdown,
     byProduct,
-    coverage: { state: "ready", basis: "order-estimate", exclusions: ["COGS", "advertising", "payroll", "overhead", "marketplace fees (none)"] },
+    coverage: { ...profitCoverage("ready", "order-estimate", "Shopify order amounts"), exclusions: [...standardExclusions, "marketplace fees (none)"] },
     currency,
   };
 }
@@ -797,10 +860,10 @@ export async function getProfitDetail(
   const shopIds = selectedShops.map((s) => s.id);
   if (shopIds.length === 0) {
     return {
-      summary: { totalRevenue: 0, totalFees: 0, totalShipping: 0, sellerIncome: 0, overallMargin: 0, totalOrders: 0, avgOrderValue: 0, avgFeePerOrder: 0 },
+      summary: { totalRevenue: null, totalFees: null, totalShipping: null, sellerIncome: null, overallMargin: null, totalOrders: 0, avgOrderValue: null, avgFeePerOrder: null },
       feeBreakdown: [],
       byProduct: [],
-      coverage: { state: "unavailable", basis: "no shops", exclusions: [] },
+      coverage: { ...profitCoverage("unavailable", "no shops", "no accessible marketplace shops", {}, [], ["no accessible marketplace shops"]), exclusions: [] },
       currency: "unknown",
     };
   }
@@ -821,9 +884,26 @@ export async function getProfitDetail(
   const reconciled = await getMarketplaceFinancialReadiness(platform, shopIds);
   const financeReady = isFinancialAnalyticsEligible({ platform, shops: selectedShops, finance: capabilities.finance, readinessAndEvidenceApproved: reconciled });
 
-  if (capabilities.finance === "available" && !financeReady) {
-    result.coverage = { state: "provisional", basis: result.coverage.basis, exclusions: result.coverage.exclusions };
+  if (result.coverage.state !== "unavailable" && (result.coverage.provisional || !financeReady)) {
+    result.coverage.state = "provisional";
+    result.coverage.provisional = true;
   }
+
+  const sourceDateField: Record<MarketplacePlatform, string> = {
+    shopee: "shopeeCreatedAt (createdAt fallback)",
+    lazada: "lazadaCreatedAt (createdAt fallback)",
+    tiktok: "marketplace financial record occurredAt",
+    shopify: "shopifyCreatedAt (createdAt fallback)",
+  };
+  // Echo the exact filter strings, including an explicit UTC offset, alongside the
+  // normalized database boundaries so downstream reports can reproduce the slice.
+  result.coverage.dateBasis = {
+    field: sourceDateField[platform],
+    from: params.get("dateFrom"),
+    to: params.get("dateTo"),
+    appliedFrom: range?.gte?.toISOString() ?? null,
+    appliedTo: range?.lte?.toISOString() ?? null,
+  };
 
   return result;
 }

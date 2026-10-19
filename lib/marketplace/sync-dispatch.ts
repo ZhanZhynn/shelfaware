@@ -11,6 +11,7 @@ import {
   failMarketplaceSyncJob,
   getClaimedMarketplaceSyncJob,
   getMarketplaceSyncJobNextAttempt,
+  marketplaceSyncDateRange,
   retryMarketplaceSyncJob,
 } from "./sync-jobs";
 
@@ -48,8 +49,11 @@ function createdAfter(days: number | undefined) {
 async function runShopee(shopId: string, actorId: string, syncType: string, input: unknown) {
   const shop = await prisma.shopeeShop.findUnique({ where: { id: shopId }, select: { shopId: true, userId: true } });
   if (!shop) throw new PermanentDispatchError("SHOP_NOT_FOUND");
+  const range = marketplaceSyncDateRange(input);
   const days = daysBack(input);
-  const [timeFrom, timeTo] = secondsRange(days);
+  const [defaultTimeFrom, defaultTimeTo] = secondsRange(days);
+  const timeFrom = range?.timeFrom ?? defaultTimeFrom;
+  const timeTo = range?.timeTo ?? defaultTimeTo;
   switch (syncType) {
     case "products": return syncShopeeProducts(shop.shopId, shop.userId, actorId);
     case "orders": return syncShopeeOrders(shop.shopId, shop.userId, timeFrom, timeTo, actorId);
@@ -57,7 +61,9 @@ async function runShopee(shopId: string, actorId: string, syncType: string, inpu
     case "finance": return syncShopeeOrders(shop.shopId, shop.userId, timeFrom, timeTo, actorId);
     case "returns": return syncShopeeReturns(shop.shopId, shop.userId, timeFrom, timeTo, actorId);
     case "ads": return syncShopeeAds(shop.shopId, shop.userId, days, actorId);
-    case "payouts": return syncShopeePayoutStatements(shop.shopId, shop.userId, days, actorId);
+    case "payouts": return range
+      ? syncShopeePayoutStatements(shop.shopId, shop.userId, { timeFrom: range.timeFrom, timeTo: range.timeTo }, actorId)
+      : syncShopeePayoutStatements(shop.shopId, shop.userId, days, actorId);
     case "all": return syncShopeeAll(shop.shopId, shop.userId, actorId);
     default: throw new PermanentDispatchError("SYNC_TYPE_UNSUPPORTED");
   }
@@ -116,6 +122,19 @@ async function invalidatePlatformCaches(platform: MarketplacePlatform) {
   await Promise.all([invalidateCache(cacheKeys[platform].pattern), invalidateMarketplaceAnalytics(platform)]);
 }
 
+function hasResultErrors(result: unknown) {
+  return !!result && typeof result === "object" && Array.isArray((result as { errors?: unknown }).errors) && (result as { errors: unknown[] }).errors.length > 0;
+}
+
+function providerReturnedErrors(result: unknown, syncType: string) {
+  if (hasResultErrors(result)) return true;
+  if (syncType !== "all" || !result || typeof result !== "object") return false;
+  // `all` helpers return only these stream result wrappers. Do not recursively
+  // inspect provider payloads, which can contain unrelated `errors` fields.
+  const streams = result as Record<string, unknown>;
+  return ["products", "orders", "ads"].some((stream) => hasResultErrors(streams[stream]));
+}
+
 /** Claim, execute and settle exactly one durable job. Provider messages never leave this service. */
 export async function dispatchMarketplaceSyncJob(id: string, workerId: string, now = new Date()): Promise<MarketplaceSyncDispatchResult> {
   if (!(await claimMarketplaceSyncJob(id, workerId, now, WORKER_LEASE_MS))) return { status: "skipped" };
@@ -127,7 +146,8 @@ export async function dispatchMarketplaceSyncJob(id: string, workerId: string, n
   }
 
   try {
-    await runMarketplaceSync(job.platform as MarketplacePlatform, job.shopId, job.requestedByUserId, job.syncType, job.input);
+    const result = await runMarketplaceSync(job.platform as MarketplacePlatform, job.shopId, job.requestedByUserId, job.syncType, job.input);
+    if (providerReturnedErrors(result, job.syncType)) throw new Error("PROVIDER_RETURNED_ERRORS");
     await invalidatePlatformCaches(job.platform as MarketplacePlatform);
     return (await completeMarketplaceSyncJob(id, workerId)) ? { status: "completed" } : { status: "skipped" };
   } catch (error) {

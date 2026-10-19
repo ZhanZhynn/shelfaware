@@ -176,28 +176,34 @@ export function calculateProvisionalProfitFromOrders(orders: NormalizedOrderFina
   const labels: Record<FinancialField, string> = { grossSales: "gross sales", sellerDiscount: "seller-funded discounts", refund: "refunds", buyerShippingCredit: "buyer-paid shipping credits", platformSubsidy: "platform subsidies", marketplaceFees: "marketplace fees", paymentFees: "payment and transaction fees", sellerShipping: "seller shipping charges", returnShipping: "return shipping charges", otherCharges: "other marketplace charges" };
 
   for (const field of financialFields) {
-    const knownValues = operational.map((order) => order[field]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-    if (knownValues.length > 0) {
-      totals[field] = round(knownValues.reduce((sum, v) => sum + v, 0));
-      if (knownValues.length < operational.length) missing.add(labels[field]);
-    } else {
+    const values = operational.map((order) => order[field]);
+    if (values.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
       totals[field] = null;
       missing.add(labels[field]);
+    } else {
+      totals[field] = round((values as number[]).reduce((sum, value) => sum + value, 0));
     }
   }
 
-  const netSales = totals.grossSales !== null ? round(totals.grossSales - (totals.sellerDiscount ?? 0) - (totals.refund ?? 0)) : null;
-  const knownCosts = [totals.marketplaceFees, totals.paymentFees, totals.sellerShipping, totals.returnShipping, totals.otherCharges].filter((v): v is number => v !== null);
-  const totalCosts = knownCosts.length > 0 ? round(knownCosts.reduce((sum, v) => sum + v, 0)) : null;
-  const estimate = netSales !== null && totalCosts !== null ? round(netSales + (totals.buyerShippingCredit ?? 0) + (totals.platformSubsidy ?? 0) - Math.abs(totalCosts)) : null;
+  const netSales = totals.grossSales !== null && totals.sellerDiscount !== null && totals.refund !== null
+    ? round(totals.grossSales - totals.sellerDiscount - totals.refund)
+    : null;
+  const costs = [totals.marketplaceFees, totals.paymentFees, totals.sellerShipping, totals.returnShipping, totals.otherCharges];
+  const totalCosts = costs.every((value): value is number => value !== null)
+    ? round(costs.reduce((sum, value) => sum + value, 0))
+    : null;
+  const estimate = netSales !== null && totals.buyerShippingCredit !== null && totals.platformSubsidy !== null && totalCosts !== null
+    ? round(netSales + totals.buyerShippingCredit + totals.platformSubsidy - Math.abs(totalCosts))
+    : null;
+  const hasFinancialEvidence = financialFields.some((field) => operational.some((order) => typeof order[field] === "number" && Number.isFinite(order[field])));
 
   const coverage: AnalyticsCoverage = {
-    state: "provisional", calculationBasis: "imported-records",
+    state: hasFinancialEvidence ? "provisional" : "unavailable", calculationBasis: hasFinancialEvidence ? "imported-records" : "unavailable",
     financialCoveragePercent: null, buyerIdentityCoveragePercent: 0,
     missingCostCategories: [...missing], reportingCurrency,
     conversion: { applied: false, sourceCurrencies: [reportingCurrency] },
     exclusions: ["COGS", "advertising spend", "payroll", "overhead", "tax pass-through amounts"],
-    unavailableReasons: [], rawOrderCount: orders.length, certifiedOrderCount: 0,
+    unavailableReasons: hasFinancialEvidence ? [] : ["no usable order financial data"], rawOrderCount: orders.length, certifiedOrderCount: 0,
   };
 
   return {

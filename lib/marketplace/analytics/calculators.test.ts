@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBuyerMetrics, calculateClvMetrics, calculateProfit } from "./calculators";
+import { calculateBuyerMetrics, calculateClvMetrics, calculateProfit, calculateProvisionalProfitFromOrders } from "./calculators";
 import { parseSourceNumber } from "./provenance";
 
 const order = (overrides: Partial<Parameters<typeof calculateProfit>[0][number]> = {}) => ({ id: "1", shopId: "s", platform: "shopee" as const, currency: "MYR", createdAt: new Date("2026-01-01"), status: "COMPLETED", buyerId: null, buyerDisplayName: null, financialQuality: "verified" as const, grossSales: 100, sellerDiscount: 0, platformDiscount: null, refund: 0, buyerShippingCredit: 0, platformSubsidy: 0, marketplaceFees: 0, paymentFees: 0, sellerShipping: 0, returnShipping: 0, otherCharges: 0, settledProceeds: null, settledProceedsVerified: false, items: [], ...overrides });
@@ -29,6 +29,48 @@ describe("calculateProfit", () => {
     const result = calculateProfit([order({ settledProceeds: 70, settledProceedsVerified: true })], "MYR");
     expect(result.coverage.calculationBasis).toBe("settled");
     expect(result.estimatedProfit).toBe(70);
+  });
+});
+
+describe("calculateProvisionalProfitFromOrders", () => {
+  it("does not derive net sales or profit when one required component is absent", () => {
+    const result = calculateProvisionalProfitFromOrders([order({ sellerDiscount: null })], "MYR");
+    expect(result.grossSales).toBe(100);
+    expect(result.sellerDiscounts).toBeNull();
+    expect(result.netSales).toBeNull();
+    expect(result.estimatedProfit).toBeNull();
+    expect(result.coverage.missingCostCategories).toContain("seller-funded discounts");
+  });
+
+  it("marks all-null financial fields unavailable rather than treating them as zero", () => {
+    const result = calculateProvisionalProfitFromOrders([order({
+      grossSales: null, sellerDiscount: null, refund: null, buyerShippingCredit: null,
+      platformSubsidy: null, marketplaceFees: null, paymentFees: null,
+      sellerShipping: null, returnShipping: null, otherCharges: null,
+    })], "MYR");
+    expect(result.grossSales).toBeNull();
+    expect(result.netSales).toBeNull();
+    expect(result.estimatedProfit).toBeNull();
+    expect(result.coverage.state).toBe("unavailable");
+  });
+
+  it("preserves explicit zero financial values as known values", () => {
+    const result = calculateProvisionalProfitFromOrders([order({
+      grossSales: 0, sellerDiscount: 0, refund: 0, buyerShippingCredit: 0,
+      platformSubsidy: 0, marketplaceFees: 0, paymentFees: 0,
+      sellerShipping: 0, returnShipping: 0, otherCharges: 0,
+    })], "MYR");
+    expect(result).toMatchObject({ grossSales: 0, netSales: 0, estimatedProfit: 0 });
+    expect(result.coverage.state).toBe("provisional");
+  });
+
+  it("calculates known provisional values only when every component is present", () => {
+    const result = calculateProvisionalProfitFromOrders([order({
+      grossSales: 100, sellerDiscount: 10, refund: 5, buyerShippingCredit: 4,
+      platformSubsidy: 2, marketplaceFees: 8, paymentFees: 1,
+      sellerShipping: 3, returnShipping: 0, otherCharges: 1,
+    })], "MYR");
+    expect(result).toMatchObject({ netSales: 85, estimatedProfit: 78 });
   });
 });
 

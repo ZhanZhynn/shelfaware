@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   checkpoint: vi.fn(), claim: vi.fn(), complete: vi.fn(), fail: vi.fn(), claimed: vi.fn(), renew: vi.fn(), retry: vi.fn(),
   invalidateCache: vi.fn(), invalidateMarketplaceAnalytics: vi.fn(),
   shopeeShop: { findUnique: vi.fn() },
-  syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(),
+  syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(), syncShopeeReturns: vi.fn(), syncShopeePayoutStatements: vi.fn(),
 }));
 
 vi.mock("./sync-runs", () => ({
@@ -22,7 +22,7 @@ vi.mock("@/lib/cache/cache-utils", () => ({
   invalidateCache: mocks.invalidateCache,
   invalidateMarketplaceAnalytics: mocks.invalidateMarketplaceAnalytics,
 }));
-vi.mock("@/lib/shopee", () => ({ syncShopeeOrders: mocks.syncShopeeOrders, syncShopeeProducts: mocks.syncShopeeProducts, syncShopeeAds: mocks.syncShopeeAds }));
+vi.mock("@/lib/shopee", () => ({ syncShopeeOrders: mocks.syncShopeeOrders, syncShopeeProducts: mocks.syncShopeeProducts, syncShopeeAds: mocks.syncShopeeAds, syncShopeeReturns: mocks.syncShopeeReturns, syncShopeePayoutStatements: mocks.syncShopeePayoutStatements }));
 
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
 
@@ -41,6 +41,8 @@ beforeEach(() => {
   mocks.checkpoint.mockResolvedValue({ settled: true });
   mocks.shopeeShop.findUnique.mockResolvedValue({ shopId: 123, userId: "shop-owner" });
   mocks.syncShopeeOrders.mockResolvedValue({ synced: 1, created: 0, updated: 0, errors: [] });
+  mocks.syncShopeeReturns.mockResolvedValue({ synced: 1, created: 0, updated: 0, errors: [] });
+  mocks.syncShopeePayoutStatements.mockResolvedValue({ synced: 1, created: 0, updated: 0, errors: [] });
   mocks.invalidateCache.mockResolvedValue(undefined);
   mocks.invalidateMarketplaceAnalytics.mockResolvedValue(undefined);
 });
@@ -57,7 +59,7 @@ describe("dispatchMarketplaceSyncTask", () => {
     expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({
       id: "a".repeat(24),
       workerId: "worker-a",
-      checkpoint: { from: 1790640000, end: 1791849600, windowsCompleted: 1, windowSeconds: 86400 },
+      checkpoint: { from: 1790640000, end: 1791849600, windowsCompleted: 1, windowSeconds: 86400, inclusive: false },
       metrics: { windowsCompleted: 1, ordersSynced: 1, ordersCreated: 0, ordersUpdated: 0, orderErrors: 0 },
       dedupeKey: "window-1",
     }));
@@ -89,5 +91,42 @@ describe("dispatchMarketplaceSyncTask", () => {
     expect(mocks.retry).toHaveBeenCalledWith("a".repeat(24), "worker-a", "SYNC_ATTEMPT_FAILED");
     expect(mocks.complete).not.toHaveBeenCalled();
     expect(JSON.stringify(mocks.retry.mock.calls)).not.toContain("provider-secret");
+  });
+
+  it("freezes an explicit historical boundary across checkpoint resumption", async () => {
+    mocks.claimed.mockResolvedValue(task({
+      run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-03T00:00:00Z" } },
+      checkpoint: { from: 1735862400, end: 1735862400, windowsCompleted: 2 },
+    }));
+
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a", new Date("2026-10-13T00:00:00.000Z"))).resolves.toEqual({ status: "completed", nextTaskId: "c".repeat(24) });
+
+    expect(mocks.syncShopeeOrders).toHaveBeenCalledWith(123, "shop-owner", 1735862400, 1735862400, "requester");
+    expect(mocks.complete).toHaveBeenCalledWith("a".repeat(24), "worker-a", undefined, expect.objectContaining({ windowsCompleted: 3 }));
+  });
+
+  it("runs a date-scoped return task in one provider-safe window and retries provider-reported errors", async () => {
+    mocks.claimed.mockResolvedValue(task({
+      stream: "returns",
+      run: { syncType: "returns", requestedByUserId: "requester", input: { dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" } },
+    }));
+    mocks.syncShopeeReturns.mockResolvedValue({ synced: 0, created: 0, updated: 0, errors: ["permission denied"] });
+    mocks.retry.mockResolvedValue({ settled: true, status: "retrying", nextTaskId: "a".repeat(24), nextAttemptAt: null });
+
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toEqual({ status: "retrying", nextTaskId: "a".repeat(24), nextAttemptAt: null });
+
+    expect(mocks.syncShopeeReturns).toHaveBeenCalledWith(123, "shop-owner", 1735689600, 1735776000, "requester");
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it("passes one explicit bounded window to payout ingestion", async () => {
+    mocks.claimed.mockResolvedValue(task({
+      stream: "payouts",
+      run: { syncType: "payouts", requestedByUserId: "requester", input: { dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" } },
+    }));
+
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toEqual({ status: "completed", nextTaskId: "c".repeat(24) });
+
+    expect(mocks.syncShopeePayoutStatements).toHaveBeenCalledWith(123, "shop-owner", { timeFrom: 1735689600, timeTo: 1735776000 }, "requester");
   });
 });

@@ -700,8 +700,8 @@ export async function syncShopeeOrders(
 
   const now = Math.floor(Date.now() / 1000);
   const fifteenDaysAgo = now - 15 * 24 * 60 * 60;
-  const effectiveTimeFrom = timeFrom || fifteenDaysAgo;
-  const effectiveTimeTo = timeTo || now;
+  const effectiveTimeFrom = timeFrom ?? fifteenDaysAgo;
+  const effectiveTimeTo = timeTo ?? now;
 
   const syncLog = await prisma.shopeeSyncLog.create({
     data: {
@@ -1050,16 +1050,17 @@ export async function syncShopeeReturns(
     const now = Math.floor(Date.now() / 1000);
     const WINDOW_DAYS = 15;
     const WINDOW_SECONDS = WINDOW_DAYS * 24 * 60 * 60;
-    const defaultTimeFrom = timeFrom || (now - 90 * 24 * 60 * 60); // 90 days back
-    const effectiveTimeTo = timeTo || now;
+    const hasExplicitWindow = timeFrom !== undefined || timeTo !== undefined;
+    const defaultTimeFrom = timeFrom ?? (now - 90 * 24 * 60 * 60); // 90 days back
+    const effectiveTimeTo = timeTo ?? now;
 
     // Break into 15-day windows
     const windows: Array<{ from: number; to: number }> = [];
     let windowStart = defaultTimeFrom;
-    while (windowStart < effectiveTimeTo) {
-      const windowEnd = Math.min(windowStart + WINDOW_SECONDS, effectiveTimeTo);
+    while (hasExplicitWindow ? windowStart <= effectiveTimeTo : windowStart < effectiveTimeTo) {
+      const windowEnd = Math.min(windowStart + WINDOW_SECONDS - (hasExplicitWindow ? 1 : 0), effectiveTimeTo);
       windows.push({ from: windowStart, to: windowEnd });
-      windowStart = windowEnd;
+      windowStart = windowEnd + (hasExplicitWindow ? 1 : 0);
     }
 
     const allReturns: Record<string, unknown>[] = [];
@@ -1223,7 +1224,7 @@ function payoutEvidencePayload(payout: Record<string, unknown>) {
 export async function syncShopeePayoutStatements(
   shopId: number,
   userId: string,
-  daysBack = 15,
+  daysBackOrWindow: number | { timeFrom: number; timeTo: number } = 15,
   actorId = userId,
 ): Promise<SyncResult> {
   const sdk = getShopeeSDK(shopId);
@@ -1248,13 +1249,19 @@ export async function syncShopeePayoutStatements(
 
   try {
     const now = Math.floor(Date.now() / 1000);
-    const safeDaysBack = Number.isInteger(daysBack) && daysBack > 0 ? Math.min(daysBack, 180) : 15;
+    const requestedWindow = typeof daysBackOrWindow === "object" ? daysBackOrWindow : null;
+    const requestedDaysBack = typeof daysBackOrWindow === "number" ? daysBackOrWindow : undefined;
+    const safeDaysBack = requestedDaysBack !== undefined && Number.isInteger(requestedDaysBack) && requestedDaysBack > 0
+      ? Math.min(requestedDaysBack, 180)
+      : 15;
+    const effectiveTimeFrom = requestedWindow?.timeFrom ?? now - safeDaysBack * 24 * 60 * 60;
+    const effectiveTimeTo = requestedWindow?.timeTo ?? now;
     const windowSeconds = 15 * 24 * 60 * 60;
     const seenPayoutIds = new Set<string>();
 
     // The endpoint permits at most fifteen days per request.
-    for (let from = now - safeDaysBack * 24 * 60 * 60; from < now; from += windowSeconds) {
-      const to = Math.min(from + windowSeconds, now);
+    for (let from = effectiveTimeFrom; requestedWindow ? from <= effectiveTimeTo : from < effectiveTimeTo; from += windowSeconds) {
+      const to = Math.min(from + windowSeconds - (requestedWindow ? 1 : 0), effectiveTimeTo);
       let cursor = "";
       let more = true;
 

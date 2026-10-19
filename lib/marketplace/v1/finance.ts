@@ -5,6 +5,7 @@ import { getMarketplaceReconciliationStatus } from "@/lib/marketplace/analytics/
 import { getProfitDetail } from "@/lib/marketplace/analytics/profit-detail";
 import { AnalyticsValidationError, parseAnalyticsDateRange } from "@/lib/marketplace/analytics/server";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
+import { andFinancialRecordWhere, financialQualityFilters, financialRecordWhere, hasOnlyLegacyFinanceDefaults, linkStateFilters, normalizedFinanceFilters, type FinanceFilters } from "@/lib/marketplace/finance-filter";
 
 const objectId = /^[a-f\d]{24}$/i;
 
@@ -12,8 +13,8 @@ export class MarketplaceFinanceValidationError extends Error {}
 export class MarketplaceFinanceNotFoundError extends Error {}
 
 type FinanceResource = "financial-records" | "reconciliation-status" | "profit";
-type FinancialRecordsQuery = { shopId: string; limit: number; cursor?: string };
-type ReconciliationStatusQuery = { shopId: string };
+type FinancialRecordsQuery = { shopId: string; limit: number; cursor?: string } & FinanceFilters;
+type ReconciliationStatusQuery = { shopId: string } & FinanceFilters;
 type ProfitQuery = { shopId?: string; dateFrom?: string; dateTo?: string };
 
 const shopId = z.string().regex(objectId, "shopId must be an internal shop ID");
@@ -21,12 +22,19 @@ const financialRecordsSchema = z.object({
   shopId,
   limit: z.coerce.number().int().min(1).max(100).default(25),
   cursor: z.string().min(1).max(2048).optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  dateBasis: z.enum(["occurred", "observed"]).default("occurred"),
+  transactionType: z.string().min(1).max(128).optional(),
+  financialQuality: z.enum(financialQualityFilters).optional(),
+  linkState: z.enum(linkStateFilters).optional(),
+  currency: z.string().regex(/^[A-Z]{3}$/, "currency must be an ISO 4217 alpha-3 code").optional(),
 }).strict();
-const reconciliationStatusSchema = z.object({ shopId }).strict();
+const reconciliationStatusSchema = financialRecordsSchema.omit({ limit: true, cursor: true });
 const profitSchema = z.object({
   shopId: shopId.optional(),
-  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
 }).strict();
 
 function duplicateQueryKey(params: URLSearchParams) {
@@ -43,9 +51,10 @@ export function parseMarketplaceFinanceQuery(params: URLSearchParams, resource: 
   if (duplicate) throw new MarketplaceFinanceValidationError(`Duplicate query parameter: ${duplicate}`);
   const parsed = (resource === "financial-records" ? financialRecordsSchema : resource === "reconciliation-status" ? reconciliationStatusSchema : profitSchema).safeParse(Object.fromEntries(params));
   if (!parsed.success) throw new MarketplaceFinanceValidationError("Invalid query parameters");
-  if (resource === "profit") {
+  if (resource === "profit" || resource === "financial-records" || resource === "reconciliation-status") {
     try {
-      parseAnalyticsDateRange(params);
+      const dateRange = parseAnalyticsDateRange(params);
+      if (resource !== "profit") return { ...parsed.data, dateRange } as FinancialRecordsQuery | ReconciliationStatusQuery;
     } catch (error) {
       if (error instanceof AnalyticsValidationError) throw new MarketplaceFinanceValidationError(error.message);
       throw error;
@@ -55,18 +64,21 @@ export function parseMarketplaceFinanceQuery(params: URLSearchParams, resource: 
 }
 
 function financialRecordsFilter(platform: MarketplacePlatform, query: FinancialRecordsQuery) {
-  return JSON.stringify({ platform, shopId: query.shopId });
+  return JSON.stringify({ platform, shopId: query.shopId, ...normalizedFinanceFilters(query) });
 }
 
 function encodeFinancialRecordsCursor(platform: MarketplacePlatform, query: FinancialRecordsQuery, id: string) {
-  return Buffer.from(JSON.stringify({ v: 1, platform, filter: financialRecordsFilter(platform, query), id })).toString("base64url");
+  return Buffer.from(JSON.stringify({ v: 2, platform, filter: financialRecordsFilter(platform, query), id })).toString("base64url");
 }
 
 function decodeFinancialRecordsCursor(platform: MarketplacePlatform, query: FinancialRecordsQuery) {
   if (!query.cursor) return undefined;
   try {
     const value = JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8"));
-    if (value?.v !== 1 || value.platform !== platform || value.filter !== financialRecordsFilter(platform, query) || typeof value.id !== "string" || !objectId.test(value.id)) throw new Error();
+    const legacyFilter = JSON.stringify({ platform, shopId: query.shopId });
+    const validV2 = value?.v === 2 && value.filter === financialRecordsFilter(platform, query);
+    const validLegacyV1 = value?.v === 1 && hasOnlyLegacyFinanceDefaults(query) && value.filter === legacyFilter;
+    if ((!validV2 && !validLegacyV1) || value.platform !== platform || typeof value.id !== "string" || !objectId.test(value.id)) throw new Error();
     return value.id;
   } catch {
     throw new MarketplaceFinanceValidationError("Invalid cursor");
@@ -81,29 +93,43 @@ export async function assertMarketplaceFinanceShop(platform: MarketplacePlatform
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
 
-export async function getMarketplaceFinancialCoverage(platform: MarketplacePlatform, shopId: string) {
-  const [totalRecords, usableRecords, verifiedRecords, latestObservedAt] = await Promise.all([
-    prisma.marketplaceFinancialRecord.count({ where: { platform, shopId } }),
-    prisma.marketplaceFinancialRecord.count({ where: { platform, shopId, amountMinor: { not: null } } }),
-    prisma.marketplaceFinancialRecord.count({ where: { platform, shopId, financialQuality: { in: ["verified", "derived"] } } }),
-    prisma.marketplaceFinancialRecord.aggregate({ where: { platform, shopId }, _max: { sourceObservedAt: true, occurredAt: true } }),
+export async function getMarketplaceFinancialCoverage(platform: MarketplacePlatform, shopId: string, filters: FinanceFilters = { dateBasis: "occurred" }) {
+  const where = financialRecordWhere(platform, shopId, filters);
+  const certifiedQuality = ["verified", "derived"];
+  const [totalRecords, usableRecords, numericAmountRecords, verifiedRecords, latestObservedAt] = await Promise.all([
+    prisma.marketplaceFinancialRecord.count({ where }),
+    // Kept for existing clients: this is fixed-point-minor coverage only.
+    prisma.marketplaceFinancialRecord.count({ where: andFinancialRecordWhere(where, { amountMinor: { not: null } }) }),
+    prisma.marketplaceFinancialRecord.count({ where: andFinancialRecordWhere(where, { OR: [{ amountMinor: { not: null } }, { amount: { not: null } }] }) }),
+    prisma.marketplaceFinancialRecord.count({ where: andFinancialRecordWhere(where, { financialQuality: { in: certifiedQuality } }) }),
+    prisma.marketplaceFinancialRecord.aggregate({ where, _max: { sourceObservedAt: true } }),
   ]);
-  const latest = latestObservedAt._max.sourceObservedAt ?? latestObservedAt._max.occurredAt;
+  const missingAmountRecords = totalRecords - numericAmountRecords;
+  // Missing and unset quality values are unverified too, so derive this from the complete scope.
+  const unverifiedRecords = totalRecords - verifiedRecords;
+  const warnings = [
+    ...(unverifiedRecords > 0 ? ["Some matching records are not verified financial values."] : []),
+    ...(missingAmountRecords > 0 ? ["Some matching records have no numeric amount."] : []),
+  ];
   return {
-    state: usableRecords > 0 ? (verifiedRecords === totalRecords && usableRecords === totalRecords ? "complete" : "partial") : "unavailable",
+    state: numericAmountRecords > 0 ? (missingAmountRecords === 0 && unverifiedRecords === 0 ? "complete" : "partial") : "unavailable",
     totalRecords,
     usableRecords,
     verifiedRecords,
     excludedUnknownRecords: totalRecords - usableRecords,
-    latestObservedAt: iso(latest),
-    reason: usableRecords > 0 ? null : "No usable financial records have been synchronized for this shop.",
+    numericAmountRecords,
+    missingAmountRecords,
+    unverifiedRecords,
+    latestObservedAt: iso(latestObservedAt._max.sourceObservedAt),
+    reason: numericAmountRecords > 0 ? null : "No matching financial records contain a numeric amount.",
+    warnings,
   };
 }
 
 export async function listMarketplaceFinancialRecords(platform: MarketplacePlatform, query: FinancialRecordsQuery) {
   const cursor = decodeFinancialRecordsCursor(platform, query);
   const rows = await prisma.marketplaceFinancialRecord.findMany({
-    where: { platform, shopId: query.shopId },
+    where: financialRecordWhere(platform, query.shopId, query),
     orderBy: [{ occurredAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     take: query.limit + 1,
@@ -126,7 +152,7 @@ export async function listMarketplaceFinancialRecords(platform: MarketplacePlatf
       limit: query.limit,
       nextCursor: rows.length > query.limit && data.length ? encodeFinancialRecordsCursor(platform, query, data[data.length - 1]!.id) : null,
     },
-    coverage: await getMarketplaceFinancialCoverage(platform, query.shopId),
+    coverage: await getMarketplaceFinancialCoverage(platform, query.shopId, query),
   };
 }
 
@@ -137,7 +163,7 @@ export async function getMarketplaceFinanceResult(
   query: FinancialRecordsQuery | ReconciliationStatusQuery | ProfitQuery,
 ) {
   if (resource === "financial-records") return listMarketplaceFinancialRecords(platform, query as FinancialRecordsQuery);
-  if (resource === "reconciliation-status") return getMarketplaceReconciliationStatus(platform, (query as ReconciliationStatusQuery).shopId);
+  if (resource === "reconciliation-status") return getMarketplaceReconciliationStatus(platform, (query as ReconciliationStatusQuery).shopId, new Date(), query as ReconciliationStatusQuery);
   return getProfitDetail(platform, user, new URLSearchParams(query as Record<string, string>));
 }
 

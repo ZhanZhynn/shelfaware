@@ -10,6 +10,7 @@ import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 import { MarketplaceFilters } from "../analytics/MarketplaceFilters";
 import { MarketplaceStatus } from "../analytics/MarketplaceStatus";
 import { financialReportingCurrency, fetchMarketplaceMetric, MarketplaceApiError, displayValue, filtersFromSearchParams, marketplaceUrlQuery, type MarketplaceFiltersValue, type MarketplaceMetricResponse, type MarketplaceShopOption, validateMarketplaceFilters, withDefaultMarketplaceShop } from "../analytics/marketplaceAnalyticsUi";
+import type { FeeBreakdownItem, ProductProfitRow, ProfitDetailResponse, ProfitDetailSummary, ShippingDiscrepancyProduct, ShippingDiscrepancySummary } from "@/lib/marketplace/analytics/profit-detail";
 import { DollarSign, TrendingUp, Receipt, Percent } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts";
 import {
@@ -20,54 +21,6 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-
-// ── Profit Detail types ─────────────────────────────────────────────────────
-
-type ProfitDetailSummary = {
-  totalRevenue: number;
-  totalFees: number;
-  totalShipping: number;
-  sellerIncome: number;
-  overallMargin: number;
-  totalOrders: number;
-  avgOrderValue: number;
-  avgFeePerOrder: number;
-};
-
-type FeeBreakdownItem = { name: string; amount: number; percentage: number };
-
-type ProductProfitRow = {
-  productName: string;
-  revenue: number;
-  quantitySold: number;
-  orderCount: number;
-  estimatedFees: number;
-  estimatedProfit: number;
-  margin: number;
-};
-
-type ShippingDiscrepancyProduct = {
-  productName: string;
-  orderCount: number;
-  totalEstimated: number;
-  totalActual: number;
-  avgDiscrepancy: number;
-  discrepancyPct: number;
-  totalRevenue: number;
-  totalQuantity: number;
-};
-
-type ProfitDetailResponse = {
-  summary: ProfitDetailSummary;
-  feeBreakdown: FeeBreakdownItem[];
-  byProduct: ProductProfitRow[];
-  shippingDiscrepancy?: {
-    summary: { totalOrders: number; ordersWithDiscrepancy: number; totalEstimated: number; totalActual: number; totalDiscrepancy: number };
-    products: ShippingDiscrepancyProduct[];
-  };
-  coverage: { state: "ready" | "provisional" | "unavailable"; basis: string; exclusions: string[] };
-  currency: string;
-};
 
 // ── Chart colors ────────────────────────────────────────────────────────────
 
@@ -150,6 +103,7 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
   const usable = detail && detail.coverage.state !== "unavailable";
   const currency = detail?.currency || financialReportingCurrency({ financialCoverage: coverage });
   const money = (value: number | null | undefined) => displayValue(value, currency ? (number) => formatMoney(number, currency) : undefined);
+  const percent = (value: number | null | undefined) => displayValue(value, (number) => `${number}%`);
 
   const apply = (requestedFilters = draft) => {
     const next = withDefaultMarketplaceShop(requestedFilters, shops);
@@ -163,17 +117,41 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
 
   const exportCsv = () => {
     if (!detail) return;
+    const csvValue = (value: string | number | null | undefined) =>
+      typeof value === "number" ? (Number.isFinite(value) ? value : "Unavailable") : value || "Unavailable";
     const rows: Array<Array<string | number>> = [
       ["Metric", "Value"],
-      ["Total revenue", detail.summary.totalRevenue],
-      ["Total fees", detail.summary.totalFees],
-      ["Total shipping", detail.summary.totalShipping],
-      ["Seller income", detail.summary.sellerIncome],
-      ["Overall margin", `${detail.summary.overallMargin}%`],
+      ["Coverage state", detail.coverage.state],
+      ["Coverage basis", detail.coverage.basis],
+      ["Source quality basis", detail.coverage.sourceQualityBasis],
+      ["Exclusions", detail.coverage.exclusions.join("; ") || "Unavailable"],
+      ["Missing cost categories", detail.coverage.missingCostCategories.join("; ") || "Unavailable"],
+      ["Unavailable reasons", detail.coverage.unavailableReasons.join("; ") || "Unavailable"],
+      ["Total revenue", csvValue(detail.summary.totalRevenue)],
+      ["Total fees", csvValue(detail.summary.totalFees)],
+      ["Total shipping", csvValue(detail.summary.totalShipping)],
+      ["Seller income", csvValue(detail.summary.sellerIncome)],
+      ["Overall margin", detail.summary.overallMargin == null ? "Unavailable" : `${detail.summary.overallMargin}%`],
       ["Total orders", detail.summary.totalOrders],
       [],
-      ["Product", "Revenue", "Qty Sold", "Orders", "Est. Fees", "Est. Profit", "Margin"],
-      ...detail.byProduct.map((p) => [p.productName, p.revenue, p.quantitySold, p.orderCount, p.estimatedFees, p.estimatedProfit, `${p.margin}%`]),
+      ["Coverage field", "Known", "Missing"],
+      ...Object.entries(detail.coverage.fieldCoverage).map(([field, value]) => [field, value.known, value.missing]),
+      [],
+      ["Product", "SKU", "Source product key", "Paid revenue", "Revenue basis", "Source/list price subtotal", "Qty sold", "Qty confidence", "Orders", "Est. fees", "Est. profit", "Margin"],
+      ...detail.byProduct.map((p) => [
+        p.productName,
+        csvValue(p.sku),
+        csvValue(p.sourceProductKey),
+        csvValue(p.revenue),
+        csvValue(p.revenueBasis),
+        csvValue(p.itemSourceSubtotal),
+        csvValue(p.quantitySold),
+        csvValue(p.quantitySourceConfidence),
+        p.orderCount,
+        csvValue(p.estimatedFees),
+        csvValue(p.estimatedProfit),
+        p.margin == null ? "Unavailable" : `${p.margin}%`,
+      ]),
     ];
     const csv = rows.map((row) => row.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -250,13 +228,23 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
                     <svg className="h-5 w-5 text-yellow-600" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                     </svg>
-                    Provisional data — 30-day maturity and a final provider statement are required before certification.
+                    Provisional data. It has not met all coverage or source-quality requirements; review the details below before relying on it.
+                  </CardContent>
+                </Card>
+              )}
+
+              {detail && <CoverageNotice coverage={detail.coverage} />}
+              {detail?.refundEvidence && (
+                <Card>
+                  <CardContent className="space-y-1 py-3 text-sm text-muted-foreground">
+                    <p>Observed return requests: {detail.refundEvidence.returnRequestCount} across {detail.refundEvidence.ordersWithReturnRequests} orders. Return-history completeness is unknown.</p>
+                    <p>{detail.refundEvidence.warning}</p>
                   </CardContent>
                 </Card>
               )}
 
               {/* Summary cards */}
-              {detail && <SummaryCards summary={detail.summary} money={money} currency={currency} />}
+              {detail && <SummaryCards summary={detail.summary} money={money} percent={percent} />}
 
               {/* Fee breakdown + Product table side by side */}
               {detail && detail.feeBreakdown.length > 0 && (
@@ -282,7 +270,7 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
             <Card>
               <CardHeader><CardTitle>Marketplace financial analytics unavailable</CardTitle></CardHeader>
               <CardContent className="text-sm text-muted-foreground">
-                Financial breakdown, product allocation, and CSV export remain disabled because this selection is {coverage?.state ?? "unavailable"}. Missing capability or category: {coverage?.missingCostCategories?.join(", ") || coverage?.unavailableReasons?.join(", ") || "financial readiness is unavailable"}. Operational product and order insights are available in Analytics.
+                Financial breakdown, product allocation, and CSV export remain disabled because this selection is {detail?.coverage.state ?? coverage?.state ?? "unavailable"}. Missing capability or category: {detail?.coverage.missingCostCategories.join(", ") || detail?.coverage.unavailableReasons.join(", ") || coverage?.missingCostCategories?.join(", ") || coverage?.unavailableReasons?.join(", ") || "financial readiness is unavailable"}. Operational product and order insights are available in Analytics.
               </CardContent>
             </Card>
           )}
@@ -294,12 +282,12 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
 
 // ── Summary cards ───────────────────────────────────────────────────────────
 
-function SummaryCards({ summary, money, currency }: { summary: ProfitDetailSummary; money: (v: number | null | undefined) => string; currency?: string }) {
+function SummaryCards({ summary, money, percent }: { summary: ProfitDetailSummary; money: (v: number | null | undefined) => string; percent: (v: number | null | undefined) => string }) {
   const cards = [
     { label: "Total Revenue", value: money(summary.totalRevenue), icon: DollarSign, color: "from-blue-500 to-blue-600" },
     { label: "Total Fees", value: money(summary.totalFees), icon: Receipt, color: "from-red-500 to-red-600" },
     { label: "Seller Income", value: money(summary.sellerIncome), icon: TrendingUp, color: "from-emerald-500 to-emerald-600" },
-    { label: "Overall Margin", value: `${summary.overallMargin}%`, icon: Percent, color: "from-purple-500 to-purple-600" },
+    { label: "Overall Margin", value: percent(summary.overallMargin), icon: Percent, color: "from-purple-500 to-purple-600" },
   ];
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -318,6 +306,26 @@ function SummaryCards({ summary, money, currency }: { summary: ProfitDetailSumma
         </Card>
       ))}
     </div>
+  );
+}
+
+function CoverageNotice({ coverage }: { coverage: ProfitDetailResponse["coverage"] }) {
+  const missingFields = Object.entries(coverage.fieldCoverage)
+    .filter(([, value]) => value.missing > 0)
+    .map(([field, value]) => `${field} (${value.missing} missing)`);
+  const hasWarning = coverage.state === "provisional" || missingFields.length > 0 || coverage.missingCostCategories.length > 0 || coverage.unavailableReasons.length > 0;
+
+  if (!hasWarning) return null;
+
+  return (
+    <Card className="border-yellow-200 bg-yellow-50">
+      <CardContent className="space-y-1 py-3 text-sm text-yellow-800">
+        <p>Coverage basis: {coverage.basis}. Source quality: {coverage.sourceQualityBasis}.</p>
+        {missingFields.length > 0 && <p>Missing field coverage: {missingFields.join(", ")}.</p>}
+        {coverage.missingCostCategories.length > 0 && <p>Excluded cost categories: {coverage.missingCostCategories.join(", ")}.</p>}
+        {coverage.unavailableReasons.length > 0 && <p>Unavailable details: {coverage.unavailableReasons.join(", ")}.</p>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -363,29 +371,73 @@ function FeeBreakdownChart({ feeBreakdown, money }: { feeBreakdown: FeeBreakdown
 
 // ── Profit by product table ─────────────────────────────────────────────────
 
-const productColumns: ColumnDef<ProductProfitRow>[] = [
-  { accessorKey: "productName", header: "Product", cell: ({ row }) => <span className="font-medium">{row.original.productName}</span> },
-  { accessorKey: "revenue", header: "Revenue", cell: ({ row }) => row.original.revenue.toLocaleString() },
-  { accessorKey: "quantitySold", header: "Qty Sold" },
-  { accessorKey: "orderCount", header: "Orders" },
-  { accessorKey: "estimatedFees", header: "Est. Fees", cell: ({ row }) => row.original.estimatedFees.toLocaleString() },
-  { accessorKey: "estimatedProfit", header: "Est. Profit", cell: ({ row }) => {
-    const v = row.original.estimatedProfit;
-    return <span className={v >= 0 ? "text-emerald-600" : "text-red-600"}>{v.toLocaleString()}</span>;
-  }},
-  { accessorKey: "margin", header: "Margin", cell: ({ row }) => {
-    const v = row.original.margin;
-    return <span className={v >= 0 ? "text-emerald-600" : "text-red-600"}>{v}%</span>;
-  }},
-];
+function productValueColor(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-muted-foreground";
+  return value >= 0 ? "text-emerald-600" : "text-red-600";
+}
+
+function productColumns(money: (value: number | null | undefined) => string, showSourceSubtotal: boolean): ColumnDef<ProductProfitRow>[] {
+  const columns: ColumnDef<ProductProfitRow>[] = [
+    {
+      accessorKey: "productName",
+      header: "Product",
+      cell: ({ row }) => (
+        <div>
+          <span className="font-medium">{row.original.productName}</span>
+          {row.original.sku && <span className="block text-xs text-muted-foreground">SKU: {row.original.sku}</span>}
+        </div>
+      ),
+    },
+    { accessorKey: "revenue", header: "Paid Revenue", cell: ({ row }) => money(row.original.revenue) },
+    { accessorKey: "quantitySold", header: "Qty Sold", cell: ({ row }) => (
+      <div>
+        <span>{displayValue(row.original.quantitySold)}</span>
+        {row.original.quantitySourceConfidence && <span className="ml-1 text-xs text-muted-foreground">({row.original.quantitySourceConfidence === "observed" ? "Observed" : "Partial"})</span>}
+      </div>
+    ) },
+    { accessorKey: "orderCount", header: "Orders" },
+    { accessorKey: "estimatedFees", header: "Est. Fees", cell: ({ row }) => money(row.original.estimatedFees) },
+    { accessorKey: "estimatedProfit", header: "Est. Profit", cell: ({ row }) => {
+      const value = row.original.estimatedProfit;
+      return <span className={productValueColor(value)}>{money(value)}</span>;
+    }},
+    { accessorKey: "margin", header: "Margin", cell: ({ row }) => {
+      const value = row.original.margin;
+      return <span className={productValueColor(value)}>{displayValue(value, (number) => `${number}%`)}</span>;
+    }},
+  ];
+
+  if (showSourceSubtotal) {
+    columns.splice(2, 0, {
+      accessorKey: "itemSourceSubtotal",
+      header: "Source/List Price Subtotal",
+      cell: ({ row }) => money(row.original.itemSourceSubtotal),
+    });
+  }
+
+  return columns;
+}
 
 function ProfitByProductTable({ products, money, loading }: { products: ProductProfitRow[]; money: (v: number | null | undefined) => string; loading: boolean }) {
-  const table = useReactTable({ data: products, columns: productColumns, getCoreRowModel: getCoreRowModel(), getPaginationRowModel: getPaginationRowModel(), initialState: { pagination: { pageSize: 10 } } });
+  const sourceProductKeys = products.map((product) => product.sourceProductKey?.trim() ?? "");
+  const useSourceProductKey = sourceProductKeys.every(Boolean) && new Set(sourceProductKeys).size === sourceProductKeys.length;
+  const hasSourceSubtotal = products.some((product) => product.itemSourceSubtotal != null || product.revenueBasis === "item_source_subtotal");
+  const hasSourceOnlyRows = products.some((product) => product.revenue == null && (product.itemSourceSubtotal != null || product.revenueBasis === "item_source_subtotal"));
+  const columns = productColumns(money, hasSourceSubtotal);
+  const table = useReactTable({
+    data: products,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getRowId: useSourceProductKey ? (row) => row.sourceProductKey!.trim() : undefined,
+    initialState: { pagination: { pageSize: 10 } },
+  });
 
   return (
     <Card className="h-full">
       <CardHeader><CardTitle>Profit by Product</CardTitle></CardHeader>
       <CardContent className="text-sm">
+        {hasSourceOnlyRows && <p className="mb-3 text-muted-foreground">Source/list price subtotals are observed item values, not paid revenue. Paid revenue and estimated profit remain unavailable where the marketplace does not provide paid line amounts.</p>}
         {loading ? (
           <p className="text-muted-foreground">Loading product breakdown...</p>
         ) : products.length === 0 ? (
@@ -439,7 +491,7 @@ function ProfitByProductTable({ products, money, loading }: { products: ProductP
 
 // ── Shipping discrepancy section ────────────────────────────────────────────
 
-function ShippingDiscrepancySection({ discrepancy, money, platform }: { discrepancy: { summary: { totalOrders: number; ordersWithDiscrepancy: number; totalEstimated: number; totalActual: number; totalDiscrepancy: number }; products: ShippingDiscrepancyProduct[] }; money: (v: number | null | undefined) => string; platform: MarketplacePlatform }) {
+function ShippingDiscrepancySection({ discrepancy, money, platform }: { discrepancy: { summary: ShippingDiscrepancySummary; products: ShippingDiscrepancyProduct[] }; money: (v: number | null | undefined) => string; platform: MarketplacePlatform }) {
   const [csvUrl, setCsvUrl] = useState<string | null>(null);
 
   const exportCsv = () => {

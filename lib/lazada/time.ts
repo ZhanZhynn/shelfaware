@@ -1,4 +1,5 @@
 const timeZones: Record<string, string> = { my: "Asia/Kuala_Lumpur", sg: "Asia/Singapore", th: "Asia/Bangkok", vn: "Asia/Ho_Chi_Minh", ph: "Asia/Manila", id: "Asia/Jakarta" };
+const months: Record<string, number> = { jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12 };
 
 export type LazadaSyncRange = { from: string; to: string; basis?: "created" | "updated" };
 
@@ -38,4 +39,21 @@ export function lazadaSourceDate(value: unknown, countryCode: string): Date | nu
   if (!offset) return null;
   const date = new Date(`${match[1]}T${match[2] ?? "00:00:00"}${match[3] ?? ""}${offset}`);
   return Number.isFinite(date.getTime()) ? date : null;
+}
+
+/** Finance dates can use English month names. Date-only values identify the
+ * marketplace accounting day; they are never a release or delivery timestamp. */
+export function lazadaFinanceDate(value: unknown, countryCode: string): Date | null {
+  if (typeof value === "string") {
+    const monthFirst = /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/.exec(value.trim());
+    const source = monthFirst ? `${monthFirst[2]} ${monthFirst[1]} ${monthFirst[3]}` : value.trim();
+    const english = /^(\d{1,2})[\s-]+([A-Za-z]+),?[\s-]+(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(source);
+    if (english) {
+      const month = months[english[2]!.toLowerCase()];
+      if (!month) return null;
+      const iso = `${english[3]}-${String(month).padStart(2, "0")}-${english[1]!.padStart(2, "0")}T${(english[4] ?? "00").padStart(2, "0")}:${english[5] ?? "00"}:${english[6] ?? "00"}`;
+      return lazadaSourceDate(iso, countryCode);
+    }
+  }
+  return lazadaSourceDate(value, countryCode);
 }

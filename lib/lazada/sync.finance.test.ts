@@ -123,4 +123,13 @@ describe("Lazada finance sync", () => {
     expect(stored.size).toBe(2);
     expect([...stored.values()].map((row) => row.amountMinor)).toEqual(["2000", "-200"]);
   });
+
+  it("parses English finance dates but rejects ambiguous numeric dates without inventing an occurrence time", async () => {
+    getAllFinanceTransactionDetailsCustom.mockResolvedValue([{ transaction_number: "source", fee_type: "13", amount: "20.00", transaction_date: "01 Aug 2026" }]);
+    const range = { from: "2026-08-01T00:00:00+08:00", to: "2026-08-01T23:59:59+08:00" };
+    expect(await syncLazadaFinance("seller-record", "user-record", range)).toMatchObject({ synced: 1, errors: [] });
+    expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ occurredAt: new Date("2026-07-31T16:00:00Z") }) }));
+    getAllFinanceTransactionDetailsCustom.mockResolvedValue([{ transaction_number: "source", amount: "20.00", transaction_date: "01/08/2026" }]);
+    await expect(syncLazadaFinance("seller-record", "user-record", range)).rejects.toMatchObject({ code: "MISSING_FINANCE_TIMESTAMP", fields: ["timestamp_shape_DD_DD_DDDD"] });
+  });
 });

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/env", () => ({ getEnvVar: () => "fixture-value" }));
 import { getAllOrdersCustom, getOrdersPageCustom, getFinanceTransactionDetailsCustom, getAllFinanceTransactionDetailsCustom, validateFinanceDateRange } from "./custom-api";
 import { LazadaProviderError } from "./provider-error";
-import { lazadaSourceDate } from "./time";
+import { lazadaSourceDate, lazadaFinanceDate } from "./time";
 import { lazadaOrderStatus, lazadaPaymentStatus } from "./status";
 import type { LazadaShopContext } from "./server";
 const context: LazadaShopContext = { shopId: "shop", sellerId: "seller", userId: "owner", countryCode: "my", accessToken: "fixture-token", refreshToken: "", tokenExpiry: null, refreshExpiry: null };
@@ -30,6 +30,12 @@ describe("Lazada bounded provider reads", () => {
   it("uses the marketplace calendar for date-only finance endpoints", () => {
     expect(validateFinanceDateRange("2026-08-01T00:00:00+08:00", "2026-08-31T23:59:59+08:00")).toEqual({ startTime: "2026-08-01", endTime: "2026-08-31" });
     expect(lazadaSourceDate("2026-08-01 09:29:00", "my")).toEqual(new Date("2026-08-01T01:29:00Z"));
+    expect(lazadaFinanceDate("01 Aug 2026", "my")).toEqual(new Date("2026-07-31T16:00:00Z"));
+    expect(lazadaFinanceDate("01-Aug-2026", "my")).toEqual(new Date("2026-07-31T16:00:00Z"));
+    expect(lazadaFinanceDate("Aug 01, 2026", "my")).toEqual(new Date("2026-07-31T16:00:00Z"));
+    expect(lazadaFinanceDate("01 August 2026 09:29", "my")).toEqual(new Date("2026-08-01T01:29:00Z"));
+    expect(lazadaFinanceDate("31 Feb 2026", "my")).toBeNull();
+    expect(lazadaFinanceDate("01/08/2026", "my")).toBeNull();
   });
   it("keeps mixed and unknown lifecycle states and does not manufacture settled refunds", () => {
     expect(lazadaOrderStatus(["Package Returned"])).toBe("returned");

@@ -19,7 +19,7 @@ import { createHash } from "crypto";
 import type { LazadaOrderDetail } from "lazada-api-client";
 import type { OrderItem } from "./custom-api";
 import { lazadaOrderStatus, lazadaPaymentStatus, normalizeLazadaStatus } from "./status";
-import { lazadaSourceDate, type LazadaSyncRange } from "./time";
+import { lazadaSourceDate, lazadaFinanceDate, type LazadaSyncRange } from "./time";
 import { lazadaIdentifier, LazadaProviderError } from "./provider-error";
 import { lazadaFinanceIdentity } from "./finance-identity";
 
@@ -519,8 +519,11 @@ export async function syncLazadaFinance(
           end_time: range?.to ?? new Date(),
         }));
         const transactions = range ? fetched.filter((transaction) => {
-          const occurred = lazadaSourceDate(transaction.transaction_date, shop.countryCode);
-          if (!occurred) throw new LazadaProviderError("MISSING_FINANCE_TIMESTAMP", 502);
+          const occurred = lazadaFinanceDate(transaction.transaction_date, shop.countryCode);
+          if (!occurred) {
+            const shape = typeof transaction.transaction_date === "string" ? transaction.transaction_date.replace(/[0-9A-Za-z]/g, (char) => /[0-9]/.test(char) ? "D" : "A").replace(/[^A-Za-z0-9_]/g, "_").slice(0, 40) : typeof transaction.transaction_date;
+            throw new LazadaProviderError("MISSING_FINANCE_TIMESTAMP", 502, undefined, [`timestamp_shape_${shape}`]);
+          }
           return occurred >= new Date(range.from) && occurred <= new Date(range.to);
         }) : fetched;
         const orderIds = [...new Set(transactions.flatMap((row) => { const id = lazadaFinanceIdentity(row).orderNumber; return id ? [id] : []; }))];
@@ -542,7 +545,7 @@ export async function syncLazadaFinance(
             const externalId = identity.externalId;
             const parsedAmount = parseSourceNumber(transaction.amount, "lazada.finance.amount");
             const exactAmount = toExactMinorUnits(transaction.amount);
-            const occurredAt = lazadaSourceDate(transaction.transaction_date, shop.countryCode);
+            const occurredAt = lazadaFinanceDate(transaction.transaction_date, shop.countryCode);
             const orderExternalId = identity.orderNumber;
             const orderInternalId = orderExternalId ? orderLinks.get(orderExternalId) ?? null : null;
             const data = {

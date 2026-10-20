@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/env", () => ({ getEnvVar: () => "fixture-value" }));
-import { getAllOrdersCustom, getOrdersPageCustom, validateFinanceDateRange } from "./custom-api";
+import { getAllOrdersCustom, getOrdersPageCustom, getFinanceTransactionDetailsCustom, validateFinanceDateRange } from "./custom-api";
 import { LazadaProviderError } from "./provider-error";
 import { lazadaSourceDate } from "./time";
 import { lazadaOrderStatus, lazadaPaymentStatus } from "./status";
@@ -33,8 +33,15 @@ describe("Lazada bounded provider reads", () => {
   });
   it("keeps mixed and unknown lifecycle states and does not manufacture settled refunds", () => {
     expect(lazadaOrderStatus(["Package Returned"])).toBe("returned");
+    expect(lazadaOrderStatus(["shipped_back_success"])).toBe("returned");
     expect(lazadaOrderStatus(["delivered", "canceled"])).toBe("mixed");
     expect(lazadaOrderStatus(["new_provider_status"])).toBe("unknown");
     expect(lazadaPaymentStatus("returned")).toBe("unknown");
+  });
+  it.each([[null, "NULL"], ["private provider contents", "STRING"], [{ private: "contents" }, "OBJECT"]])("reports a safe finance envelope shape without converting unsupported data into zero rows", async (data, shape) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data, request_id: "fixture-request" }) }));
+    const error = await getFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" }).catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: `MALFORMED_FINANCE_${shape}`, providerRequestId: "fixture-request" });
+    expect(String(error)).not.toContain("private");
   });
 });

@@ -28,6 +28,7 @@ vi.mock("@/lib/shopee", () => ({ syncShopeeOrders: mocks.syncShopeeOrders, syncS
 vi.mock("@/lib/lazada", () => ({ syncLazadaOrders: mocks.syncLazadaOrders, syncLazadaFinance: mocks.syncLazadaFinance, syncLazadaPayoutStatements: mocks.syncLazadaPayoutStatements }));
 
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
+import { LazadaProviderError } from "@/lib/lazada/provider-error";
 
 const task = (overrides: Record<string, unknown> = {}) => ({
   id: "a".repeat(24), platform: "shopee", shopId: "b".repeat(24), stream: "orders_and_escrow", sequence: 0,
@@ -51,6 +52,32 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it("fails permanent Lazada response errors with a safe actionable code rather than repeatedly advancing or retrying", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "finance", run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00Z", dateTo: "2026-08-01T23:59:59Z" } } }));
+    mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });
+    mocks.syncLazadaFinance.mockRejectedValue(new LazadaProviderError("MALFORMED_FINANCE_NULL", 502, "fixture-request"));
+    mocks.fail.mockResolvedValue({ settled: true });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toEqual({ status: "failed" });
+      expect(mocks.fail).toHaveBeenCalledWith("a".repeat(24), "worker-a", "LAZADA_MALFORMED_FINANCE_NULL");
+      expect(mocks.retry).not.toHaveBeenCalled();
+      expect(mocks.checkpoint).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledWith("Marketplace provider task failure", expect.objectContaining({ providerCode: "MALFORMED_FINANCE_NULL", providerRequestId: "fixture-request" }));
+    } finally { warning.mockRestore(); }
+  });
+  it("retains retry behavior for actual provider rate limiting", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "finance", run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00Z", dateTo: "2026-08-01T23:59:59Z" } } }));
+    mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });
+    mocks.syncLazadaFinance.mockRejectedValue(new LazadaProviderError("SellerCallLimit", 429));
+    mocks.retry.mockResolvedValue({ settled: true, status: "retrying", nextTaskId: "task", nextAttemptAt: null });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toMatchObject({ status: "retrying" });
+      expect(mocks.retry).toHaveBeenCalledWith("a".repeat(24), "worker-a", "LAZADA_SELLERCALLLIMIT");
+      expect(mocks.fail).not.toHaveBeenCalled();
+    } finally { warning.mockRestore(); }
+  });
   it("runs Lazada finance in frozen daily windows and checkpoints only completed work", async () => {
     mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "finance", run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-03T23:59:59+08:00" } } }));
     mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });

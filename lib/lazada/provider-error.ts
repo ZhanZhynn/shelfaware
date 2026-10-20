@@ -22,3 +22,16 @@ export function lazadaIdentifier(value: unknown): string {
   if (!/^[1-9]\d{0,24}$/.test(id)) throw new LazadaProviderError("INVALID_IDENTIFIER", 502);
   return id;
 }
+
+export function lazadaSyncFailure(error: LazadaProviderError) {
+  const code = `LAZADA_${error.code.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`.slice(0, 64);
+  const permanent = [400, 401, 403, 404].includes(error.status)
+    || /^(MALFORMED_|MISSING_|INVALID_|INCONSISTENT_)/.test(error.code)
+    || /IllegalAccessToken|InvalidAccessToken|Unauthorized|AccessDenied|Permission|Parameter|^100001[24]$/i.test(error.code);
+  return { code, retryable: !permanent };
+}
+
+/** Only the envelope's shape is diagnostic; its contents can be sensitive. */
+export function lazadaResponseShape(value: unknown): string {
+  return value === null ? "NULL" : value === undefined ? "MISSING" : Array.isArray(value) ? "ARRAY" : typeof value === "object" ? "OBJECT" : typeof value === "string" ? "STRING" : "OTHER";
+}

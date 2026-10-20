@@ -20,7 +20,7 @@ import type { LazadaOrderDetail } from "lazada-api-client";
 import type { OrderItem } from "./custom-api";
 import { lazadaOrderStatus, lazadaPaymentStatus, normalizeLazadaStatus } from "./status";
 import { lazadaSourceDate, type LazadaSyncRange } from "./time";
-import { lazadaIdentifier } from "./provider-error";
+import { lazadaIdentifier, LazadaProviderError } from "./provider-error";
 
 // Lazada order status mapping to our internal status
 // ─── Sync Lock (per-seller mutex) ─────────────────────────────────────────
@@ -528,7 +528,7 @@ export async function syncLazadaFinance(
         }));
         const transactions = range ? fetched.filter((transaction) => {
           const occurred = lazadaSourceDate(transaction.transaction_date, shop.countryCode);
-          if (!occurred) throw new Error("Transaction date is unavailable for a bounded finance query");
+          if (!occurred) throw new LazadaProviderError("MISSING_FINANCE_TIMESTAMP", 502);
           return occurred >= new Date(range.from) && occurred <= new Date(range.to);
         }) : fetched;
         const orderIds = [...new Set(transactions.flatMap((row) => typeof row.order_no === "string" && row.order_no.trim() ? [row.order_no.trim()] : []))];

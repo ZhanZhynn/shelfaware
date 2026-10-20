@@ -1,7 +1,7 @@
 const statuses: Record<string, string> = {
   pending: "pending", confirmed: "confirmed", packed: "processing", ready_to_ship: "processing",
   processing: "processing", shipped: "shipped", delivered: "delivered", canceled: "cancelled", cancelled: "cancelled",
-  returned: "returned", package_returned: "returned", failed: "failed",
+  returned: "returned", package_returned: "returned", shipped_back_success: "returned", failed: "failed",
 };
 
 export function normalizeLazadaStatus(value: unknown): string {

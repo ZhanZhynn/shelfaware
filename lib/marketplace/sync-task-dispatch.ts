@@ -1,6 +1,7 @@
 import { cacheKeys, invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { syncShopeeAds, syncShopeeOrders, syncShopeePayoutStatements, syncShopeeProducts, syncShopeeReturns } from "@/lib/shopee";
 import { syncLazadaOrders, syncLazadaFinance, syncLazadaPayoutStatements } from "@/lib/lazada";
+import { LazadaProviderError, lazadaSyncFailure } from "@/lib/lazada/provider-error";
 import { prisma } from "@/prisma/client";
 import {
   checkpointMarketplaceSyncTask,
@@ -136,6 +137,17 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {
+    if (error instanceof LazadaProviderError) {
+      const failure = lazadaSyncFailure(error);
+      console.warn("Marketplace provider task failure", { taskId: id, platform: task.platform, providerCode: error.code, providerRequestId: error.providerRequestId, httpStatus: error.status, retryable: failure.retryable });
+      if (!failure.retryable) {
+        const settled = await failMarketplaceSyncTask(id, workerId, failure.code);
+        return settled.settled ? { status: "failed" } : { status: "skipped" };
+      }
+      const settled = await retryMarketplaceSyncTask(id, workerId, failure.code);
+      if (!settled.settled) return { status: "skipped" };
+      return settled.status === "retrying" ? { status: "retrying", nextTaskId: settled.nextTaskId, nextAttemptAt: settled.nextAttemptAt } : { status: "failed" };
+    }
     if (error instanceof PermanentTaskDispatchError) {
       const settled = await failMarketplaceSyncTask(id, workerId, error.code);
       return settled.settled ? { status: "failed" } : { status: "skipped" };

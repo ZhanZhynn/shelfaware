@@ -10,7 +10,7 @@ import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { createHmac } from "crypto";
 import { lazadaCalendarDate, lazadaTimestamp } from "./time";
-import { assertLazadaSuccess, LazadaProviderError, lazadaIdentifier } from "./provider-error";
+import { assertLazadaSuccess, LazadaProviderError, lazadaIdentifier, lazadaResponseShape } from "./provider-error";
 
 /**
  * Convert Unix timestamp (milliseconds) to ISO 8601 format.
@@ -417,7 +417,7 @@ export async function getFinanceTransactionDetailsCustom(
   const data: GetFinanceTransactionDetailsResponse = await response.json();
 
   assertLazadaSuccess(data, response.status);
-  if (!Array.isArray(data.data)) throw new LazadaProviderError("MALFORMED_FINANCE", 502, data.request_id);
+  if (!Array.isArray(data.data)) throw new LazadaProviderError(`MALFORMED_FINANCE_${lazadaResponseShape(data.data)}`, 502, data.request_id);
   return data.data;
 }
 
@@ -434,7 +434,7 @@ export async function getAllFinanceTransactionDetailsCustom(
   while (offset < 500_000) {
     const page = await getFinanceTransactionDetailsCustom(context, { ...params, offset, limit: pageSize });
     for (const row of page) {
-      if (!row.transaction_number || seen.has(row.transaction_number)) throw new Error("Lazada finance pagination returned a missing or duplicate transaction ID");
+      if (!row.transaction_number || seen.has(row.transaction_number)) throw new LazadaProviderError("INVALID_FINANCE_TRANSACTION_ID", 502);
       seen.add(row.transaction_number);
     }
     transactions.push(...page);

@@ -11,6 +11,7 @@ import { logger } from "@/lib/logger";
 import { createHash, createHmac } from "crypto";
 import { lazadaCalendarDate, lazadaTimestamp } from "./time";
 import { assertLazadaSuccess, LazadaProviderError, lazadaIdentifier, lazadaResponseShape } from "./provider-error";
+import { lazadaFinanceIdentity } from "./finance-identity";
 
 /**
  * Convert Unix timestamp (milliseconds) to ISO 8601 format.
@@ -452,8 +453,10 @@ export async function getAllFinanceTransactionDetailsCustom(
     const page = await getFinanceTransactionDetailsCustom(context, { ...params, offset, limit: pageSize });
     const previousCount = transactions.length;
     for (const row of page) {
-      const id = row.transaction_number!;
-      const fingerprint = createHash("sha256").update(JSON.stringify(financialFields.map((field) => row[field] ?? null))).digest("hex");
+      const identity = lazadaFinanceIdentity(row);
+      const id = identity.externalId;
+      const facts: Record<string, unknown> = { ...row, fee_type: identity.feeType, order_no: identity.orderNumber, orderItem_no: identity.lineNumber };
+      const fingerprint = createHash("sha256").update(JSON.stringify(financialFields.map((field) => facts[field] ?? null))).digest("hex");
       const previous = seen.get(id);
       if (previous && previous.fingerprint !== fingerprint) {
         const first = transactions[previous.index]!;

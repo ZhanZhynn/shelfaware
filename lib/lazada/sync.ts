@@ -21,6 +21,7 @@ import type { OrderItem } from "./custom-api";
 import { lazadaOrderStatus, lazadaPaymentStatus, normalizeLazadaStatus } from "./status";
 import { lazadaSourceDate, type LazadaSyncRange } from "./time";
 import { lazadaIdentifier, LazadaProviderError } from "./provider-error";
+import { lazadaFinanceIdentity } from "./finance-identity";
 
 // Lazada order status mapping to our internal status
 // ─── Sync Lock (per-seller mutex) ─────────────────────────────────────────
@@ -442,15 +443,6 @@ function toExactMinorUnits(value: unknown): { amountMinor: string; amountScale: 
   return { amountMinor: `${sign === "-" && digits !== "0" ? "-" : ""}${digits}`, amountScale: fraction.length };
 }
 
-function financeExternalId(transaction: Record<string, unknown>): string {
-  if (typeof transaction.transaction_number === "string" && transaction.transaction_number) {
-    return transaction.transaction_number;
-  }
-  // The documented transaction_number is the stable provider key. Hash the full
-  // row only for malformed rows where Lazada omitted it, preserving idempotency.
-  return `row:${createHash("sha256").update(JSON.stringify(transaction)).digest("hex")}`;
-}
-
 function documentedStatementReference(value: unknown): string | null {
   // Lazada documents `statement` for finance rows and `statement_number` for payouts.
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -531,29 +523,36 @@ export async function syncLazadaFinance(
           if (!occurred) throw new LazadaProviderError("MISSING_FINANCE_TIMESTAMP", 502);
           return occurred >= new Date(range.from) && occurred <= new Date(range.to);
         }) : fetched;
-        const orderIds = [...new Set(transactions.flatMap((row) => typeof row.order_no === "string" && row.order_no.trim() ? [row.order_no.trim()] : []))];
+        const orderIds = [...new Set(transactions.flatMap((row) => { const id = lazadaFinanceIdentity(row).orderNumber; return id ? [id] : []; }))];
         const linkedOrders = orderIds.length ? await prisma.lazadaOrder.findMany({ where: { shopId: shop.id, lazadaOrderId: { in: orderIds } }, select: { id: true, lazadaOrderId: true } }) : [];
         const orderLinks = new Map(linkedOrders.map((row) => [row.lazadaOrderId, row.id]));
+        const legacyIds = [...new Set(transactions.map((row) => row.transaction_number).filter((id): id is string => typeof id === "string"))];
+        const legacyRows = legacyIds.length ? await prisma.marketplaceFinancialRecord.findMany({
+          where: { platform: "lazada", shopId: shop.id, externalId: { in: legacyIds } },
+          select: { id: true, externalId: true, statementExternalId: true, orderExternalId: true, orderInternalId: true, orderLinkState: true, itemExternalId: true, transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, financialQuality: true, unknownReason: true, currency: true, occurredAt: true, rawPayload: true },
+        }) : [];
+        const legacyById = new Map(legacyRows.map((row) => [row.externalId, row]));
         let created = 0;
         let updated = 0;
         const errors: string[] = [];
 
         for (const transaction of transactions) {
           try {
-            const externalId = financeExternalId(transaction);
+            const identity = lazadaFinanceIdentity(transaction);
+            const externalId = identity.externalId;
             const parsedAmount = parseSourceNumber(transaction.amount, "lazada.finance.amount");
             const exactAmount = toExactMinorUnits(transaction.amount);
             const occurredAt = lazadaSourceDate(transaction.transaction_date, shop.countryCode);
-            const orderExternalId = typeof transaction.order_no === "string" && transaction.order_no.trim() ? transaction.order_no.trim() : null;
+            const orderExternalId = identity.orderNumber;
             const orderInternalId = orderExternalId ? orderLinks.get(orderExternalId) ?? null : null;
             const data = {
               statementExternalId: documentedStatementReference(transaction.statement),
               orderExternalId,
               orderInternalId,
               orderLinkState: orderExternalId ? orderInternalId ? "linked" : "unmatched" : "not_applicable",
-              itemExternalId: typeof transaction.orderItem_no === "string" ? transaction.orderItem_no : null,
+              itemExternalId: identity.lineNumber,
               transactionType: typeof transaction.transaction_type === "string" ? transaction.transaction_type : null,
-              feeType: typeof transaction.fee_type === "string" ? transaction.fee_type : null,
+              feeType: identity.feeType,
               feeName: typeof transaction.fee_name === "string" ? transaction.fee_name : null,
               amountMinor: exactAmount?.amountMinor ?? null,
               amountScale: exactAmount?.amountScale ?? 2,
@@ -563,24 +562,38 @@ export async function syncLazadaFinance(
               unknownReason: parsedAmount.unknownReason,
               sourceObservedAt: new Date(),
               occurredAt: occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null,
-              rawPayload: sanitizeMarketplaceRawPayload(transaction),
+              rawPayload: sanitizeMarketplaceRawPayload({ ...transaction, shelfaware_identity_basis: "transaction_number+fee_type+order_no+orderItem_no" }),
             };
-            const existing = await prisma.marketplaceFinancialRecord.findUnique({
+            let existing = await prisma.marketplaceFinancialRecord.findUnique({
               where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
               select: { id: true, statementExternalId: true, orderExternalId: true, orderInternalId: true, orderLinkState: true, itemExternalId: true, transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, financialQuality: true, unknownReason: true, currency: true, occurredAt: true, rawPayload: true },
             });
-            await prisma.marketplaceFinancialRecord.upsert({
+            const legacy = legacyById.get(identity.transactionNumber);
+            let migratedLegacy = false;
+            if (legacy) {
+              const raw = legacy.rawPayload && typeof legacy.rawPayload === "object" && !Array.isArray(legacy.rawPayload) ? legacy.rawPayload as Record<string, unknown> : {};
+              const legacyIdentity = lazadaFinanceIdentity({ transaction_number: legacy.externalId, fee_type: legacy.feeType ?? raw.fee_type, order_no: legacy.orderExternalId ?? raw.order_no, orderItem_no: legacy.itemExternalId ?? raw.orderItem_no });
+              if (!legacyIdentity.feeType && identity.feeType) throw new LazadaProviderError("INCONSISTENT_LEGACY_FINANCE_IDENTITY", 502);
+              if (legacyIdentity.externalId === externalId) {
+                if (existing && existing.id !== legacy.id) throw new LazadaProviderError("INCONSISTENT_LEGACY_FINANCE_DUPLICATE", 502);
+                await prisma.marketplaceFinancialRecord.update({ where: { id: legacy.id }, data: { externalId, ...data } });
+                existing = legacy;
+                migratedLegacy = true;
+                legacyById.delete(identity.transactionNumber);
+              }
+            }
+            if (!migratedLegacy) await prisma.marketplaceFinancialRecord.upsert({
               where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
-              create: { userId, platform: "lazada", shopId: shop.id, externalId, ...data },
-              update: data,
+              create: { userId, platform: "lazada", shopId: shop.id, externalId, ...data }, update: data,
             });
             if (existing) {
               updated++;
-              if (financeSourceChanged(existing, data)) {
+              if (migratedLegacy || financeSourceChanged(existing, data)) {
                 await invalidateLazadaStatementReconciliations({ userId, shopId: shop.id, statementExternalIds: [existing.statementExternalId, data.statementExternalId] });
               }
             } else created++;
           } catch (error) {
+            if (error instanceof LazadaProviderError) throw error;
             const message = error instanceof Error ? error.message : String(error);
             errors.push(`Transaction ${String(transaction.transaction_number ?? "unknown")}: ${message}`);
             logger.warn(`[Lazada Finance Sync] Failed to store transaction: ${message}`);

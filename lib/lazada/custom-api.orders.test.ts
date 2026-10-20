@@ -63,4 +63,18 @@ describe("Lazada bounded provider reads", () => {
       expect(JSON.stringify(warning.mock.calls)).not.toContain("private-value");
     } finally { warning.mockRestore(); }
   });
+  it("retains different source fee types under the same commercial transaction number", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [
+      { transaction_number: "shared-source", fee_type: "13", fee_name: "Item Price Credit", amount: "20.00" },
+      { transaction_number: "shared-source", fee_type: "14", fee_name: "Commission", amount: "-2.00" },
+    ] }) }));
+    expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toHaveLength(2);
+  });
+  it("treats numeric and string representations of component identifiers as the same observation", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [
+      { transaction_number: "source", fee_type: 13, order_no: 10, orderItem_no: 11, amount: "20.00" },
+      { transaction_number: "source", fee_type: "13", order_no: "10", orderItem_no: "11", amount: "20.00" },
+    ] }) }));
+    expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toHaveLength(1);
+  });
 });

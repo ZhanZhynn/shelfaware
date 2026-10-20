@@ -429,7 +429,7 @@ export async function getFinanceTransactionDetailsCustom(
         sourceIdType: lazadaResponseShape(sourceId),
         fields: Object.keys(row).filter((key) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)).slice(0, 40),
       });
-      throw new LazadaProviderError("MISSING_FINANCE_TRANSACTION_ID", 502, data.request_id);
+      throw new LazadaProviderError("MISSING_FINANCE_TRANSACTION_ID", 502, data.request_id, Object.keys(row));
     }
     return { ...row, transaction_number: transactionNumber };
   });
@@ -444,22 +444,25 @@ export async function getAllFinanceTransactionDetailsCustom(
   const pageSize = 500;
   let offset = 0;
 
-  const seen = new Map<string, string>();
+  // Provider status/descriptive metadata can change between observations of one
+  // posting. Only conflicting financial facts make an identity ambiguous.
+  const financialFields = ["amount", "currency", "transaction_date", "order_no", "orderItem_no", "transaction_type", "fee_type", "fee_name", "statement", "VAT_in_amount", "WHT_amount", "WHT_included_in_amount", "payment_ref_id"];
+  const seen = new Map<string, { fingerprint: string; index: number }>();
   while (offset < 500_000) {
     const page = await getFinanceTransactionDetailsCustom(context, { ...params, offset, limit: pageSize });
     const previousCount = transactions.length;
     for (const row of page) {
       const id = row.transaction_number!;
-      const fingerprint = createHash("sha256").update(JSON.stringify(Object.fromEntries(Object.entries(row).sort(([a], [b]) => a.localeCompare(b))))).digest("hex");
+      const fingerprint = createHash("sha256").update(JSON.stringify(financialFields.map((field) => row[field] ?? null))).digest("hex");
       const previous = seen.get(id);
-      if (previous && previous !== fingerprint) {
-        const first = transactions.find((item) => item.transaction_number === id)!;
-        const fields = [...new Set([...Object.keys(first), ...Object.keys(row)])].filter((key) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) && JSON.stringify(first[key]) !== JSON.stringify(row[key])).slice(0, 40);
+      if (previous && previous.fingerprint !== fingerprint) {
+        const first = transactions[previous.index]!;
+        const fields = financialFields.filter((key) => JSON.stringify(first[key] ?? null) !== JSON.stringify(row[key] ?? null));
         console.warn("Lazada finance source identity conflict", { offset, differingFields: fields });
-        throw new LazadaProviderError("INCONSISTENT_FINANCE_TRANSACTION_ID", 502);
+        throw new LazadaProviderError("INCONSISTENT_FINANCE_TRANSACTION_ID", 502, undefined, fields);
       }
-      if (previous) continue; // Identical source-ID observations are not new money.
-      seen.set(id, fingerprint);
+      if (previous) { transactions[previous.index] = row; continue; }
+      seen.set(id, { fingerprint, index: transactions.length });
       transactions.push(row);
     }
     if (page.length < pageSize) break;

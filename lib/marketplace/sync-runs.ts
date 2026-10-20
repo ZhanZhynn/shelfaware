@@ -360,13 +360,21 @@ export async function checkpointMarketplaceSyncTask(input: {
   return settled;
 }
 
-export async function retryMarketplaceSyncTask(id: string, workerId: string, error: string, now = new Date()) {
+type SyncProviderDiagnostic = { code: string; requestId: string | null; fields: string[] };
+
+function safeProviderDiagnostic(value?: SyncProviderDiagnostic) {
+  if (!value) return {};
+  const atom = (entry: string | null) => entry && /^[A-Za-z0-9_.:-]{1,160}$/.test(entry) ? entry : null;
+  return { provider: { code: atom(value.code), requestId: atom(value.requestId), fields: value.fields.filter((field) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(field)).slice(0, 40) } };
+}
+
+export async function retryMarketplaceSyncTask(id: string, workerId: string, error: string, now = new Date(), provider?: SyncProviderDiagnostic) {
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
   if (!task) return { settled: false as const };
   const code = marketplaceSyncErrorCode(error);
   const exhausted = task.attempts >= MAX_MARKETPLACE_SYNC_ATTEMPTS;
   const errors = Array.isArray(task.errors) ? task.errors.slice(-4) : [];
-  errors.push({ at: now.toISOString(), code });
+  errors.push({ at: now.toISOString(), code, ...safeProviderDiagnostic(provider) });
   const settled = await prisma.$transaction(async (tx) => {
     const result = await tx.marketplaceSyncTask.updateMany({
       where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } },
@@ -389,12 +397,12 @@ export async function retryMarketplaceSyncTask(id: string, workerId: string, err
   return settled;
 }
 
-export async function failMarketplaceSyncTask(id: string, workerId: string, error: string, now = new Date()) {
+export async function failMarketplaceSyncTask(id: string, workerId: string, error: string, now = new Date(), provider?: SyncProviderDiagnostic) {
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
   if (!task) return { settled: false as const };
   const code = marketplaceSyncErrorCode(error);
   const settled = await prisma.$transaction(async (tx) => {
-    const result = await tx.marketplaceSyncTask.updateMany({ where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } }, data: { status: "failed", completedAt: now, nextAttemptAt: null, lastError: code, errors: [{ at: now.toISOString(), code }] as Prisma.InputJsonArray, leaseOwner: null, leaseExpiresAt: null } });
+    const result = await tx.marketplaceSyncTask.updateMany({ where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } }, data: { status: "failed", completedAt: now, nextAttemptAt: null, lastError: code, errors: [{ at: now.toISOString(), code, ...safeProviderDiagnostic(provider) }] as Prisma.InputJsonArray, leaseOwner: null, leaseExpiresAt: null } });
     if (result.count !== 1) return { settled: false as const };
     if (task.required) await tx.marketplaceSyncTask.updateMany({ where: { runId: task.runId, sequence: { gt: task.sequence }, status: { in: ["pending", "retrying"] } }, data: { status: "cancelled", completedAt: now, lastError: "BLOCKED_BY_REQUIRED_TASK" } });
     const tasks = await tx.marketplaceSyncTask.findMany({ where: { runId: task.runId }, orderBy: { sequence: "asc" } });

@@ -48,8 +48,10 @@ describe("Lazada bounded provider reads", () => {
     const first = { transaction_number: "source-1", amount: "7.93", fee_name: "Reversal Commission" };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [first, { ...first }] }) }));
     expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toHaveLength(1);
+    vi.mocked(fetch).mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [{ ...first, paid_status: "No" }, { ...first, paid_status: "Yes" }] }) } as Response);
+    expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toMatchObject([{ paid_status: "Yes" }]);
     vi.mocked(fetch).mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [first, { ...first, amount: "8.00" }] }) } as Response);
-    await expect(getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).rejects.toMatchObject({ code: "INCONSISTENT_FINANCE_TRANSACTION_ID" });
+    await expect(getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).rejects.toMatchObject({ code: "INCONSISTENT_FINANCE_TRANSACTION_ID", fields: ["amount"] });
   });
   it("normalizes numeric finance IDs and reports missing identities without logging source values", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [{ transaction_number: 123, amount: "1.00" }] }) }));

@@ -1,12 +1,14 @@
 export class LazadaProviderError extends Error {
   readonly code: string;
   readonly providerRequestId: string | null;
-  constructor(code: unknown, readonly status: number, requestId?: unknown) {
+  readonly fields: string[];
+  constructor(code: unknown, readonly status: number, requestId?: unknown, fields: readonly string[] = []) {
     const safe = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,160}$/.test(value) ? value : null;
     const sourceCode = typeof code === "string" || typeof code === "number" ? safe(String(code)) : null;
     super(`Lazada provider failure: ${sourceCode ?? "UNKNOWN"}`);
     this.code = sourceCode ?? "UNKNOWN";
     this.providerRequestId = safe(requestId);
+    this.fields = fields.filter((field) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(field)).slice(0, 40);
   }
 }
 

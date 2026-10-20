@@ -60,7 +60,7 @@ describe("dispatchMarketplaceSyncTask", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toEqual({ status: "failed" });
-      expect(mocks.fail).toHaveBeenCalledWith("a".repeat(24), "worker-a", "LAZADA_MALFORMED_FINANCE_NULL");
+      expect(mocks.fail).toHaveBeenCalledWith("a".repeat(24), "worker-a", "LAZADA_MALFORMED_FINANCE_NULL", undefined, { code: "MALFORMED_FINANCE_NULL", requestId: "fixture-request", fields: [] });
       expect(mocks.retry).not.toHaveBeenCalled();
       expect(mocks.checkpoint).not.toHaveBeenCalled();
       expect(warning).toHaveBeenCalledWith("Marketplace provider task failure", expect.objectContaining({ providerCode: "MALFORMED_FINANCE_NULL", providerRequestId: "fixture-request" }));
@@ -74,7 +74,7 @@ describe("dispatchMarketplaceSyncTask", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toMatchObject({ status: "retrying" });
-      expect(mocks.retry).toHaveBeenCalledWith("a".repeat(24), "worker-a", "LAZADA_SELLERCALLLIMIT");
+      expect(mocks.retry).toHaveBeenCalledWith("a".repeat(24), "worker-a", "LAZADA_SELLERCALLLIMIT", undefined, { code: "SellerCallLimit", requestId: null, fields: [] });
       expect(mocks.fail).not.toHaveBeenCalled();
     } finally { warning.mockRestore(); }
   });

@@ -139,12 +139,13 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
   } catch (error) {
     if (error instanceof LazadaProviderError) {
       const failure = lazadaSyncFailure(error);
+      const provider = { code: error.code, requestId: error.providerRequestId, fields: error.fields };
       console.warn("Marketplace provider task failure", { taskId: id, platform: task.platform, providerCode: error.code, providerRequestId: error.providerRequestId, httpStatus: error.status, retryable: failure.retryable });
       if (!failure.retryable) {
-        const settled = await failMarketplaceSyncTask(id, workerId, failure.code);
+        const settled = await failMarketplaceSyncTask(id, workerId, failure.code, undefined, provider);
         return settled.settled ? { status: "failed" } : { status: "skipped" };
       }
-      const settled = await retryMarketplaceSyncTask(id, workerId, failure.code);
+      const settled = await retryMarketplaceSyncTask(id, workerId, failure.code, undefined, provider);
       if (!settled.settled) return { status: "skipped" };
       return settled.status === "retrying" ? { status: "retrying", nextTaskId: settled.nextTaskId, nextAttemptAt: settled.nextAttemptAt } : { status: "failed" };
     }

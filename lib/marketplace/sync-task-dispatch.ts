@@ -1,5 +1,6 @@
 import { cacheKeys, invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { syncShopeeAds, syncShopeeOrders, syncShopeePayoutStatements, syncShopeeProducts, syncShopeeReturns } from "@/lib/shopee";
+import { syncLazadaOrders, syncLazadaFinance, syncLazadaPayoutStatements } from "@/lib/lazada";
 import { prisma } from "@/prisma/client";
 import {
   checkpointMarketplaceSyncTask,
@@ -32,7 +33,8 @@ const ORDER_LOOKBACK_SECONDS = 15 * ORDER_WINDOW_SECONDS;
 type SyncWindow = { from: number; to: number; end: number; windowsCompleted: number; windowSeconds: number; inclusive: boolean };
 
 function taskWindow(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, now: Date): SyncWindow | undefined {
-  const windowSeconds = task.stream === "orders_and_escrow" ? ORDER_WINDOW_SECONDS
+  const windowSeconds = task.platform === "lazada" && ["orders", "finance"].includes(task.stream) ? ORDER_WINDOW_SECONDS
+    : task.stream === "orders_and_escrow" ? ORDER_WINDOW_SECONDS
     : task.stream === "returns" || task.stream === "payouts" ? FINANCIAL_WINDOW_SECONDS
       : undefined;
   if (!windowSeconds) return undefined;
@@ -85,11 +87,24 @@ async function runShopeeTask(task: NonNullable<Awaited<ReturnType<typeof getClai
   }
 }
 
-/** Claim, execute, and settle one bounded Shopee stream task. */
+async function runLazadaTask(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, window?: SyncWindow) {
+  if (!window) throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
+  const shop = await prisma.lazadaShop.findUnique({ where: { id: task.shopId }, select: { sellerId: true, userId: true } });
+  if (!shop) throw new PermanentTaskDispatchError("SHOP_NOT_FOUND");
+  const range = { from: new Date(window.from * 1000).toISOString(), to: new Date(window.to * 1000).toISOString() };
+  switch (task.stream) {
+    case "orders": return syncLazadaOrders(shop.sellerId, shop.userId, range, task.run.requestedByUserId);
+    case "finance": return syncLazadaFinance(shop.sellerId, shop.userId, range, task.run.requestedByUserId);
+    case "payouts": return syncLazadaPayoutStatements(shop.sellerId, shop.userId, range, task.run.requestedByUserId);
+    default: throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
+  }
+}
+
+/** Claim, execute, and settle one provider-safe, checkpointed stream window. */
 export async function dispatchMarketplaceSyncTask(id: string, workerId: string, now = new Date()): Promise<MarketplaceSyncTaskDispatchResult> {
   if (!(await claimMarketplaceSyncTask(id, workerId, now))) return { status: "skipped" };
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
-  if (!task || task.platform !== "shopee" || !["all", "orders", "finance", "returns", "payouts"].includes(task.run.syncType)) {
+  if (!task || !["shopee", "lazada"].includes(task.platform) || !["all", "orders", "finance", "returns", "payouts"].includes(task.run.syncType)) {
     await failMarketplaceSyncTask(id, workerId, "TASK_STREAM_UNSUPPORTED", now);
     return { status: "failed" };
   }
@@ -99,10 +114,11 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     // cannot settle after it loses its durable four-minute lease.
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
     const window = taskWindow(task, now);
-    const result = await runShopeeTask(task, window);
+    const result = task.platform === "lazada" ? await runLazadaTask(task, window) : await runShopeeTask(task, window);
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
     if (result.errors.length) throw new Error("PROVIDER_RETURNED_ERRORS");
-    await Promise.all([invalidateCache(cacheKeys.shopee.pattern), invalidateMarketplaceAnalytics("shopee")]);
+    const platform = task.platform as "shopee" | "lazada";
+    await Promise.all([invalidateCache(cacheKeys[platform].pattern), invalidateMarketplaceAnalytics(platform)]);
     if (window && window.to < window.end) {
       const metrics = windowMetrics(task.metrics, window, result);
       const checkpointed = await checkpointMarketplaceSyncTask({

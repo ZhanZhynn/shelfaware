@@ -4,7 +4,11 @@ import { prisma } from "@/prisma/client";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import { getTransientShopeeSDK } from "@/lib/shopee/server";
 import { createLazadaShopContext } from "@/lib/lazada/server";
-import { getOrdersCustom, getProductsCustom } from "@/lib/lazada/custom-api";
+import { getOrdersPageCustom, getMultipleOrderItemsCustom, getProductsCustom } from "@/lib/lazada/custom-api";
+import { LazadaProviderError, lazadaIdentifier } from "@/lib/lazada/provider-error";
+import { lazadaOrderStatus, lazadaRevenue } from "@/lib/lazada/status";
+import { lazadaOrderFacts } from "@/lib/lazada/order-facts";
+import { lazadaSourceDate } from "@/lib/lazada/time";
 import { searchOrders, searchProducts } from "@/lib/tiktok/custom-api";
 import { shopifyGraphQL } from "@/lib/shopify/server";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
@@ -41,12 +45,19 @@ export type LiveListResult = { data: Array<Record<string, unknown>>; page: { lim
 export class MarketplaceLiveValidationError extends Error {}
 export class MarketplaceLiveNotFoundError extends Error {}
 export class MarketplaceLiveProviderError extends Error {
-  constructor(readonly code: "LIVE_PROVIDER_AUTH_REQUIRED" | "LIVE_PROVIDER_RATE_LIMITED" | "LIVE_PROVIDER_TEMPORARY" | "LIVE_PROVIDER_UNSUPPORTED", readonly retryable: boolean, readonly retryAfterSeconds?: number) {
+  constructor(readonly code: "LIVE_PROVIDER_AUTH_REQUIRED" | "LIVE_PROVIDER_RATE_LIMITED" | "LIVE_PROVIDER_TEMPORARY" | "LIVE_PROVIDER_UNSUPPORTED" | "LIVE_PROVIDER_INVALID_QUERY", readonly retryable: boolean, readonly retryAfterSeconds?: number, readonly provider?: { code: string; requestId: string | null }) {
     super(code);
   }
 }
 
 export function classifyLiveProviderError(error: unknown) {
+  if (error instanceof LazadaProviderError) {
+    const provider = { code: error.code, requestId: error.providerRequestId };
+    if (error.status === 401 || error.status === 403 || /IllegalAccessToken|InvalidAccessToken|AccessDenied|Unauthorized|MissingAccessToken/i.test(error.code)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_AUTH_REQUIRED", false, undefined, provider);
+    if (error.status === 429 || /SellerCallLimit|RateLimit|TooManyRequests/i.test(error.code)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_RATE_LIMITED", true, 60, provider);
+    if (error.status === 400 || /Parameter|MissingParameter|InvalidDate/i.test(error.code)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_INVALID_QUERY", false, undefined, provider);
+    return new MarketplaceLiveProviderError("LIVE_PROVIDER_TEMPORARY", true, 30, provider);
+  }
   const status = error && typeof error === "object" && "status" in error ? Number((error as { status?: unknown }).status) : 0;
   const message = error instanceof Error ? error.message : String(error);
   if (status === 401 || status === 403 || /unauthori[sz]ed|forbidden|permission|token.*(?:expired|invalid)/i.test(message)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_AUTH_REQUIRED", false);
@@ -207,9 +218,30 @@ async function shopeeProducts(query: LiveQuery, ownerIds: string[]): Promise<Liv
 async function lazadaOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {
   const shop = await prisma.lazadaShop.findFirst({ where: { id: query.shopId, userId: { in: ownerIds } } });
   if (!shop) throw new MarketplaceLiveNotFoundError("Shop not found");
-  const rows = await getOrdersCustom(createLazadaShopContext(shop), { created_after: query.createdAfter ?? defaultFrom(), created_before: query.createdBefore ?? defaultTo(), status: query.status, limit: query.limit, offset: nextOffset(query.cursor), sort_by: "created_at", sort_direction: "DESC" });
-  const data = rows.map((item) => { const totalAmount = finiteNumber(item.price); const orderStatus = item.statuses?.[0] ?? null; return { shopId: query.shopId, externalId: String(item.order_id), reference: item.order_number || null, status: orderStatus, totalAmount, shippingAmount: finiteNumber(item.shipping_fee), ...liveRevenue(orderStatus, totalAmount), createdAt: item.created_at || null, updatedAt: item.updated_at || null }; });
-  return { data, page: { limit: query.limit, nextCursor: rows.length === query.limit ? String(nextOffset(query.cursor) + rows.length) : null } };
+  if (shop.tokenExpiry && shop.tokenExpiry.getTime() <= Date.now()) throw new MarketplaceLiveProviderError("LIVE_PROVIDER_AUTH_REQUIRED", false);
+  const offset = nextOffset(query.cursor);
+  if (offset >= 5000) throw new MarketplaceLiveValidationError("Lazada's order offset cap was reached; narrow the date window");
+  const context = createLazadaShopContext(shop);
+  const { orders: rows, total } = await getOrdersPageCustom(context, { created_after: query.createdAfter ?? defaultFrom(), created_before: query.createdBefore ?? defaultTo(), status: query.status, limit: query.limit, offset, sort_by: "created_at", sort_direction: "DESC" });
+  if (rows.length < query.limit && total !== null && offset + rows.length < total) throw new LazadaProviderError("INCOMPLETE_PAGINATION", 502);
+  const more = total !== null ? offset + rows.length < total : rows.length === query.limit;
+  if (more && offset + rows.length >= 5000) throw new MarketplaceLiveValidationError("Lazada's order offset cap prevents complete traversal; narrow the date window");
+  const ids = rows.map((row) => lazadaIdentifier(row.order_id));
+  if (new Set(ids).size !== ids.length) throw new LazadaProviderError("MALFORMED_ORDER_IDS", 502);
+  const groupedItems = rows.length ? await getMultipleOrderItemsCustom(context, ids) : [];
+  const byOrder = new Map(groupedItems.map((group) => [lazadaIdentifier(group.order_id), group.order_items]));
+  const data = rows.map((item) => {
+    const totalAmount = finiteNumber(item.price), shippingAmount = finiteNumber(item.shipping_fee);
+    const orderStatus = lazadaOrderStatus(item.statuses);
+    const items = byOrder.get(lazadaIdentifier(item.order_id));
+    const currencies = items?.map((line) => line.currency?.trim().toUpperCase() ?? "") ?? [];
+    const currency = currencies.length && currencies.every((value) => /^[A-Z]{3}$/.test(value) && value === currencies[0]) ? currencies[0] : null;
+    return { shopId: query.shopId, externalId: String(item.order_id), reference: item.order_number || null, status: orderStatus,
+      totalAmount, shippingAmount, currency, ...lazadaRevenue(orderStatus, totalAmount),
+      ...lazadaOrderFacts(totalAmount, shippingAmount, items?.map((line) => ({ externalLineId: String(line.order_item_id), paidPrice: finiteNumber(line.paid_price), quantity: null })) ?? null, item),
+      createdAt: lazadaSourceDate(item.created_at, shop.countryCode)?.toISOString() ?? null, updatedAt: lazadaSourceDate(item.updated_at, shop.countryCode)?.toISOString() ?? null };
+  });
+  return { data, page: { limit: query.limit, nextCursor: more ? String(offset + rows.length) : null } };
 }
 
 async function lazadaProducts(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {

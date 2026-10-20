@@ -9,6 +9,8 @@ import type { LazadaShopContext } from "./server";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { createHmac } from "crypto";
+import { lazadaCalendarDate, lazadaTimestamp } from "./time";
+import { assertLazadaSuccess, LazadaProviderError, lazadaIdentifier } from "./provider-error";
 
 /**
  * Convert Unix timestamp (milliseconds) to ISO 8601 format.
@@ -161,13 +163,9 @@ export async function getProductsCustom(
   const response = await fetch(url);
   const data: GetProductsResponse = await response.json();
 
-  if (data.code !== "0") {
-    const errorMsg = data.data?.toString() || `API error code: ${data.code}`;
-    logger.error(`[Lazada Custom API] GetProducts failed: ${errorMsg}`);
-    throw new Error(`Lazada API error: ${errorMsg}`);
-  }
-
-  return data.data?.products || [];
+  assertLazadaSuccess(data, response.status);
+  if (!Array.isArray(data.data?.products)) throw new LazadaProviderError("MALFORMED_PRODUCTS", 502, data.request_id);
+  return data.data.products;
 }
 
 /**
@@ -239,7 +237,7 @@ export async function getAllProductsCustom(
 // ─── Order API Functions ──────────────────────────────────────────────────
 
 interface LazadaOrder {
-  order_id: number;
+  order_id: number | string;
   order_number: string;
   statuses: string[];
   price: string;
@@ -259,7 +257,7 @@ interface LazadaOrder {
 }
 
 export interface OrderItem {
-  order_item_id: number;
+  order_item_id: number | string;
   item_id: number;
   sku_id: number;
   seller_sku: string;
@@ -301,7 +299,7 @@ interface GetOrdersResponse {
 interface GetOrderItemsResponse {
   code: string;
   data: {
-    order_id: number;
+    order_id: number | string;
     order_items: OrderItem[];
   }[];
   request_id?: string;
@@ -358,22 +356,22 @@ interface GetPayoutStatusResponse {
 
 const FINANCE_MAX_RANGE_MS = 180 * 24 * 60 * 60 * 1000;
 
-function normalizeFinanceDate(value: string | Date, parameter: string): { date: Date; value: string } {
+function normalizeFinanceDate(value: string | Date, parameter: string, countryCode = "my"): { date: Date; value: string } {
   const date = value instanceof Date ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) {
     throw new Error(`Lazada finance ${parameter} must be a valid date.`);
   }
-  const normalized = date.toISOString().slice(0, 10);
+  const normalized = lazadaCalendarDate(value, countryCode);
   return { date: new Date(`${normalized}T00:00:00.000Z`), value: normalized };
 }
 
 /** Lazada rejects finance query windows that are 180 days or longer. */
-export function validateFinanceDateRange(startTime: string | Date, endTime: string | Date): {
+export function validateFinanceDateRange(startTime: string | Date, endTime: string | Date, countryCode = "my"): {
   startTime: string;
   endTime: string;
 } {
-  const start = normalizeFinanceDate(startTime, "start_time");
-  const end = normalizeFinanceDate(endTime, "end_time");
+  const start = normalizeFinanceDate(startTime, "start_time", countryCode);
+  const end = normalizeFinanceDate(endTime, "end_time", countryCode);
   const range = end.date.getTime() - start.date.getTime();
   if (range < 0) throw new Error("Lazada finance end_time must not be before start_time.");
   if (range >= FINANCE_MAX_RANGE_MS) {
@@ -395,7 +393,7 @@ export async function getFinanceTransactionDetailsCustom(
 
   if (!context.accessToken) throw new Error("Lazada shop access token is missing.");
 
-  const { startTime, endTime } = validateFinanceDateRange(params.start_time, params.end_time);
+  const { startTime, endTime } = validateFinanceDateRange(params.start_time, params.end_time, context.countryCode);
   const path = "/finance/transaction/details/get";
   const requestParams: Record<string, string> = {
     app_key: appKey,
@@ -418,12 +416,9 @@ export async function getFinanceTransactionDetailsCustom(
   const response = await fetch(`${getLazadaEndpoint(context.countryCode)}${path}?${queryString}&sign=${signature}`);
   const data: GetFinanceTransactionDetailsResponse = await response.json();
 
-  if (String(data.code) !== "0") {
-    const errorMsg = data.msg || data.message || (typeof data.data === "string" ? data.data : undefined) || `API error code: ${data.code}`;
-    logger.error(`[Lazada Custom API] GetFinanceTransactionDetails failed: ${errorMsg}`);
-    throw new Error(`Lazada API error: ${errorMsg}`);
-  }
-  return Array.isArray(data.data) ? data.data : [];
+  assertLazadaSuccess(data, response.status);
+  if (!Array.isArray(data.data)) throw new LazadaProviderError("MALFORMED_FINANCE", 502, data.request_id);
+  return data.data;
 }
 
 /** Fetch all finance transaction pages using Lazada's documented 500-row limit. */
@@ -435,11 +430,17 @@ export async function getAllFinanceTransactionDetailsCustom(
   const pageSize = 500;
   let offset = 0;
 
-  while (true) {
+  const seen = new Set<string>();
+  while (offset < 500_000) {
     const page = await getFinanceTransactionDetailsCustom(context, { ...params, offset, limit: pageSize });
+    for (const row of page) {
+      if (!row.transaction_number || seen.has(row.transaction_number)) throw new Error("Lazada finance pagination returned a missing or duplicate transaction ID");
+      seen.add(row.transaction_number);
+    }
     transactions.push(...page);
     if (page.length < pageSize) break;
     offset += pageSize;
+    if (offset >= 500_000) throw new Error("Lazada finance pagination exceeded its bounded record budget");
   }
 
   logger.info(`[Lazada Custom API] Total finance transactions fetched: ${transactions.length}`);
@@ -645,7 +646,7 @@ export async function getPayoutStatusCustom(
     sign_method: "sha256",
     timestamp: String(Date.now()),
     access_token: context.accessToken,
-    created_after: date.toISOString().slice(0, 10),
+    created_after: lazadaCalendarDate(createdAfter, context.countryCode),
   };
   const signature = createSignature(path, requestParams, appSecret);
   const queryString = Object.entries(requestParams)
@@ -654,12 +655,9 @@ export async function getPayoutStatusCustom(
   const response = await fetch(`${getLazadaEndpoint(context.countryCode)}${path}?${queryString}&sign=${signature}`);
   const data: GetPayoutStatusResponse = await response.json();
 
-  if (String(data.code) !== "0") {
-    const errorMsg = data.msg || data.message || (typeof data.data === "string" ? data.data : undefined) || `API error code: ${data.code}`;
-    logger.error(`[Lazada Custom API] GetPayoutStatus failed: ${errorMsg}`);
-    throw new Error(`Lazada API error: ${errorMsg}`);
-  }
-  return Array.isArray(data.data) ? data.data : [];
+  assertLazadaSuccess(data, response.status);
+  if (!Array.isArray(data.data)) throw new LazadaProviderError("MALFORMED_PAYOUTS", 502, data.request_id);
+  return data.data;
 }
 
 /**
@@ -669,10 +667,10 @@ export async function getPayoutStatusCustom(
  * @param params - Query parameters (created_after or update_after is mandatory)
  * @returns Array of orders
  */
-export async function getOrdersCustom(
+export async function getOrdersPageCustom(
   context: LazadaShopContext,
   params: GetOrdersParams = {},
-): Promise<LazadaOrder[]> {
+): Promise<{ orders: LazadaOrder[]; total: number | null }> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
   const appSecret = getEnvVar("LAZADA_APP_SECRET");
 
@@ -694,16 +692,16 @@ export async function getOrdersCustom(
 
   // Add optional parameters
   if (params.created_after) {
-    requestParams.created_after = params.created_after;
+    requestParams.created_after = lazadaTimestamp(params.created_after);
   }
   if (params.created_before) {
-    requestParams.created_before = params.created_before;
+    requestParams.created_before = lazadaTimestamp(params.created_before);
   }
   if (params.update_after) {
-    requestParams.update_after = params.update_after;
+    requestParams.update_after = lazadaTimestamp(params.update_after);
   }
   if (params.update_before) {
-    requestParams.update_before = params.update_before;
+    requestParams.update_before = lazadaTimestamp(params.update_before);
   }
   if (params.status) {
     requestParams.status = params.status;
@@ -731,13 +729,17 @@ export async function getOrdersCustom(
   const response = await fetch(url);
   const data: GetOrdersResponse = await response.json();
 
-  if (data.code !== "0") {
-    const errorMsg = data.data?.toString() || `API error code: ${data.code}`;
-    logger.error(`[Lazada Custom API] GetOrders failed: ${errorMsg}`);
-    throw new Error(`Lazada API error: ${errorMsg}`);
-  }
+  assertLazadaSuccess(data, response.status);
+  if (!Array.isArray(data.data?.orders)) throw new LazadaProviderError("MALFORMED_ORDERS", 502, data.request_id);
+  const rawTotal = data.data.countTotal;
+  const parsedTotal = typeof rawTotal === "number" || (typeof rawTotal === "string" && rawTotal.trim()) ? Number(rawTotal) : NaN;
+  const total = Number.isSafeInteger(parsedTotal) && parsedTotal >= 0 ? parsedTotal : null;
+  if (total !== null && total < (params.offset ?? 0) + data.data.orders.length) throw new LazadaProviderError("INCONSISTENT_ORDER_TOTAL", 502, data.request_id);
+  return { orders: data.data.orders.map((order) => ({ ...order, order_id: lazadaIdentifier(order.order_id) })), total };
+}
 
-  return data.data?.orders || [];
+export async function getOrdersCustom(context: LazadaShopContext, params: GetOrdersParams = {}): Promise<LazadaOrder[]> {
+  return (await getOrdersPageCustom(context, params)).orders;
 }
 
 /**
@@ -759,14 +761,24 @@ export async function getAllOrdersCustom(
 
   logger.info(`[Lazada Custom API] Fetching all orders`);
 
-  while (offset < 5000) { // Max offset per API docs
-    const orders = await getOrdersCustom(context, {
+  const seen = new Set<string>();
+  while (offset < 5000) { // Fail explicitly if the provider offset cap prevents complete traversal.
+    const pageResult = await getOrdersPageCustom(context, {
       ...params,
       offset,
       limit: pageSize,
     });
 
-    if (orders.length === 0) break;
+    const { orders, total } = pageResult;
+    if (orders.length === 0) {
+      if (total !== null && allOrders.length < total) throw new Error("Lazada returned incomplete order pagination");
+      break;
+    }
+    for (const order of orders) {
+      const id = String(order.order_id ?? "");
+      if (!id || seen.has(id)) throw new Error("Lazada order pagination returned a missing or duplicate order ID");
+      seen.add(id);
+    }
 
     allOrders.push(...orders);
     page++;
@@ -776,9 +788,13 @@ export async function getAllOrdersCustom(
     );
 
     // If we got fewer than pageSize, we've reached the end
-    if (orders.length < pageSize) break;
+    if (orders.length < pageSize) {
+      if (total !== null && allOrders.length < total) throw new Error("Lazada returned incomplete order pagination");
+      break;
+    }
 
     offset += pageSize;
+    if (offset >= 5000 && (total === null || allOrders.length < total)) throw new Error("Lazada order offset cap reached; narrow the synchronization window");
   }
 
   logger.info(`[Lazada Custom API] Total orders fetched: ${allOrders.length}`);
@@ -794,8 +810,8 @@ export async function getAllOrdersCustom(
  */
 export async function getMultipleOrderItemsCustom(
   context: LazadaShopContext,
-  orderIds: number[],
-): Promise<Array<{ order_id: number; order_items: OrderItem[] }>> {
+  orderIds: Array<number | string>,
+): Promise<Array<{ order_id: number | string; order_items: OrderItem[] }>> {
   const appKey = getEnvVar("LAZADA_APP_KEY");
   const appSecret = getEnvVar("LAZADA_APP_SECRET");
 
@@ -812,7 +828,7 @@ export async function getMultipleOrderItemsCustom(
     sign_method: "sha256",
     timestamp: String(Date.now()),
     access_token: context.accessToken,
-    order_ids: `[${orderIds.join(",")}]`,
+    order_ids: `[${orderIds.map(lazadaIdentifier).join(",")}]`,
   };
 
   const signature = createSignature(path, requestParams, appSecret);
@@ -825,11 +841,10 @@ export async function getMultipleOrderItemsCustom(
   const response = await fetch(url);
   const data: GetOrderItemsResponse = await response.json();
 
-  if (data.code !== "0") {
-    const errorMsg = data.data?.toString() || `API error code: ${data.code}`;
-    logger.error(`[Lazada Custom API] GetMultipleOrderItems failed: ${errorMsg}`);
-    throw new Error(`Lazada API error: ${errorMsg}`);
-  }
-
-  return Array.isArray(data.data) ? data.data : [];
+  assertLazadaSuccess(data, response.status);
+  if (!Array.isArray(data.data)) throw new LazadaProviderError("MALFORMED_ORDER_ITEMS", 502, data.request_id);
+  return data.data.map((group) => {
+    if (!Array.isArray(group.order_items)) throw new LazadaProviderError("MALFORMED_ORDER_ITEMS", 502, data.request_id);
+    return { ...group, order_id: lazadaIdentifier(group.order_id), order_items: group.order_items.map((item) => ({ ...item, order_item_id: lazadaIdentifier(item.order_item_id) })) };
+  });
 }

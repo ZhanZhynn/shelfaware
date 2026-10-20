@@ -12,7 +12,7 @@ import {
   MarketplaceSyncJobNotFoundError,
 } from "@/lib/marketplace/sync-jobs";
 import { enqueueMarketplaceSyncJob } from "@/lib/marketplace/sync-enqueue";
-import { createShopeeAllSyncRun, createShopeeBoundedSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
+import { createShopeeAllSyncRun, createShopeeBoundedSyncRun, createLazadaBoundedSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
@@ -34,7 +34,8 @@ function dateRangeError(platform: string, syncType: string, input: Record<string
   const hasDateFrom = input && Object.hasOwn(input, "dateFrom");
   const hasDateTo = input && Object.hasOwn(input, "dateTo");
   if (!hasDateFrom && !hasDateTo) return null;
-  if (platform !== "shopee" || !["orders", "finance", "returns", "payouts", "all"].includes(syncType)) return "Date ranges are not supported for this platform or sync type";
+  const supported = platform === "shopee" ? ["orders", "finance", "returns", "payouts", "all"] : platform === "lazada" ? ["orders", "finance", "payouts", "all"] : [];
+  if (!supported.includes(syncType)) return "Date ranges are not supported for this platform or sync type";
   const dateFrom = input?.dateFrom;
   const dateTo = input?.dateTo;
   if (typeof dateFrom !== "string" || typeof dateTo !== "string" || !rfc3339WithOffset.test(dateFrom) || !rfc3339WithOffset.test(dateTo) || !dateTimeSchema.safeParse(dateFrom).success || !dateTimeSchema.safeParse(dateTo).success) return "dateFrom and dateTo must be paired RFC3339 timestamps with an offset";
@@ -82,6 +83,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const rangeError = dateRangeError(platform, body.syncType, body.input);
     if (rangeError) return failure(requestId, "INVALID_DATE_RANGE", rangeError, 422);
     await assertMarketplaceSyncShop(platform as MarketplacePlatform, body.shopId, actor.user);
+    if (platform === "lazada" && body.input && Object.hasOwn(body.input, "dateFrom")) {
+      const result = await createLazadaBoundedSyncRun({ shopId: body.shopId, requestedByUserId: actor.user.id,
+        syncType: body.syncType as "orders" | "finance" | "payouts" | "all", idempotencyKey, input: body.input as MarketplaceSyncInput });
+      const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
+      return NextResponse.json({ apiVersion: "2026-marketplace-v1", data: marketplaceSyncRunResponse(result.run), meta: { requestId, platform, execution: queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced } }, { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+    }
     // The first bounded graph is intentionally narrow. All other platforms and
     // stream-specific requests retain their existing MarketplaceSyncJob path.
     if (platform === "shopee" && body.syncType === "all") {

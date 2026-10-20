@@ -15,7 +15,7 @@ export class MarketplaceFinanceNotFoundError extends Error {}
 type FinanceResource = "financial-records" | "reconciliation-status" | "profit";
 type FinancialRecordsQuery = { shopId: string; limit: number; cursor?: string } & FinanceFilters;
 type ReconciliationStatusQuery = { shopId: string } & FinanceFilters;
-type ProfitQuery = { shopId?: string; dateFrom?: string; dateTo?: string };
+type ProfitQuery = { shopId?: string; dateFrom?: string; dateTo?: string; dateBasis?: "order-created" | "occurred" | "released"; ledgerDateFrom?: string; ledgerDateTo?: string };
 
 const shopId = z.string().regex(objectId, "shopId must be an internal shop ID");
 const financialRecordsSchema = z.object({
@@ -35,6 +35,9 @@ const profitSchema = z.object({
   shopId: shopId.optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
+  dateBasis: z.enum(["order-created", "occurred", "released"]).optional(),
+  ledgerDateFrom: z.string().optional(),
+  ledgerDateTo: z.string().optional(),
 }).strict();
 
 function duplicateQueryKey(params: URLSearchParams) {
@@ -54,6 +57,11 @@ export function parseMarketplaceFinanceQuery(params: URLSearchParams, resource: 
   if (resource === "profit" || resource === "financial-records" || resource === "reconciliation-status") {
     try {
       const dateRange = parseAnalyticsDateRange(params);
+      if (resource === "profit") {
+        const ledgerFrom = params.get("ledgerDateFrom"), ledgerTo = params.get("ledgerDateTo");
+        if (Boolean(ledgerFrom) !== Boolean(ledgerTo)) throw new MarketplaceFinanceValidationError("ledgerDateFrom and ledgerDateTo must be provided together");
+        if (ledgerFrom && ledgerTo) parseAnalyticsDateRange(new URLSearchParams({ dateFrom: ledgerFrom, dateTo: ledgerTo }));
+      }
       if (resource !== "profit") return { ...parsed.data, dateRange } as FinancialRecordsQuery | ReconciliationStatusQuery;
     } catch (error) {
       if (error instanceof AnalyticsValidationError) throw new MarketplaceFinanceValidationError(error.message);
@@ -136,16 +144,23 @@ export async function listMarketplaceFinancialRecords(platform: MarketplacePlatf
     select: {
       id: true, shopId: true, externalId: true, statementExternalId: true, orderExternalId: true, orderInternalId: true, orderLinkState: true, itemExternalId: true,
       transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, amount: true, currency: true,
-      occurredAt: true, sourceObservedAt: true, financialQuality: true, unknownReason: true, createdAt: true, updatedAt: true,
+      occurredAt: true, sourceObservedAt: true, financialQuality: true, unknownReason: true, createdAt: true, updatedAt: true, rawPayload: true,
     },
   });
-  const data = rows.slice(0, query.limit).map((row) => ({
-    ...row,
-    occurredAt: iso(row.occurredAt),
-    sourceObservedAt: iso(row.sourceObservedAt),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  }));
+  const data = rows.slice(0, query.limit).map(({ rawPayload, ...row }) => {
+    const source = rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload) ? rawPayload as Record<string, unknown> : {};
+    const paid = typeof source.paid_status === "string" ? source.paid_status.trim().toLowerCase() : "";
+    return {
+      ...row,
+      // Preserve the documented Yes/No fact without equating it to a verified
+      // release-to-balance event or a bank withdrawal.
+      ...(platform === "lazada" ? { providerPaidStatus: paid === "yes" ? "Yes" : paid === "no" ? "No" : null, releaseStatus: null, releasedAt: null, releaseDateState: "unavailable" } : {}),
+      occurredAt: iso(row.occurredAt),
+      sourceObservedAt: iso(row.sourceObservedAt),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  });
   return {
     data,
     page: {
@@ -164,7 +179,14 @@ export async function getMarketplaceFinanceResult(
 ) {
   if (resource === "financial-records") return listMarketplaceFinancialRecords(platform, query as FinancialRecordsQuery);
   if (resource === "reconciliation-status") return getMarketplaceReconciliationStatus(platform, (query as ReconciliationStatusQuery).shopId, new Date(), query as ReconciliationStatusQuery);
-  return getProfitDetail(platform, user, new URLSearchParams(query as Record<string, string>));
+  const profitQuery = query as ProfitQuery;
+  if (profitQuery.dateBasis && platform !== "lazada") throw new MarketplaceFinanceValidationError("Profit dateBasis is currently supported only for Lazada");
+  try {
+    return await getProfitDetail(platform, user, new URLSearchParams(query as Record<string, string>));
+  } catch (error) {
+    if (error instanceof AnalyticsValidationError) throw new MarketplaceFinanceValidationError(error.message);
+    throw error;
+  }
 }
 
 export type { FinanceResource };

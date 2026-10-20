@@ -5,13 +5,16 @@ const mocks = vi.hoisted(() => ({
   accessibleMarketplaceShops: vi.fn(),
   shopeeOrderFindMany: vi.fn(),
   shopeeReturnFindMany: vi.fn(),
+  lazadaOrderFindMany: vi.fn(),
+  financialRecordFindMany: vi.fn(),
+  reconciliationStatus: vi.fn(),
   getMarketplaceCapabilities: vi.fn(),
   getMarketplaceFinancialReadiness: vi.fn(),
   isFinancialAnalyticsEligible: vi.fn(),
   parseAnalyticsDateRange: vi.fn(),
 }));
 
-vi.mock("@/prisma/client", () => ({ prisma: { shopeeOrder: { findMany: mocks.shopeeOrderFindMany }, shopeeReturn: { findMany: mocks.shopeeReturnFindMany } } }));
+vi.mock("@/prisma/client", () => ({ prisma: { shopeeOrder: { findMany: mocks.shopeeOrderFindMany }, shopeeReturn: { findMany: mocks.shopeeReturnFindMany }, lazadaOrder: { findMany: mocks.lazadaOrderFindMany }, marketplaceFinancialRecord: { findMany: mocks.financialRecordFindMany } } }));
 vi.mock("@/lib/marketplace/access", () => ({ marketplaceOwnerIds: mocks.marketplaceOwnerIds }));
 vi.mock("@/lib/marketplace/shops", () => ({ accessibleMarketplaceShops: mocks.accessibleMarketplaceShops }));
 vi.mock("./capabilities", () => ({
@@ -19,9 +22,11 @@ vi.mock("./capabilities", () => ({
   getMarketplaceFinancialReadiness: mocks.getMarketplaceFinancialReadiness,
 }));
 vi.mock("./server", () => ({
+  AnalyticsValidationError: class extends Error {},
   isFinancialAnalyticsEligible: mocks.isFinancialAnalyticsEligible,
   parseAnalyticsDateRange: mocks.parseAnalyticsDateRange,
 }));
+vi.mock("./reconciliation-status", () => ({ getMarketplaceReconciliationStatus: mocks.reconciliationStatus }));
 
 import { getProfitDetail } from "./profit-detail";
 
@@ -53,6 +58,61 @@ beforeEach(() => {
   mocks.isFinancialAnalyticsEligible.mockReturnValue(false);
   mocks.parseAnalyticsDateRange.mockReturnValue(undefined);
   mocks.shopeeReturnFindMany.mockResolvedValue([]);
+  mocks.lazadaOrderFindMany.mockResolvedValue([]);
+  mocks.financialRecordFindMany.mockResolvedValue([]);
+});
+
+describe("Lazada profit population boundaries", () => {
+  it("selects all linked postings for an order-created cohort, including later-month credits", async () => {
+    const range = { gte: new Date("2026-07-31T16:00:00Z"), lte: new Date("2026-08-31T15:59:59Z") };
+    mocks.parseAnalyticsDateRange.mockReturnValue(range);
+    mocks.lazadaOrderFindMany.mockResolvedValue([{ id: "o", shopId: "shop-1", lazadaOrderId: "external-1", orderStatus: "confirmed", currency: "MYR", items: [] }]);
+    const result = await getProfitDetail("lazada", { user: { id: "owner-1" } } as never, new URLSearchParams({ dateFrom: "2026-08-01", dateTo: "2026-08-31" }));
+    expect(mocks.financialRecordFindMany).toHaveBeenCalledWith({ where: { platform: "lazada", OR: [{ shopId: "shop-1", orderExternalId: { in: ["external-1"] } }] } });
+    expect(result.coverage.dateBasis.field).toContain("unlinked adjustments excluded");
+    expect(result.summary.sellerIncome).toBeNull();
+  });
+
+  it("filters transaction-occurrence time independently from linked order creation dates", async () => {
+    const range = { gte: new Date("2026-08-01T00:00:00Z") };
+    mocks.parseAnalyticsDateRange.mockReturnValue(range);
+    mocks.financialRecordFindMany.mockResolvedValue([{ shopId: "shop-1", orderExternalId: "older-order", itemExternalId: null, amountMinor: "-100", amountScale: 2, currency: "MYR", feeName: "Wrong Weight Adjustment", transactionType: "source" }]);
+    const result = await getProfitDetail("lazada", { user: { id: "owner-1" } } as never, new URLSearchParams({ dateBasis: "occurred" }));
+    expect(mocks.financialRecordFindMany).toHaveBeenCalledWith({ where: { platform: "lazada", shopId: { in: ["shop-1"] }, occurredAt: range } });
+    expect(mocks.lazadaOrderFindMany).toHaveBeenCalledWith({ where: { OR: [{ shopId: "shop-1", lazadaOrderId: { in: ["older-order"] } }] }, include: { items: true } });
+    expect(result.summary).toMatchObject({ observedLedgerNet: -1, unallocatedLedgerNet: -1 });
+    expect(result.coverage.dateBasis.field).toContain("occurredAt");
+  });
+
+  it("bounds ledger postings independently for an order-created cohort", async () => {
+    const sourceRange = { gte: new Date("2026-08-01"), lte: new Date("2026-08-31") };
+    const ledgerRange = { gte: new Date("2026-08-01"), lte: new Date("2026-09-14") };
+    mocks.parseAnalyticsDateRange.mockReturnValueOnce(sourceRange).mockReturnValueOnce(ledgerRange);
+    mocks.lazadaOrderFindMany.mockResolvedValue([{ id: "o", shopId: "shop-1", lazadaOrderId: "external-1", orderStatus: "confirmed", currency: "MYR", items: [] }]);
+    const result = await getProfitDetail("lazada", { user: { id: "owner-1" } } as never, new URLSearchParams({ ledgerDateFrom: "2026-08-01", ledgerDateTo: "2026-09-14" }));
+    expect(mocks.financialRecordFindMany).toHaveBeenCalledWith({ where: { platform: "lazada", occurredAt: ledgerRange, OR: [{ shopId: "shop-1", orderExternalId: { in: ["external-1"] } }] } });
+    expect(result.coverage.dateBasis).toMatchObject({ ledgerFrom: "2026-08-01", ledgerTo: "2026-09-14" });
+  });
+
+  it("rejects release-date reporting when the provider has no verified release-date field", async () => {
+    await expect(getProfitDetail("lazada", { user: { id: "owner-1" } } as never, new URLSearchParams({ dateBasis: "released" }))).rejects.toThrow("release-date reporting is unavailable");
+  });
+
+  it("requires certification for the actual occurrence interval rather than a global shop approval", async () => {
+    const range = { gte: new Date("2026-08-01"), lte: new Date("2026-08-31") };
+    mocks.parseAnalyticsDateRange.mockReturnValue(range);
+    mocks.isFinancialAnalyticsEligible.mockReturnValue(true);
+    mocks.financialRecordFindMany.mockResolvedValue([{ shopId: "shop-1", orderExternalId: null, itemExternalId: null, amountMinor: "1000", amountScale: 2, currency: "MYR", feeName: "Item Price Credit", transactionType: "source", financialQuality: "verified" }]);
+    mocks.reconciliationStatus.mockResolvedValue({ certifiedReconciliationCount: 0, financialCoverage: { state: "complete" } });
+    const params = new URLSearchParams({ dateBasis: "occurred" });
+    const provisional = await getProfitDetail("lazada", { user: { id: "owner-1" } } as never, params);
+    expect(provisional.summary).toMatchObject({ sellerIncome: null, observedLedgerNet: 10 });
+    expect(mocks.reconciliationStatus).toHaveBeenCalledWith("lazada", "shop-1", expect.any(Date), { dateBasis: "occurred", dateRange: range });
+    mocks.reconciliationStatus.mockResolvedValue({ certifiedReconciliationCount: 1, financialCoverage: { state: "complete" } });
+    const ready = await getProfitDetail("lazada", { user: { id: "owner-1" } } as never, params);
+    expect(ready.coverage.state).toBe("ready");
+    expect(ready.summary.sellerIncome).toBe(10);
+  });
 });
 
 describe("Shopee profit detail financial coverage", () => {

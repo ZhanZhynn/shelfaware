@@ -2,6 +2,8 @@ import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
+import { lazadaOrderFacts } from "@/lib/lazada/order-facts";
+import { lazadaRevenue } from "@/lib/lazada/status";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
 const objectId = /^[a-f\d]{24}$/i;
@@ -100,7 +102,8 @@ const orderDateFilter = (platform: MarketplacePlatform, query: LocalQuery) => {
 };
 const page = <T extends { id: string }>(rows: T[], limit: number, platform: MarketplacePlatform, resource: Resource, query: LocalQuery) => {
   const data = rows.slice(0, limit);
-  return { data, page: { limit, nextCursor: rows.length > limit && data.length ? encodeMarketplaceCursor(platform, resource, query, data[data.length - 1]!.id) : null } };
+  return { data, page: { limit, nextCursor: rows.length > limit && data.length ? encodeMarketplaceCursor(platform, resource, query, data[data.length - 1]!.id) : null },
+    ...(resource === "orders" ? { filters: { dateBasis: query.dateBasis ?? "ingested", createdAfter: query.createdAfter ?? null, createdBefore: query.createdBefore ?? null, sourceTimestampFallback: query.dateBasis === "source" ? "ingested_when_source_missing" : null } } : {}) };
 };
 
 export async function listMarketplaceOrders(platform: MarketplacePlatform, user: { id: string; role: string | null }, query: LocalQuery) {
@@ -116,8 +119,10 @@ export async function listMarketplaceOrders(platform: MarketplacePlatform, user:
     return page(rows.map((row) => ({ id: row.id, shopId: row.shopId, externalId: row.shopeeOrderId, status: row.orderStatus, paymentStatus: row.paymentStatus, fulfillmentStatus: row.fulfillmentStatus, totalAmount: row.totalAmount, currency: row.currency, tracking: { number: row.trackingNumber, carrier: row.trackingCarrier }, shipByDate: iso(row.shipByDate), packageNumber: row.packageNumber, daysToShip: row.daysToShip, createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.shopeeCreatedAt), sourceUpdatedAt: iso(row.shopeeUpdatedAt) })), query.limit, platform, "orders", query);
   }
   if (platform === "lazada") {
-    const rows = await prisma.lazadaOrder.findMany({ ...options, select: { id: true, shopId: true, lazadaOrderId: true, orderNumber: true, orderStatus: true, paymentStatus: true, totalAmount: true, shippingFee: true, currency: true, trackingNumber: true, trackingCarrier: true, createdAt: true, updatedAt: true, lazadaCreatedAt: true, lazadaUpdatedAt: true } });
-    return page(rows.map((row) => ({ id: row.id, shopId: row.shopId, externalId: row.lazadaOrderId, reference: row.orderNumber, status: row.orderStatus, paymentStatus: row.paymentStatus, totalAmount: row.totalAmount, shippingAmount: row.shippingFee, currency: row.currency, tracking: { number: row.trackingNumber, carrier: row.trackingCarrier }, createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.lazadaCreatedAt), sourceUpdatedAt: iso(row.lazadaUpdatedAt) })), query.limit, platform, "orders", query);
+    const rows = await prisma.lazadaOrder.findMany({ ...options, select: { id: true, shopId: true, lazadaOrderId: true, orderNumber: true, orderStatus: true, paymentStatus: true, totalAmount: true, shippingFee: true, currency: true, trackingNumber: true, trackingCarrier: true, createdAt: true, updatedAt: true, lazadaCreatedAt: true, lazadaUpdatedAt: true, rawFinancialPayload: true, items: { select: { lazadaOrderItemId: true, paidPrice: true, quantity: true } } } });
+    return page(rows.map((row) => ({ id: row.id, shopId: row.shopId, externalId: row.lazadaOrderId, reference: row.orderNumber, status: row.orderStatus, paymentStatus: row.paymentStatus, totalAmount: row.totalAmount, shippingAmount: row.shippingFee,
+      ...lazadaRevenue(row.orderStatus, row.totalAmount), ...lazadaOrderFacts(row.totalAmount, row.shippingFee, row.items?.map((item) => ({ externalLineId: String(item.lazadaOrderItemId), paidPrice: item.paidPrice, quantity: item.quantity })) ?? null, row.rawFinancialPayload),
+      currency: row.currency, tracking: { number: row.trackingNumber, carrier: row.trackingCarrier }, createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.lazadaCreatedAt), sourceUpdatedAt: iso(row.lazadaUpdatedAt) })), query.limit, platform, "orders", query);
   }
   if (platform === "tiktok") {
     const rows = await prisma.tikTokOrder.findMany({ ...options, select: { id: true, shopId: true, tiktokOrderId: true, orderStatus: true, trackingNumber: true, shippingProvider: true, fulfillmentType: true, shippingType: true, currency: true, createdAt: true, updatedAt: true, tiktokCreatedAt: true, tiktokUpdatedAt: true } });
@@ -178,11 +183,13 @@ export async function getMarketplaceOrder(platform: MarketplacePlatform, user: {
     };
   }
   if (platform === "lazada") {
-    const row = await prisma.lazadaOrder.findFirst({ where, select: { id: true, shopId: true, lazadaOrderId: true, orderNumber: true, orderStatus: true, paymentStatus: true, totalAmount: true, shippingFee: true, currency: true, trackingNumber: true, trackingCarrier: true, lazadaCreatedAt: true, lazadaUpdatedAt: true, paidAt: true, shippedAt: true, deliveredAt: true, completedAt: true, cancelledAt: true, createdAt: true, updatedAt: true, items: { select: { id: true, lazadaOrderItemId: true, itemId: true, skuId: true, sellerSku: true, shopSku: true, productName: true, variation: true, quantity: true, price: true, paidPrice: true, itemPrice: true, currency: true, status: true } } } });
+    const row = await prisma.lazadaOrder.findFirst({ where, select: { id: true, shopId: true, lazadaOrderId: true, orderNumber: true, orderStatus: true, paymentStatus: true, totalAmount: true, shippingFee: true, currency: true, trackingNumber: true, trackingCarrier: true, lazadaCreatedAt: true, lazadaUpdatedAt: true, paidAt: true, shippedAt: true, deliveredAt: true, completedAt: true, cancelledAt: true, createdAt: true, updatedAt: true, rawFinancialPayload: true, items: { select: { id: true, lazadaOrderItemId: true, itemId: true, skuId: true, sellerSku: true, shopSku: true, productName: true, variation: true, quantity: true, price: true, paidPrice: true, itemPrice: true, currency: true, status: true } } } });
     if (!row) throw new MarketplaceV1NotFoundError("Order not found");
     return {
       id: row.id, shopId: row.shopId, externalId: row.lazadaOrderId, reference: row.orderNumber, status: row.orderStatus, paymentStatus: row.paymentStatus, fulfillmentStatus: null,
       totalAmount: row.totalAmount, subtotalAmount: null, shippingAmount: row.shippingFee, taxAmount: null, currency: row.currency,
+      ...lazadaRevenue(row.orderStatus, row.totalAmount),
+      ...lazadaOrderFacts(row.totalAmount, row.shippingFee, row.items.map((item) => ({ externalLineId: String(item.lazadaOrderItemId), paidPrice: item.paidPrice, quantity: item.quantity })), row.rawFinancialPayload),
       tracking: { number: row.trackingNumber, carrier: row.trackingCarrier, status: null },
       createdAt: iso(row.createdAt), updatedAt: iso(row.updatedAt), sourceCreatedAt: iso(row.lazadaCreatedAt), sourceUpdatedAt: iso(row.lazadaUpdatedAt), paidAt: iso(row.paidAt), shippedAt: iso(row.shippedAt), deliveredAt: iso(row.deliveredAt), completedAt: iso(row.completedAt), cancelledAt: iso(row.cancelledAt),
       lineItems: row.items.map((item) => ({ id: item.id, externalLineId: item.lazadaOrderItemId.toString(), productExternalId: item.itemId?.toString() ?? null, variantExternalId: item.skuId, title: item.productName, variantTitle: item.variation, sku: item.sellerSku ?? item.shopSku, quantity: item.quantity, unitPrice: item.price, originalUnitPrice: item.itemPrice, subtotal: item.paidPrice ?? (item.quantity !== null && item.price !== null ? item.quantity * item.price : null), discountAmount: null, taxAmount: null, currency: item.currency ?? row.currency, status: item.status, imageUrl: null, isGift: false })),

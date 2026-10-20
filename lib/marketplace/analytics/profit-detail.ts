@@ -2,9 +2,11 @@ import { prisma } from "@/prisma/client";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import { accessibleMarketplaceShops } from "@/lib/marketplace/shops";
 import { getMarketplaceCapabilities, getMarketplaceFinancialReadiness } from "./capabilities";
-import { isFinancialAnalyticsEligible, parseAnalyticsDateRange } from "./server";
+import { AnalyticsValidationError, isFinancialAnalyticsEligible, parseAnalyticsDateRange } from "./server";
 import type { MarketplacePlatform } from "./types";
 import { getShopeeRefundEvidence } from "./refund-evidence";
+import { buildLazadaProfitReport } from "@/lib/lazada/financial-report";
+import { getMarketplaceReconciliationStatus } from "./reconciliation-status";
 
 // ── Response types ──────────────────────────────────────────────────────────
 
@@ -17,6 +19,11 @@ export type ProfitDetailSummary = {
   totalOrders: number;
   avgOrderValue: number | null;
   avgFeePerOrder: number | null;
+  refunds?: number | null;
+  sellerDiscounts?: number | null;
+  observedLedgerNet?: number | null;
+  unallocatedLedgerNet?: number | null;
+  unallocatedRecordCount?: number;
 };
 
 export type FeeBreakdownItem = {
@@ -79,7 +86,7 @@ export type ProfitDetailResponse = {
     fieldCoverage: Record<string, { known: number; missing: number }>;
     missingCostCategories: string[];
     unavailableReasons: string[];
-    dateBasis: { field: string; from: string | null; to: string | null; appliedFrom: string | null; appliedTo: string | null };
+    dateBasis: { field: string; from: string | null; to: string | null; appliedFrom: string | null; appliedTo: string | null; ledgerFrom?: string | null; ledgerTo?: string | null };
   };
   currency: string;
   refundEvidence?: Awaited<ReturnType<typeof getShopeeRefundEvidence>>;
@@ -316,236 +323,33 @@ async function getShopeeProfitDetail(
 // ── Lazada ──────────────────────────────────────────────────────────────────
 
 async function getLazadaProfitDetail(
-  ownerIds: string[],
   shopIds: string[],
   range?: { gte?: Date; lte?: Date },
+  financeReady = false,
+  dateBasis = "order-created",
+  ledgerRange?: { gte?: Date; lte?: Date },
 ): Promise<ProfitDetailResponse> {
-  const [records, orders] = await Promise.all([
-    prisma.marketplaceFinancialRecord.findMany({
+  if (dateBasis === "released") throw new AnalyticsValidationError("Lazada's transaction API has no verified release-date field; release-date reporting is unavailable.");
+  if (!["order-created", "occurred"].includes(dateBasis)) throw new AnalyticsValidationError("Lazada profit dateBasis must be order-created or occurred");
+  if (ledgerRange && dateBasis !== "order-created") throw new AnalyticsValidationError("Independent ledger dates require the order-created profit date basis");
+  if (dateBasis === "occurred") {
+    const records = await prisma.marketplaceFinancialRecord.findMany({
       where: { platform: "lazada", shopId: { in: shopIds }, ...(range ? { occurredAt: range } : {}) },
-    }),
-    prisma.lazadaOrder.findMany({
-      where: { shopId: { in: shopIds }, ...fallbackDateFilter("lazadaCreatedAt", range) },
-      include: { items: true },
-    }),
-  ]);
-
-  const currency = records[0]?.currency ?? orders[0]?.currency ?? "MYR";
-
-  // Group financial records by feeName for the donut chart
-  const feeByName = new Map<string, number>();
-  let totalRevenue = 0;
-  let totalFees = 0;
-  let totalShipping = 0;
-
-  for (const r of records) {
-    if (!r.amountMinor) continue;
-    // Skip logistics fee and shipping comparison records from fee breakdown
-    const txType = (r.transactionType ?? "").toLowerCase();
-    if (txType === "logistics_fee" || txType === "shipping_fee_comparison") continue;
-
-    const amount = Number(r.amountMinor) / Math.pow(10, r.amountScale);
-    if (!Number.isFinite(amount)) continue;
-
-    const feeName = r.feeName ?? r.transactionType ?? "Other";
-    const type = (r.transactionType ?? "").toLowerCase();
-
-    if (type.includes("sales")) {
-      if (amount > 0) totalRevenue += amount;
-      else if (amount < 0) { feeByName.set("Refunds", (feeByName.get("Refunds") ?? 0) + Math.abs(amount)); totalFees += Math.abs(amount); }
-    } else if (type.includes("logistics")) {
-      totalShipping += Math.abs(amount);
-      feeByName.set(feeName, (feeByName.get(feeName) ?? 0) + amount);
-    } else if (type.includes("fee") || type.includes("marketing")) {
-      const absAmount = Math.abs(amount);
-      totalFees += absAmount;
-      feeByName.set(feeName, (feeByName.get(feeName) ?? 0) + absAmount);
-    } else {
-      feeByName.set(feeName, (feeByName.get(feeName) ?? 0) + amount);
-    }
+    });
+    const orders = await prisma.lazadaOrder.findMany({ where: { OR: shopIds.map((shopId) => ({ shopId, lazadaOrderId: { in: records.filter((row) => row.shopId === shopId && row.orderExternalId).map((row) => row.orderExternalId!) } })) }, include: { items: true } });
+    // A connection-level approval for another period is not evidence for this
+    // requested occurrence interval. Both bounds and scoped certification matter.
+    const scopes = financeReady && range?.gte && range.lte ? await Promise.all(shopIds.map((shopId) => getMarketplaceReconciliationStatus("lazada", shopId, new Date(), { dateBasis: "occurred", dateRange: range }))) : [];
+    const scopedReady = scopes.length === shopIds.length && scopes.length > 0 && scopes.every((scope) => scope.certifiedReconciliationCount > 0 && scope.financialCoverage.state === "complete");
+    return buildLazadaProfitReport(records, orders, scopedReady);
   }
-
-  const feeBreakdown: FeeBreakdownItem[] = [...feeByName.entries()]
-    .filter(([, v]) => v !== 0)
-    .map(([name, amount]) => ({
-      name,
-      amount: round(amount),
-      percentage: totalRevenue > 0 ? round((Math.abs(amount) / totalRevenue) * 100) : 0,
-    }))
-    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-
-  // Per-product: attribute via seller_sku on financial records
-  const nonCancelled = orders.filter((o) => !/cancel|fail/i.test(o.orderStatus));
-  const skuToProduct = new Map<string, string>();
-  for (const o of nonCancelled) {
-    for (const item of o.items) {
-      if (item.sellerSku) skuToProduct.set(item.sellerSku, item.productName || "Unknown Product");
-    }
-  }
-
-  const productRevenue = new Map<string, { revenue: number; quantity: number; orders: Set<string> }>();
-  for (const o of nonCancelled) {
-    for (const item of o.items) {
-      const name = item.productName || "Unknown Product";
-      const existing = productRevenue.get(name) ?? { revenue: 0, quantity: 0, orders: new Set() };
-      existing.revenue += item.paidPrice ?? (item.price != null && item.quantity != null ? item.price * item.quantity : 0);
-      existing.quantity += item.quantity ?? 0;
-      existing.orders.add(o.id);
-      productRevenue.set(name, existing);
-    }
-  }
-
-  // Direct-attribute fees by seller_sku from financial records
-  const feesByProduct = new Map<string, number>();
-  for (const r of records) {
-    if (!r.amountMinor || !r.itemExternalId) continue;
-    const amount = Math.abs(Number(r.amountMinor) / Math.pow(10, r.amountScale));
-    if (!Number.isFinite(amount) || amount === 0) continue;
-    // Try to find the product via itemExternalId
-    const sku = r.itemExternalId;
-    const productName = skuToProduct.get(sku);
-    if (productName) {
-      feesByProduct.set(productName, (feesByProduct.get(productName) ?? 0) + amount);
-    }
-  }
-
-  // Fallback: proportional allocation for products without direct fee attribution
-  if (feesByProduct.size === 0 && totalFees > 0) {
-    for (const [name, p] of productRevenue) {
-      const share = totalRevenue > 0 ? (p.revenue / totalRevenue) * totalFees : 0;
-      feesByProduct.set(name, share);
-    }
-  }
-
-  const byProduct: ProductProfitRow[] = [...productRevenue.entries()]
-    .map(([name, p]) => {
-      const fees = feesByProduct.get(name) ?? 0;
-      const profit = round(p.revenue - fees);
-      return {
-        productName: name,
-        revenue: round(p.revenue),
-        quantitySold: p.quantity,
-        orderCount: p.orders.size,
-        estimatedFees: round(fees),
-        estimatedProfit: profit,
-        margin: p.revenue > 0 ? round((profit / p.revenue) * 100) : 0,
-      };
-    })
-    .sort((a, b) => b.revenue - a.revenue);
-
-  const sellerIncome = totalRevenue - totalFees - totalShipping;
-  const margin = totalRevenue > 0 ? round((sellerIncome / totalRevenue) * 100) : 0;
-
-  // Shipping discrepancy: compare order-level shippingFee (customer-paid estimate)
-  // with logistics_fee records (actual seller cost) per order.
-  const logisticsFeeRecords = records.filter((r) => r.transactionType === "logistics_fee");
-  const orderShippingFee = new Map<string, number>(); // orderExternalId → estimated shipping fee
-  for (const o of nonCancelled) {
-    if (o.shippingFee != null && o.shippingFee > 0) {
-      orderShippingFee.set(o.lazadaOrderId, o.shippingFee);
-    }
-  }
-  const actualByOrder = new Map<string, number>(); // orderExternalId → total actual shipping
-  for (const r of logisticsFeeRecords) {
-    if (!r.orderExternalId) continue;
-    const raw = r.rawPayload as Record<string, unknown> | null;
-    const amount = typeof raw?.amount === "number" ? raw.amount : (r.amountMinor ? Number(r.amountMinor) / Math.pow(10, r.amountScale) : 0);
-    if (!Number.isFinite(amount)) continue;
-    actualByOrder.set(r.orderExternalId, (actualByOrder.get(r.orderExternalId) ?? 0) + amount);
-  }
-
-  // Build per-product shipping discrepancy from orders that have both estimated and actual
-  const productShipping = new Map<string, { orderCount: number; totalEstimated: number; totalActual: number; totalRevenue: number; totalQuantity: number }>();
-  let discrepancyOrders = 0;
-  let ordersWithDiscrepancy = 0;
-  let globalEstimated = 0;
-  let globalActual = 0;
-
-  const orderItemsByExternalId = new Map<string, Array<{ productName: string; revenue: number; quantity: number }>>();
-  for (const o of nonCancelled) {
-    orderItemsByExternalId.set(o.lazadaOrderId, o.items.map((item) => ({
-      productName: item.productName || "Unknown Product",
-      revenue: item.paidPrice ?? (item.price != null && item.quantity != null ? item.price * item.quantity : 0),
-      quantity: item.quantity ?? 0,
-    })));
-  }
-
-  // Include orders with actual logistics fees (even if estimated is 0)
-  for (const [orderId, actual] of actualByOrder) {
-    const estimated = orderShippingFee.get(orderId) ?? 0;
-    if (estimated === 0 && actual === 0) continue;
-
-    discrepancyOrders++;
-    globalEstimated += estimated;
-    globalActual += actual;
-    const pct = estimated > 0 ? Math.abs((actual - estimated) / estimated) * 100 : 0;
-    if (pct > 10) ordersWithDiscrepancy++;
-
-    const orderItems = orderItemsByExternalId.get(orderId) ?? [];
-    if (orderItems.length === 0) {
-      const name = "Unknown Product";
-      const existing = productShipping.get(name) ?? { orderCount: 0, totalEstimated: 0, totalActual: 0, totalRevenue: 0, totalQuantity: 0 };
-      existing.orderCount++;
-      existing.totalEstimated += estimated;
-      existing.totalActual += actual;
-      productShipping.set(name, existing);
-    } else {
-      const totalItemRevenue = orderItems.reduce((sum, item) => sum + item.revenue, 0);
-      for (const item of orderItems) {
-        const share = totalItemRevenue > 0 ? item.revenue / totalItemRevenue : 1 / orderItems.length;
-        const name = item.productName;
-        const existing = productShipping.get(name) ?? { orderCount: 0, totalEstimated: 0, totalActual: 0, totalRevenue: 0, totalQuantity: 0 };
-        existing.orderCount++;
-        existing.totalEstimated += estimated * share;
-        existing.totalActual += actual * share;
-        existing.totalRevenue += item.revenue;
-        existing.totalQuantity += item.quantity;
-        productShipping.set(name, existing);
-      }
-    }
-  }
-
-  const shippingDiscrepancy = discrepancyOrders > 0
-    ? {
-        summary: {
-          totalOrders: discrepancyOrders,
-          ordersWithDiscrepancy,
-          totalEstimated: round(globalEstimated),
-          totalActual: round(globalActual),
-          totalDiscrepancy: round(globalActual - globalEstimated),
-        },
-        products: [...productShipping.entries()]
-          .map(([productName, d]) => ({
-            productName,
-            orderCount: d.orderCount,
-            totalEstimated: round(d.totalEstimated),
-            totalActual: round(d.totalActual),
-            avgDiscrepancy: d.orderCount > 0 ? round((d.totalActual - d.totalEstimated) / d.orderCount) : 0,
-            discrepancyPct: d.totalEstimated > 0 ? round(((d.totalActual - d.totalEstimated) / d.totalEstimated) * 100) : 0,
-            totalRevenue: round(d.totalRevenue),
-            totalQuantity: d.totalQuantity,
-          }))
-          .sort((a, b) => Math.abs(b.avgDiscrepancy) - Math.abs(a.avgDiscrepancy)),
-      }
-    : undefined;
-
-  return {
-    summary: {
-      totalRevenue: round(totalRevenue),
-      totalFees: round(totalFees),
-      totalShipping: round(totalShipping),
-      sellerIncome: round(sellerIncome),
-      overallMargin: margin,
-      totalOrders: nonCancelled.length,
-      avgOrderValue: nonCancelled.length > 0 ? round(totalRevenue / nonCancelled.length) : 0,
-      avgFeePerOrder: nonCancelled.length > 0 ? round(totalFees / nonCancelled.length) : 0,
-    },
-    feeBreakdown,
-    byProduct,
-    shippingDiscrepancy,
-    coverage: profitCoverage("ready", "imported-records", "imported marketplace financial records"),
-    currency,
-  };
+  const orders = await prisma.lazadaOrder.findMany({ where: { shopId: { in: shopIds }, ...fallbackDateFilter("lazadaCreatedAt", range) }, include: { items: true } });
+  const records = await prisma.marketplaceFinancialRecord.findMany({
+    where: { platform: "lazada", ...(ledgerRange ? { occurredAt: ledgerRange } : {}), OR: shopIds.map((shopId) => ({ shopId, orderExternalId: { in: orders.filter((row) => row.shopId === shopId).map((row) => row.lazadaOrderId) } })) },
+  });
+  // An order-created subset is not a certified complete ledger interval. Keep its
+  // observed posting sum available, but do not certify income from a shop flag.
+  return buildLazadaProfitReport(records, orders, false);
 }
 
 // ── TikTok ──────────────────────────────────────────────────────────────────
@@ -869,21 +673,25 @@ export async function getProfitDetail(
   }
 
   const range = parseAnalyticsDateRange(params);
+  const ledgerFrom = params.get("ledgerDateFrom"), ledgerTo = params.get("ledgerDateTo");
+  if (Boolean(ledgerFrom) !== Boolean(ledgerTo)) throw new AnalyticsValidationError("ledgerDateFrom and ledgerDateTo must be provided together");
+  if ((ledgerFrom || ledgerTo) && platform !== "lazada") throw new AnalyticsValidationError("Independent ledger dates are currently supported only for Lazada");
+  const ledgerRange = ledgerFrom && ledgerTo ? parseAnalyticsDateRange(new URLSearchParams({ dateFrom: ledgerFrom, dateTo: ledgerTo })) : undefined;
+
+  const capabilities = await getMarketplaceCapabilities(platform, shopIds);
+  const reconciled = await getMarketplaceFinancialReadiness(platform, shopIds);
+  const financeReady = isFinancialAnalyticsEligible({ platform, shops: selectedShops, finance: capabilities.finance, readinessAndEvidenceApproved: reconciled });
 
   let result: ProfitDetailResponse;
   switch (platform) {
     case "shopee": result = await getShopeeProfitDetail(ownerIds, shopIds, range); break;
-    case "lazada": result = await getLazadaProfitDetail(ownerIds, shopIds, range); break;
+    case "lazada": result = await getLazadaProfitDetail(shopIds, range, financeReady, params.get("dateBasis") ?? "order-created", ledgerRange); break;
     case "tiktok": result = await getTikTokProfitDetail(ownerIds, shopIds, range); break;
     case "shopify": result = await getShopifyProfitDetail(ownerIds, shopIds, range); break;
     default: throw new Error(`Unsupported platform: ${platform}`);
   }
 
   // Mark as provisional when finance is available but not yet reconciled
-  const capabilities = await getMarketplaceCapabilities(platform, shopIds);
-  const reconciled = await getMarketplaceFinancialReadiness(platform, shopIds);
-  const financeReady = isFinancialAnalyticsEligible({ platform, shops: selectedShops, finance: capabilities.finance, readinessAndEvidenceApproved: reconciled });
-
   if (result.coverage.state !== "unavailable" && (result.coverage.provisional || !financeReady)) {
     result.coverage.state = "provisional";
     result.coverage.provisional = true;
@@ -891,7 +699,7 @@ export async function getProfitDetail(
 
   const sourceDateField: Record<MarketplacePlatform, string> = {
     shopee: "shopeeCreatedAt (createdAt fallback)",
-    lazada: "lazadaCreatedAt (createdAt fallback)",
+    lazada: params.get("dateBasis") === "occurred" ? "marketplace financial record occurredAt; linked orders across creation dates" : ledgerRange ? "lazadaCreatedAt (createdAt fallback); linked transactions within ledgerDateFrom/ledgerDateTo; unlinked adjustments excluded" : "lazadaCreatedAt (createdAt fallback); linked transactions across occurrence dates; unlinked adjustments excluded",
     tiktok: "marketplace financial record occurredAt",
     shopify: "shopifyCreatedAt (createdAt fallback)",
   };
@@ -903,6 +711,7 @@ export async function getProfitDetail(
     to: params.get("dateTo"),
     appliedFrom: range?.gte?.toISOString() ?? null,
     appliedTo: range?.lte?.toISOString() ?? null,
+    ...(platform === "lazada" ? { ledgerFrom, ledgerTo } : {}),
   };
 
   return result;

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), assertMarketplaceSyncShop: vi.fn(), createMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), enqueueMarketplaceSyncJob: vi.fn(), createShopeeAllSyncRun: vi.fn(), createShopeeBoundedSyncRun: vi.fn(), deliverMarketplaceSyncTaskOutbox: vi.fn(), marketplaceSyncRunResponse: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), assertMarketplaceSyncShop: vi.fn(), createMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), enqueueMarketplaceSyncJob: vi.fn(), createShopeeAllSyncRun: vi.fn(), createShopeeBoundedSyncRun: vi.fn(), createLazadaBoundedSyncRun: vi.fn(), deliverMarketplaceSyncTaskOutbox: vi.fn(), marketplaceSyncRunResponse: vi.fn() }));
 vi.mock("@/lib/auth/require-api-scope", () => ({
   requireApiActor: mocks.requireApiActor,
   ApiScopeError: class ApiScopeError extends Error {},
@@ -19,6 +19,7 @@ vi.mock("@/lib/marketplace/sync-enqueue", () => ({ enqueueMarketplaceSyncJob: mo
 vi.mock("@/lib/marketplace/sync-runs", () => ({
   createShopeeAllSyncRun: mocks.createShopeeAllSyncRun,
   createShopeeBoundedSyncRun: mocks.createShopeeBoundedSyncRun,
+  createLazadaBoundedSyncRun: mocks.createLazadaBoundedSyncRun,
   deliverMarketplaceSyncTaskOutbox: mocks.deliverMarketplaceSyncTaskOutbox,
   marketplaceSyncRunResponse: mocks.marketplaceSyncRunResponse,
 }));
@@ -34,11 +35,19 @@ beforeEach(() => {
   mocks.enqueueMarketplaceSyncJob.mockResolvedValue({ scheduled: false });
   mocks.createShopeeAllSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
   mocks.createShopeeBoundedSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
+  mocks.createLazadaBoundedSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
   mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: false });
   mocks.marketplaceSyncRunResponse.mockReturnValue({ id: "d".repeat(24), status: "pending", tasks: [] });
 });
 
 describe("v1 marketplace sync creation", () => {
+  it("routes Lazada historical finance through checkpointed task delivery", async () => {
+    const input = { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-09-14T23:59:59+08:00" };
+    const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/lazada/syncs", { method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "finance", input }) }), { params: Promise.resolve({ platform: "lazada" }) });
+    expect(response.status).toBe(202);
+    expect(mocks.createLazadaBoundedSyncRun).toHaveBeenCalledWith(expect.objectContaining({ syncType: "finance", input }));
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+  });
   it("requires marketplace:sync, persists the idempotency key, and leaves execution pending without a queue", async () => {
     const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/shopee/syncs", {
       method: "POST",
@@ -108,7 +117,7 @@ describe("v1 marketplace sync creation", () => {
     [{ dateFrom: "2025-01-02T00:00:00", dateTo: "2025-01-01T00:00:00Z" }, "shopee", "orders"],
     [{ dateFrom: "2025-02-30T00:00:00Z", dateTo: "2025-03-01T00:00:00Z" }, "shopee", "orders"],
     [{ dateFrom: "2024-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "orders"],
-    [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "lazada", "orders"],
+    [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "lazada", "returns"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "ads"],
   ])("rejects unsupported or invalid date ranges", async (input, platform, syncType) => {
     const response = await POST(new NextRequest(`http://localhost/api/v1/marketplaces/${platform}/syncs`, {

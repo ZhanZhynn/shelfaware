@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const query = parseLocalQuery(new URL(request.url).searchParams, "orders");
     const result = await listMarketplaceOrders(platform as MarketplacePlatform, actor.user, query);
-    return NextResponse.json({ apiVersion: "2026-marketplace-v1", ...result, meta: { requestId, platform, source: "local" } }, { headers: { "x-request-id": requestId } });
+    return NextResponse.json({ apiVersion: "2026-marketplace-v1", ...result, meta: { requestId, platform, source: "local", dateBasis: query.dateBasis ?? "ingested" } }, { headers: { "x-request-id": requestId } });
   } catch (error) {
     if (error instanceof MarketplaceV1ValidationError) return fail("INVALID_QUERY", error.message, 422);
     if (error instanceof MarketplaceV1NotFoundError) return fail("NOT_FOUND", error.message, 404);

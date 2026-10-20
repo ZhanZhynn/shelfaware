@@ -112,6 +112,33 @@ export async function createShopeeBoundedSyncRun(input: {
   return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
 }
 
+/** Lazada historical streams share the durable lease/checkpoint/outbox engine. */
+export async function createLazadaBoundedSyncRun(input: {
+  shopId: string;
+  requestedByUserId: string;
+  syncType: "orders" | "finance" | "payouts" | "all";
+  idempotencyKey?: string;
+  input: MarketplaceSyncInput;
+}) {
+  if (input.idempotencyKey) {
+    const existing = await prisma.marketplaceSyncRun.findFirst({
+      where: { platform: "lazada", shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
+      include: { tasks: { orderBy: { sequence: "asc" } } },
+    });
+    if (existing) return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
+  }
+  const run = await prisma.$transaction(async (tx) => {
+    const created = await tx.marketplaceSyncRun.create({ data: { platform: "lazada", shopId: input.shopId, requestedByUserId: input.requestedByUserId,
+      syncType: input.syncType, idempotencyKey: input.idempotencyKey ?? null, input: input.input } });
+    const streams = input.syncType === "all" ? ["orders", "finance"] : [input.syncType];
+    const tasks = [];
+    for (const [sequence, stream] of streams.entries()) tasks.push(await tx.marketplaceSyncTask.create({ data: { runId: created.id, platform: "lazada", shopId: input.shopId, stream, sequence, required: true } }));
+    await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: tasks[0]!.id, dedupeKey: "initial" } });
+    return { ...created, tasks };
+  });
+  return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
+}
+
 /** A task delivery is at-least-once; this function only publishes durable work. */
 export async function deliverMarketplaceSyncTaskOutbox(taskId: string, now = new Date()) {
   const outbox = await prisma.marketplaceSyncDeliveryOutbox.findFirst({
@@ -380,17 +407,18 @@ export async function failMarketplaceSyncTask(id: string, workerId: string, erro
   return settled;
 }
 
-const ownedShopeeRun = async (id: string, ownerIds: string[]) => prisma.marketplaceSyncRun.findFirst({
-  where: { id, platform: "shopee", requestedByUserId: { in: ownerIds } },
+const ownedRun = async (platform: MarketplacePlatform, id: string, ownerIds: string[]) => prisma.marketplaceSyncRun.findFirst({
+  where: { id, platform, requestedByUserId: { in: ownerIds } },
   include: { tasks: { orderBy: { sequence: "asc" } } },
 });
 
 export async function getMarketplaceSyncRun(platform: MarketplacePlatform, id: string, actor: MarketplaceActor) {
-  if (platform !== "shopee") throw new MarketplaceSyncRunNotFoundError("Sync run not found");
+  if (platform !== "shopee" && platform !== "lazada") throw new MarketplaceSyncRunNotFoundError("Sync run not found");
   const ownerIds = await marketplaceOwnerIds(actor);
-  const run = await ownedShopeeRun(id, ownerIds);
+  const run = await ownedRun(platform, id, ownerIds);
   if (!run) throw new MarketplaceSyncRunNotFoundError("Sync run not found");
-  const shop = await prisma.shopeeShop.findFirst({ where: { id: run.shopId, userId: { in: ownerIds } }, select: { id: true } });
+  const where = { id: run.shopId, userId: { in: ownerIds } };
+  const shop = platform === "shopee" ? await prisma.shopeeShop.findFirst({ where, select: { id: true } }) : await prisma.lazadaShop.findFirst({ where, select: { id: true } });
   if (!shop) throw new MarketplaceSyncRunNotFoundError("Sync run not found");
   return run;
 }

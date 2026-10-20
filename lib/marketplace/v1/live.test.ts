@@ -6,22 +6,45 @@ const mocks = vi.hoisted(() => ({
   getTransientShopeeSDK: vi.fn(),
   getOrderList: vi.fn(),
   getOrdersDetail: vi.fn(),
+  lazadaShopFindFirst: vi.fn(), lazadaOrdersPage: vi.fn(), lazadaItems: vi.fn(),
 }));
-vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: { findFirst: mocks.shopeeShopFindFirst } } }));
+vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: { findFirst: mocks.shopeeShopFindFirst }, lazadaShop: { findFirst: mocks.lazadaShopFindFirst } } }));
 vi.mock("@/lib/marketplace/access", () => ({ marketplaceOwnerIds: mocks.marketplaceOwnerIds }));
 vi.mock("@/lib/shopee/server", () => ({ getTransientShopeeSDK: mocks.getTransientShopeeSDK }));
-vi.mock("@/lib/lazada/server", () => ({ createLazadaShopContext: vi.fn() }));
-vi.mock("@/lib/lazada/custom-api", () => ({ getOrdersCustom: vi.fn(), getProductsCustom: vi.fn() }));
+vi.mock("@/lib/lazada/server", () => ({ createLazadaShopContext: (shop: unknown) => shop }));
+vi.mock("@/lib/lazada/custom-api", () => ({ getOrdersPageCustom: mocks.lazadaOrdersPage, getMultipleOrderItemsCustom: mocks.lazadaItems, getProductsCustom: vi.fn() }));
 vi.mock("@/lib/tiktok/custom-api", () => ({ searchOrders: vi.fn(), searchProducts: vi.fn() }));
 vi.mock("@/lib/shopify/server", () => ({ shopifyGraphQL: vi.fn() }));
 
-import { listMarketplaceLive, liveRevenue, MarketplaceLiveValidationError, parseLiveQuery } from "./live";
+import { classifyLiveProviderError, listMarketplaceLive, liveRevenue, MarketplaceLiveValidationError, parseLiveQuery } from "./live";
+import { LazadaProviderError } from "@/lib/lazada/provider-error";
 
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.marketplaceOwnerIds.mockResolvedValue(["owner-1"]);
   mocks.shopeeShopFindFirst.mockResolvedValue({ shopId: 123, accessToken: "access", refreshToken: "refresh", tokenExpiry: null });
   mocks.getTransientShopeeSDK.mockReturnValue({ order: { getOrderList: mocks.getOrderList, getOrdersDetail: mocks.getOrdersDetail } });
+});
+
+describe("live Lazada source contracts", () => {
+  it("uses provider totals, canonical status, line currency, and explicit amount bases", async () => {
+    mocks.lazadaShopFindFirst.mockResolvedValue({ countryCode: "my", tokenExpiry: null });
+    mocks.lazadaOrdersPage.mockResolvedValue({ orders: [{ order_id: 10, order_number: "10", statuses: ["confirmed"], price: "20.00", shipping_fee: "3.00", created_at: "2026-08-01 10:00:00 +0800" }], total: 1 });
+    mocks.lazadaItems.mockResolvedValue([{ order_id: 10, order_items: [{ order_item_id: 1001, paid_price: "19.00", currency: "MYR" }] }]);
+    const result = await listMarketplaceLive("lazada", { id: "owner", role: null }, "orders", { shopId: "a".repeat(24), limit: 1 });
+    expect(result.page.nextCursor).toBeNull();
+    expect(result.data[0]).toMatchObject({ status: "confirmed", totalAmount: 20, paidMerchandiseAmount: 19, buyerPaidTotalAmount: 22, currency: "MYR", itemRowCount: 1, unitQuantity: null, createdAt: "2026-08-01T02:00:00.000Z" });
+  });
+  it("reports expired authorization without refreshing credentials in a live read", async () => {
+    mocks.lazadaShopFindFirst.mockResolvedValue({ countryCode: "my", tokenExpiry: new Date("2020-01-01") });
+    await expect(listMarketplaceLive("lazada", { id: "owner", role: null }, "orders", { shopId: "a".repeat(24), limit: 1 })).rejects.toMatchObject({ code: "LIVE_PROVIDER_AUTH_REQUIRED", retryable: false });
+    expect(mocks.lazadaOrdersPage).not.toHaveBeenCalled();
+  });
+  it("classifies structured provider failures without losing safe request identifiers", () => {
+    expect(classifyLiveProviderError(new LazadaProviderError("IllegalAccessToken", 200, "provider-id"))).toMatchObject({ code: "LIVE_PROVIDER_AUTH_REQUIRED", provider: { requestId: "provider-id" } });
+    expect(classifyLiveProviderError(new LazadaProviderError("ParameterError", 200))).toMatchObject({ code: "LIVE_PROVIDER_INVALID_QUERY", retryable: false });
+    expect(classifyLiveProviderError(new LazadaProviderError("SellerCallLimit", 200))).toMatchObject({ code: "LIVE_PROVIDER_RATE_LIMITED", retryable: true });
+  });
 });
 
 describe("live marketplace query parsing", () => {

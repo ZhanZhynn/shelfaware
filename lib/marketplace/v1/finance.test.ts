@@ -42,6 +42,7 @@ describe("v1 marketplace finance queries", () => {
       orderLinkState: "linked", itemExternalId: null, transactionType: "fee", feeType: null, feeName: "commission", amountMinor: "120", amountScale: 2,
       amount: null, currency: "MYR", occurredAt: new Date("2026-01-01T00:00:00.000Z"), sourceObservedAt: null, financialQuality: "observed",
       unknownReason: null, createdAt: new Date("2026-01-01T00:00:00.000Z"), updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+      rawPayload: { paid_status: "Yes", comment: "private financial comment" },
     }]);
 
     const result = await listMarketplaceFinancialRecords("shopee", { shopId: "a".repeat(24), limit: 25 });
@@ -49,6 +50,9 @@ describe("v1 marketplace finance queries", () => {
     expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { platform: "shopee", shopId: "a".repeat(24) }, take: 26 }));
     expect(result).toMatchObject({ data: [{ id: "b".repeat(24), occurredAt: "2026-01-01T00:00:00.000Z" }], page: { limit: 25, nextCursor: null } });
     expect(result.data[0]).not.toHaveProperty("rawPayload");
+    const lazada = await listMarketplaceFinancialRecords("lazada", { shopId: "a".repeat(24), limit: 25 });
+    expect(lazada.data[0]).toMatchObject({ providerPaidStatus: "Yes", releaseStatus: null, releasedAt: null, releaseDateState: "unavailable" });
+    expect(JSON.stringify(lazada)).not.toContain("private financial comment");
   });
 
   it("maps scoped filters to persisted fields and validates dates, enums, and ISO currency", async () => {

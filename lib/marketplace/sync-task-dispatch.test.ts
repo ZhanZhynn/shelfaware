@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   checkpoint: vi.fn(), claim: vi.fn(), complete: vi.fn(), fail: vi.fn(), claimed: vi.fn(), renew: vi.fn(), retry: vi.fn(),
   invalidateCache: vi.fn(), invalidateMarketplaceAnalytics: vi.fn(),
   shopeeShop: { findUnique: vi.fn() },
+  lazadaShop: { findUnique: vi.fn() },
+  syncLazadaOrders: vi.fn(), syncLazadaFinance: vi.fn(), syncLazadaPayoutStatements: vi.fn(),
   syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(), syncShopeeReturns: vi.fn(), syncShopeePayoutStatements: vi.fn(),
 }));
 
@@ -16,13 +18,14 @@ vi.mock("./sync-runs", () => ({
   renewMarketplaceSyncTaskLease: mocks.renew,
   retryMarketplaceSyncTask: mocks.retry,
 }));
-vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: mocks.shopeeShop } }));
+vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: mocks.shopeeShop, lazadaShop: mocks.lazadaShop } }));
 vi.mock("@/lib/cache/cache-utils", () => ({
-  cacheKeys: { shopee: { pattern: "shopee:*" } },
+  cacheKeys: { shopee: { pattern: "shopee:*" }, lazada: { pattern: "lazada:*" } },
   invalidateCache: mocks.invalidateCache,
   invalidateMarketplaceAnalytics: mocks.invalidateMarketplaceAnalytics,
 }));
 vi.mock("@/lib/shopee", () => ({ syncShopeeOrders: mocks.syncShopeeOrders, syncShopeeProducts: mocks.syncShopeeProducts, syncShopeeAds: mocks.syncShopeeAds, syncShopeeReturns: mocks.syncShopeeReturns, syncShopeePayoutStatements: mocks.syncShopeePayoutStatements }));
+vi.mock("@/lib/lazada", () => ({ syncLazadaOrders: mocks.syncLazadaOrders, syncLazadaFinance: mocks.syncLazadaFinance, syncLazadaPayoutStatements: mocks.syncLazadaPayoutStatements }));
 
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
 
@@ -48,6 +51,15 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it("runs Lazada finance in frozen daily windows and checkpoints only completed work", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "finance", run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-03T23:59:59+08:00" } } }));
+    mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });
+    mocks.syncLazadaFinance.mockResolvedValue({ synced: 1, created: 1, updated: 0, errors: [] });
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toMatchObject({ status: "checkpointed" });
+    expect(mocks.syncLazadaFinance).toHaveBeenCalledWith("seller", "owner", { from: "2026-07-31T16:00:00.000Z", to: "2026-08-01T15:59:59.000Z" }, "requester");
+    expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ checkpoint: expect.objectContaining({ inclusive: true, windowsCompleted: 1 }) }));
+    expect(mocks.invalidateMarketplaceAnalytics).toHaveBeenCalledWith("lazada");
+  });
   it("checkpoints a completed 24-hour orders window and republishes the same task", async () => {
     const now = new Date("2026-10-13T00:00:00.000Z");
     await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a", now)).resolves.toEqual({ status: "checkpointed", nextTaskId: "a".repeat(24) });

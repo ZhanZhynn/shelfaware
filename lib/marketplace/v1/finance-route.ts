@@ -22,8 +22,8 @@ function failure(requestId: string, code: string, message: string, status: numbe
   );
 }
 
-function responseFilters(resource: FinanceResource, query: Record<string, unknown>) {
-  if (resource === "profit") return { shopId: query.shopId ?? null, dateFrom: query.dateFrom ?? null, dateTo: query.dateTo ?? null };
+function responseFilters(resource: FinanceResource, query: Record<string, unknown>, platform: string) {
+  if (resource === "profit") return { shopId: query.shopId ?? null, dateFrom: query.dateFrom ?? null, dateTo: query.dateTo ?? null, ...(platform === "lazada" ? { dateBasis: query.dateBasis ?? "order-created", ledgerDateFrom: query.ledgerDateFrom ?? null, ledgerDateTo: query.ledgerDateTo ?? null } : {}) };
   const filters = query as FinanceFilters & { shopId: string };
   return { shopId: filters.shopId, ...normalizedFinanceFilters(filters) };
 }
@@ -66,7 +66,7 @@ export async function financeMarketplaceGet(resource: FinanceResource, request: 
     const result = await getMarketplaceFinanceResult(platform as MarketplacePlatform, actor.user, resource, query);
     const payload = resource === "financial-records" ? result : { data: result };
     return NextResponse.json(
-      { apiVersion: "2026-marketplace-v1", ...payload, filters: responseFilters(resource, query as Record<string, unknown>), warnings: responseWarnings(resource, result), meta: { requestId, platform, source: "local" } },
+      { apiVersion: "2026-marketplace-v1", ...payload, filters: responseFilters(resource, query as Record<string, unknown>, platform), warnings: responseWarnings(resource, result), meta: { requestId, platform, source: "local" } },
       { headers: { "x-request-id": requestId, "cache-control": "no-store" } },
     );
   } catch (error) {

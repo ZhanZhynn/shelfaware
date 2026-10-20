@@ -11,8 +11,10 @@ import { createHmac } from "crypto";
 import { marketplaceFinancialDisplayEligible } from "./rollout";
 import { z } from "zod";
 import { getShopeeRefundEvidence } from "./refund-evidence";
+import { sumLazadaSourceMoney } from "@/lib/lazada/money";
+import { normalizeLazadaStatus } from "@/lib/lazada/status";
 
-export const ANALYTICS_CALCULATION_VERSION = "v5-operational-catalog-sku";
+export const ANALYTICS_CALCULATION_VERSION = "v6-lazada-source-bases";
 
 export class AnalyticsValidationError extends Error {
   constructor(message: string, readonly code: "INVALID_QUERY" | "FORBIDDEN" | "MIXED_CURRENCY" | "CONVERSION_UNAVAILABLE" = "INVALID_QUERY") { super(message); }
@@ -200,7 +202,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
   const financeReady = metric === "profit" && isFinancialAnalyticsEligible({ platform, shops: selectedShops, finance: capabilities.finance, readinessAndEvidenceApproved: reconciled });
   const originalOrders = metric === "profit" && !financeReady ? orders : null;
   if (metric === "profit" && !financeReady) orders = orders.map((order) => ({ ...order, financialQuality: "legacy-unverified" }));
-  const built = buildResponse(orders, reportingCurrency, shopCount, granularity, metric, financeReady);
+  const built = buildResponse(orders, reportingCurrency, shopCount, granularity, metric, financeReady, platform);
   if (metric === "profit" && !financeReady && capabilities.finance === "available" && originalOrders && originalOrders.length > 0) {
     built.profit = calculateProvisionalProfitFromOrders(originalOrders, reportingCurrency);
   }
@@ -222,7 +224,7 @@ export async function getMarketplaceAnalytics(platform: MarketplacePlatform, ses
 export function buildOperationalCoverage(orders: NormalizedOrderFinancials[], orderCapability: CapabilityState): OperationalCoverage {
   const dates = orders.map((order) => order.createdAt).sort((a, b) => a.getTime() - b.getTime());
   const unknownQuantityCount = orders.reduce((count, order) => count + order.items.filter((item) => item.quantity === null).length, 0);
-  const unknownStatusCount = orders.filter((order) => !order.status || order.status.trim() === "").length;
+  const unknownStatusCount = orders.filter((order) => !order.status || order.status.trim() === "" || (order.platform === "lazada" && ["unknown", "mixed"].includes(normalizeLazadaStatus(order.status)))).length;
   const unknownIdentityCount = orders.filter((order) => order.buyerId === null).length;
   const availability = orderCapability === "unauthorized" ? "not_authorized" : orderCapability === "unavailable" ? "unsupported" : orderCapability === "pending" ? "backfilling" : orders.length ? "available" : "no_data";
   const firstObserved = dates.at(0);
@@ -230,18 +232,19 @@ export function buildOperationalCoverage(orders: NormalizedOrderFinancials[], or
   return { state: availability === "available" ? (unknownQuantityCount || unknownStatusCount ? "partial" : "ready") : "unavailable", availability, reason: availability === "available" ? null : availability === "no_data" ? "No locally observed orders match these filters. Synchronization coverage is unverified; this does not establish zero live orders." : availability === "backfilling" ? "Order history is being backfilled." : availability === "not_authorized" ? "Order access is not authorized." : "Order analytics is unavailable for this connection.", observedDateRange: firstObserved && lastObserved ? { from: firstObserved.toISOString().slice(0, 10), to: lastObserved.toISOString().slice(0, 10) } : null, rawOrderCount: orders.length, rawItemCount: orders.reduce((count, order) => count + order.items.length, 0), unknownStatusCount, unknownQuantityCount, unknownIdentityCount, sourceCurrencies: [...new Set(orders.map((order) => order.currency))].sort() };
 }
 
-function buildResponse(orders: NormalizedOrderFinancials[], currency: string, shopCount: number, granularity: "daily" | "weekly" | "monthly", metric: string, financeReady: boolean) {
+function buildResponse(orders: NormalizedOrderFinancials[], currency: string, shopCount: number, granularity: "daily" | "weekly" | "monthly", metric: string, financeReady: boolean, platform: MarketplacePlatform) {
   const profit = metric === "profit" ? calculateProfit(orders, currency) : { grossSales: null, sellerDiscounts: null, refunds: null, netSales: null, buyerShippingCredits: null, platformSubsidies: null, marketplaceFees: null, paymentFees: null, sellerShipping: null, returnShipping: null, otherCharges: null, estimatedProfit: null, estimatedMargin: null, orderCount: 0, coverage: { state: "unavailable" as const, calculationBasis: "unavailable" as const, financialCoveragePercent: null, buyerIdentityCoveragePercent: 0, missingCostCategories: [], reportingCurrency: currency, conversion: { applied: false as const, sourceCurrencies: [] }, exclusions: [], unavailableReasons: ["profit_not_requested"], rawOrderCount: orders.length, certifiedOrderCount: 0 } };
   if (metric === "profit" && !financeReady) profit.coverage.unavailableReasons = [...new Set([...profit.coverage.unavailableReasons, "finance capability and approved reconciliation are required"])] ;
   const buyers = metric === "buyers" ? calculateBuyerMetrics(orders) : { uniqueBuyers: null, repeatBuyers: null, repeatPurchaseRate: null, averageOrderValue: null, topBuyers: [], availabilityReason: "buyer_metrics_not_requested" };
   const clv = metric === "clv" ? calculateClvMetrics(orders) : { summary: { totalBuyers: 0, historicalNetSales: null, predictedNetRevenueNext12Months: null, method: null, horizonMonths: null, availabilityReason: "predictive_clv_not_requested" }, segments: { champions: 0, loyal: 0, potential: 0, atRisk: 0, lost: 0 }, churnRisk: { high: 0, medium: 0, low: 0 }, topBuyersByClv: [] };
-  const operationalOrders = orders.filter((order) => !order.status.toLowerCase().includes("cancel"));
+  const operationalOrders = orders.filter((order) => !/cancel|fail/i.test(order.status));
   const operationalSales = (values: Array<number | null>) => {
+    if (platform === "lazada") return sumLazadaSourceMoney(values);
     const known = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
     return known.length ? known.reduce((total, value) => total + value, 0) : null;
   };
-  const products = new Map<string, { productId: string | null; productName: string; sku: string | null; imageUrl: string | null; quantity: number | null; operationalSales: number | null; grossSales: null; estimatedProfit: null }>();
-  if (metric === "products") for (const order of operationalOrders) for (const item of order.items) { const key = `${order.shopId}:${item.productId ?? `unmapped:${item.sku ?? item.id}`}`; const prior = products.get(key); products.set(key, { productId: item.productId, productName: item.productName, sku: item.sku, imageUrl: prior?.imageUrl ?? item.imageUrl, quantity: prior?.quantity === null || item.quantity === null ? null : (prior?.quantity ?? 0) + item.quantity, operationalSales: operationalSales([prior?.operationalSales ?? null, item.grossSales]), grossSales: null, estimatedProfit: null }); }
+  const products = new Map<string, { productId: string | null; productName: string; sku: string | null; imageUrl: string | null; quantity: number | null; operationalSales: number | null; operationalSalesBasis: string; grossSales: null; estimatedProfit: null }>();
+  if (metric === "products") for (const order of operationalOrders) for (const item of order.items) { const key = `${order.shopId}:${item.productId ?? `unmapped:${item.sku ?? item.id}`}`; const prior = products.get(key); products.set(key, { productId: item.productId, productName: item.productName, sku: item.sku, imageUrl: prior?.imageUrl ?? item.imageUrl, quantity: prior?.quantity === null || item.quantity === null ? null : (prior?.quantity ?? 0) + item.quantity, operationalSales: operationalSales(prior ? [prior.operationalSales, item.grossSales] : [item.grossSales]), operationalSalesBasis: platform === "lazada" ? "paid_merchandise_excluding_shipping" : "source_item_subtotal", grossSales: null, estimatedProfit: null }); }
   const bucket = (date: Date) => {
     const day = date.toISOString().slice(0, 10);
     if (granularity === "daily") return day;
@@ -250,5 +253,8 @@ function buildResponse(orders: NormalizedOrderFinancials[], currency: string, sh
   };
   const trend = metric === "revenue-trend" ? [...new Set(operationalOrders.map((order) => bucket(order.createdAt)))].map((date) => { const grouped = operationalOrders.filter((order) => bucket(order.createdAt) === date); return { date, operationalSales: operationalSales(grouped.map((order) => order.grossSales)), grossSales: null, netSales: null, estimatedProfit: null, orders: grouped.length }; }) : [];
   const totalOperationalSales = operationalSales(operationalOrders.map((order) => order.grossSales));
-  return { summary: { totalOrders: orders.length, operationalOrderCount: operationalOrders.length, operationalCurrency: currency, operationalSales: totalOperationalSales, certifiedFinancialOrders: metric === "profit" ? profit.orderCount : 0, netSales: null, averageOrderValue: totalOperationalSales === null || operationalOrders.length === 0 ? null : totalOperationalSales / operationalOrders.length, shopCount }, profit, buyers, clv, products: [...products.values()].sort((a, b) => (b.operationalSales ?? -Infinity) - (a.operationalSales ?? -Infinity)), revenueTrend: trend };
+  const statusCohorts = [...new Set(orders.map((order) => order.status))].sort().map((status) => { const rows = orders.filter((order) => order.status === status); return { status, orderCount: rows.length, itemRowCount: rows.reduce((sum, order) => sum + order.items.length, 0), grossSourceAmount: operationalSales(rows.map((order) => order.grossSales)) }; });
+  return { summary: { totalOrders: orders.length, operationalOrderCount: operationalOrders.length, operationalCurrency: currency, operationalSales: totalOperationalSales,
+    ...(platform === "lazada" ? { operationalSalesBasis: "non_cancelled_gross_merchandise_including_returns_and_pending", itemRowCount: orders.reduce((sum, order) => sum + order.items.length, 0), quantityBasis: "provider_quantity_or_unknown_not_item_row_count", statusCohorts } : {}),
+    certifiedFinancialOrders: metric === "profit" ? profit.orderCount : 0, netSales: null, averageOrderValue: totalOperationalSales === null || operationalOrders.length === 0 ? null : totalOperationalSales / operationalOrders.length, shopCount }, profit, buyers, clv, products: [...products.values()].sort((a, b) => (b.operationalSales ?? -Infinity) - (a.operationalSales ?? -Infinity)), revenueTrend: trend };
 }

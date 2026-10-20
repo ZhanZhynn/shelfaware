@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { prismaMock, getAllFinanceTransactionDetailsCustom, setMarketplaceCapability, validateLazadaToken, createLazadaShopContext, ensureFreshLazadaToken } = vi.hoisted(() => ({
   prismaMock: {
     lazadaShop: { findFirst: vi.fn() },
+    lazadaOrder: { findMany: vi.fn() },
     syncLog: { create: vi.fn(), update: vi.fn() },
     marketplaceFinancialRecord: { findUnique: vi.fn(), upsert: vi.fn() },
   },
@@ -28,6 +29,7 @@ describe("Lazada finance sync", () => {
     prismaMock.syncLog.update.mockResolvedValue({});
     prismaMock.marketplaceFinancialRecord.findUnique.mockResolvedValue(null);
     prismaMock.marketplaceFinancialRecord.upsert.mockResolvedValue({});
+    prismaMock.lazadaOrder.findMany.mockResolvedValue([]);
     validateLazadaToken.mockResolvedValue({ valid: true });
     setMarketplaceCapability.mockResolvedValue({});
   });
@@ -57,5 +59,20 @@ describe("Lazada finance sync", () => {
       expect.any(Object),
     );
     expect(validateLazadaToken).toHaveBeenCalledWith(expect.objectContaining({ shopId: "shop-record" }));
+  });
+
+  it("honors bounded local-date windows, links only the selected shop's orders, and retains unlinked adjustments", async () => {
+    getAllFinanceTransactionDetailsCustom.mockResolvedValue([
+      { transaction_number: "inside", transaction_date: "2026-08-01 10:00:00", amount: "7.93", fee_name: "Reversal Commission", order_no: "order-1", currency: "MYR" },
+      { transaction_number: "weight", transaction_date: "2026-08-01 11:00:00", amount: "-1.20", fee_name: "Wrong Weight Adjustment" },
+      { transaction_number: "outside", transaction_date: "2026-08-02 10:00:00", amount: "3.00" },
+    ]);
+    prismaMock.lazadaOrder.findMany.mockResolvedValue([{ id: "internal-order", lazadaOrderId: "order-1" }]);
+    const result = await syncLazadaFinance("seller-record", "user-record", { from: "2026-08-01T00:00:00+08:00", to: "2026-08-01T23:59:59+08:00" });
+    expect(result.synced).toBe(2);
+    expect(getAllFinanceTransactionDetailsCustom).toHaveBeenCalledWith(expect.anything(), { start_time: "2026-08-01T00:00:00+08:00", end_time: "2026-08-01T23:59:59+08:00" });
+    expect(prismaMock.lazadaOrder.findMany).toHaveBeenCalledWith({ where: { shopId: "shop-record", lazadaOrderId: { in: ["order-1"] } }, select: { id: true, lazadaOrderId: true } });
+    expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ externalId: "inside", amountMinor: "793", currency: "MYR", orderInternalId: "internal-order", orderLinkState: "linked" }) }));
+    expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ externalId: "weight", orderExternalId: null, orderLinkState: "not_applicable" }) }));
   });
 });

@@ -72,7 +72,8 @@ async function runShopee(shopId: string, actorId: string, syncType: string, inpu
 async function runLazada(shopId: string, actorId: string, syncType: string, input: unknown) {
   const shop = await prisma.lazadaShop.findUnique({ where: { id: shopId }, select: { sellerId: true, userId: true } });
   if (!shop) throw new PermanentDispatchError("SHOP_NOT_FOUND");
-  const after = createdAfter(daysBack(input));
+  const range = marketplaceSyncDateRange(input);
+  const after = range ? { from: range.dateFrom, to: range.dateTo } : createdAfter(daysBack(input));
   switch (syncType) {
     case "products": return syncLazadaProducts(shop.sellerId, shop.userId, actorId);
     case "orders": return syncLazadaOrders(shop.sellerId, shop.userId, after, actorId);

@@ -18,34 +18,11 @@ import { invalidateLazadaStatementReconciliations } from "@/lib/server/lazada-re
 import { createHash } from "crypto";
 import type { LazadaOrderDetail } from "lazada-api-client";
 import type { OrderItem } from "./custom-api";
+import { lazadaOrderStatus, lazadaPaymentStatus, normalizeLazadaStatus } from "./status";
+import { lazadaSourceDate, type LazadaSyncRange } from "./time";
+import { lazadaIdentifier } from "./provider-error";
 
 // Lazada order status mapping to our internal status
-const ORDER_STATUS_MAP: Record<string, string> = {
-  pending: "pending",
-  confirmed: "confirmed",
-  packed: "processing",
-  ready_to_ship: "processing",
-  shipped: "shipped",
-  delivered: "delivered",
-  canceled: "cancelled",
-  cancelled: "cancelled",
-  returned: "returned",
-  failed: "cancelled",
-};
-
-const PAYMENT_STATUS_MAP: Record<string, string> = {
-  pending: "unpaid",
-  confirmed: "paid",
-  packed: "paid",
-  ready_to_ship: "paid",
-  shipped: "paid",
-  delivered: "paid",
-  canceled: "refunded",
-  cancelled: "refunded",
-  returned: "refunded",
-  failed: "unpaid",
-};
-
 // ─── Sync Lock (per-seller mutex) ─────────────────────────────────────────
 
 const syncLocks = new Set<string>();
@@ -259,7 +236,7 @@ export async function syncLazadaProducts(
 export async function syncLazadaOrders(
   sellerId: string,
   userId: string,
-  createdAfter?: string,
+  createdAfter?: string | LazadaSyncRange,
   actorId = userId,
 ): Promise<{
   synced: number;
@@ -290,32 +267,24 @@ export async function syncLazadaOrders(
         );
       }
 
-      // Default to last 15 days if no date specified
-      // Convert to ISO 8601 format without milliseconds (Lazada expects +0800, not Z)
-      const after = createdAfter || (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 15);
-        const offset = -d.getTimezoneOffset();
-        const sign = offset >= 0 ? "+" : "-";
-        const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0");
-        const minutes = String(Math.abs(offset) % 60).padStart(2, "0");
-        return d.toISOString().replace(/\.\d{3}Z$/, `${sign}${hours}${minutes}`);
-      })();
-
-      // Fetch all orders using custom implementation
+      const range = typeof createdAfter === "object" ? createdAfter : null;
+      const end = range?.to ?? new Date().toISOString();
+      const start = range?.from ?? (typeof createdAfter === "string" ? createdAfter : new Date(Date.now() - 15 * 86_400_000).toISOString());
+      // Rolling synchronization follows updates, so old orders can advance after
+      // delivery/returns. Explicit historical ranges default to creation time.
+      const byUpdate = range ? range.basis === "updated" : !createdAfter;
       const orders = await withLazadaRetry(() =>
-        getAllOrdersCustom(context, { created_after: after }),
+        getAllOrdersCustom(context, byUpdate ? { update_after: start, update_before: end } : { created_after: start, created_before: end }),
       );
 
       // Batch fetch order items (max 50 IDs per request)
       const BATCH_SIZE = 50;
-      const allItemMap = new Map<number, OrderItem[]>();
+      const allItemMap = new Map<string, OrderItem[]>();
 
       for (let i = 0; i < orders.length; i += BATCH_SIZE) {
         const batch = orders.slice(i, i + BATCH_SIZE);
         const orderIds = batch
-          .map((o) => o.order_id)
-          .filter((id): id is number => id != null);
+          .map((o) => lazadaIdentifier(o.order_id));
 
         if (orderIds.length === 0) continue;
 
@@ -325,7 +294,7 @@ export async function syncLazadaOrders(
           );
           for (const entry of itemsList) {
             if (entry.order_id && entry.order_items) {
-              allItemMap.set(entry.order_id, entry.order_items);
+              allItemMap.set(lazadaIdentifier(entry.order_id), entry.order_items);
             }
           }
         } catch (err) {
@@ -336,13 +305,14 @@ export async function syncLazadaOrders(
       // Process each order
       for (const order of orders) {
         try {
-          const orderId = order.order_id;
-          if (!orderId) continue;
+          const orderId = lazadaIdentifier(order.order_id);
 
           const orderItems = allItemMap.get(orderId) || [];
-          const orderStatus = (order.statuses?.[0] || "pending").toLowerCase();
-          const internalStatus = ORDER_STATUS_MAP[orderStatus] || "pending";
-          const paymentStatus = PAYMENT_STATUS_MAP[orderStatus] || "unpaid";
+          if (!orderItems.length) throw new Error("ORDER_ITEMS_UNAVAILABLE");
+          const itemIds = orderItems.map((item) => Number(lazadaIdentifier(item.order_item_id)));
+          if (itemIds.some((id) => !Number.isSafeInteger(id) || id <= 0) || new Set(itemIds).size !== itemIds.length) throw new Error("ORDER_ITEMS_INVALID_IDENTITIES");
+          const internalStatus = lazadaOrderStatus(order.statuses);
+          const paymentStatus = lazadaPaymentStatus(internalStatus);
 
           const totalAmount = parseSourceNumber(order.price, "lazada.order.price").value;
           const shippingFee = parseSourceNumber(order.shipping_fee, "lazada.order.shipping_fee").value;
@@ -351,16 +321,21 @@ export async function syncLazadaOrders(
             .filter((currency): currency is string => Boolean(currency)))];
           // Lazada omits currency on the order, but its line items provide it.
           // Persist it only when every priced item agrees on one upstream currency.
-          const currency = itemCurrencies.length === 1 ? itemCurrencies[0] : null;
+          const currency = itemCurrencies.length === 1 && orderItems.every((item) => item.currency?.trim().toUpperCase() === itemCurrencies[0]) ? itemCurrencies[0] : null;
 
           const existing = await prisma.lazadaOrder.findFirst({
             where: { shopId: shop.id, lazadaOrderId: String(orderId) },
           });
+          // The documented payment_time is an item timestamp in milliseconds.
+          // Do not choose the first item when payments disagree or are missing.
+          const paymentTimes = orderItems.map((item) => lazadaSourceDate(item.payment_time, shop.countryCode));
+          const paidAt = paymentTimes.every((date) => date !== null) && new Set(paymentTimes.map((date) => date?.getTime())).size === 1 ? paymentTimes[0] : null;
 
           const orderData = {
             orderNumber: order.order_number ? String(order.order_number) : null,
             orderStatus: internalStatus,
             paymentStatus,
+            ...(paidAt ? { paidAt } : {}),
             totalAmount,
             shippingFee,
             currency,
@@ -372,8 +347,8 @@ export async function syncLazadaOrders(
             trackingCarrier: orderItems[0]?.shipment_provider || null,
             shippingAddress: order.address_shipping ? toInputJson(order.address_shipping) : undefined,
             billingAddress: order.address_billing ? toInputJson(order.address_billing) : undefined,
-            lazadaCreatedAt: order.created_at ? new Date(order.created_at) : null,
-            lazadaUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+             lazadaCreatedAt: lazadaSourceDate(order.created_at, shop.countryCode),
+             lazadaUpdatedAt: lazadaSourceDate(order.updated_at, shop.countryCode),
             financialQuality: "unknown",
             financialRevision: "source-v1",
             qualityMarkedAt: new Date(),
@@ -381,66 +356,58 @@ export async function syncLazadaOrders(
             rawFinancialPayload: sanitizeMarketplaceRawPayload(order),
           };
 
-          if (existing) {
-            await prisma.lazadaOrder.update({
-              where: { id: existing.id },
-              data: { ...orderData, updatedAt: new Date() },
-            });
-            updated++;
-          } else {
-            await prisma.lazadaOrder.create({
-              data: {
-                shopId: shop.id,
-                userId,
-                lazadaOrderId: String(orderId),
-                ...orderData,
-              },
-            });
-            created++;
-          }
-
-          // Upsert order items
-          const dbOrder = existing || (await prisma.lazadaOrder.findFirst({
-             where: { shopId: shop.id, lazadaOrderId: String(orderId) },
-          }));
-
-          if (dbOrder) {
-            // Delete existing items and re-create (simpler than diffing)
-            await prisma.lazadaOrderItem.deleteMany({
+          await prisma.$transaction(async (tx) => {
+            const dbOrder = existing
+              ? await tx.lazadaOrder.update({
+                where: { id: existing.id },
+                data: { ...orderData, updatedAt: new Date() },
+              })
+              : await tx.lazadaOrder.create({
+                data: {
+                  shopId: shop.id,
+                  userId,
+                  lazadaOrderId: String(orderId),
+                  ...orderData,
+                },
+              });
+            // Header and replacement items commit together. Missing/failed item
+            // batches never erase previously observed lines or advance a header.
+            await tx.lazadaOrderItem.deleteMany({
               where: { orderId: dbOrder.id },
             });
 
             for (const item of orderItems) {
-              const itemStatus = (item.status || orderStatus).toLowerCase();
-              await prisma.lazadaOrderItem.create({
+              const itemStatus = item.status ? normalizeLazadaStatus(item.status) : internalStatus;
+              await tx.lazadaOrderItem.create({
                 data: {
                   orderId: dbOrder.id,
                   shopId: shop.id,
-                  lazadaOrderItemId: item.order_item_id || 0,
-                  itemId: item.item_id || null,
+                   lazadaOrderItemId: Number(lazadaIdentifier(item.order_item_id)),
+                   itemId: Number.isSafeInteger(Number(item.item_id)) && Number(item.item_id) > 0 ? Number(item.item_id) : null,
                   skuId: item.sku_id ? String(item.sku_id) : null,
                   sellerSku: item.seller_sku || null,
                   shopSku: item.shop_sku || null,
                   productName: item.name || "Unknown Product",
                   variation: item.variation || null,
-                   // Row multiplicity has not been verified. Do not manufacture unit sales.
-                   quantity: null,
-                   price: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
-                   paidPrice: parseSourceNumber(item.paid_price, "lazada.item.paid_price").value,
-                   itemPrice: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
+                  // Row multiplicity has not been verified. Do not manufacture unit sales.
+                  quantity: null,
+                  price: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
+                  paidPrice: parseSourceNumber(item.paid_price, "lazada.item.paid_price").value,
+                  itemPrice: parseSourceNumber(item.item_price, "lazada.item.item_price").value,
                   currency: item.currency || null,
-                  status: ORDER_STATUS_MAP[itemStatus] || internalStatus,
+                  status: itemStatus,
                   shipmentProvider: item.shipment_provider || null,
-                   trackingNumber: item.tracking_code || item.tracking_number || null,
-                    financialQuality: "unknown",
-                    financialRevision: "source-v1",
-                    qualityMarkedAt: new Date(),
-                    sourceObservedAt: new Date(),
-                     rawFinancialPayload: sanitizeMarketplaceRawPayload(item),
+                  trackingNumber: item.tracking_code || item.tracking_number || null,
+                  financialQuality: "unknown",
+                  financialRevision: "source-v1",
+                  qualityMarkedAt: new Date(),
+                  sourceObservedAt: new Date(),
+                  rawFinancialPayload: sanitizeMarketplaceRawPayload(item),
                 },
               });
             }
-          }
+          });
+          if (existing) updated++; else created++;
 
           synced++;
         } catch (err) {
@@ -451,7 +418,7 @@ export async function syncLazadaOrders(
       }
 
       // Update shop last synced
-      await prisma.lazadaShop.update({
+      if (!errors.length) await prisma.lazadaShop.update({
         where: { id: shop.id },
         data: { lastSyncedAt: new Date() },
       });
@@ -497,10 +464,10 @@ function stableValue(value: unknown): string {
 }
 
 function financeSourceChanged(existing: object, data: object): boolean {
-  const fields = ["statementExternalId", "orderExternalId", "itemExternalId", "transactionType", "feeType", "feeName", "amountMinor", "amountScale", "financialQuality", "unknownReason", "currency", "occurredAt", "rawPayload"];
+  const fields = ["statementExternalId", "orderExternalId", "orderInternalId", "orderLinkState", "itemExternalId", "transactionType", "feeType", "feeName", "amountMinor", "amountScale", "financialQuality", "unknownReason", "currency", "occurredAt", "rawPayload"];
   const current = existing as Record<string, unknown>;
   const incoming = data as Record<string, unknown>;
-  return fields.some((field) => stableValue(current[field]) !== stableValue(incoming[field]));
+  return fields.some((field) => Object.hasOwn(incoming, field) && stableValue(current[field]) !== stableValue(incoming[field]));
 }
 
 function defaultFinanceStart(): Date {
@@ -535,16 +502,10 @@ function isPaidPayout(value: unknown): boolean {
   return value === 1 || value === true || value === "1";
 }
 
-function validDate(value: unknown): Date | null {
-  if (typeof value !== "string") return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
 export async function syncLazadaFinance(
   sellerId: string,
   userId: string,
-  createdAfter?: string,
+  createdAfter?: string | LazadaSyncRange,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
   const shop = await prisma.lazadaShop.findFirst({ where: { sellerId, userId } });
@@ -560,10 +521,19 @@ export async function syncLazadaFinance(
           throw new Error(`Lazada token is invalid or expired: ${tokenCheck.error}. Please re-authorize the seller by connecting again.`);
         }
 
-        const transactions = await withLazadaRetry(() => getAllFinanceTransactionDetailsCustom(context, {
-          start_time: createdAfter || defaultFinanceStart(),
-          end_time: new Date(),
+        const range = typeof createdAfter === "object" ? createdAfter : null;
+        const fetched = await withLazadaRetry(() => getAllFinanceTransactionDetailsCustom(context, {
+          start_time: range?.from ?? (typeof createdAfter === "string" ? createdAfter : defaultFinanceStart()),
+          end_time: range?.to ?? new Date(),
         }));
+        const transactions = range ? fetched.filter((transaction) => {
+          const occurred = lazadaSourceDate(transaction.transaction_date, shop.countryCode);
+          if (!occurred) throw new Error("Transaction date is unavailable for a bounded finance query");
+          return occurred >= new Date(range.from) && occurred <= new Date(range.to);
+        }) : fetched;
+        const orderIds = [...new Set(transactions.flatMap((row) => typeof row.order_no === "string" && row.order_no.trim() ? [row.order_no.trim()] : []))];
+        const linkedOrders = orderIds.length ? await prisma.lazadaOrder.findMany({ where: { shopId: shop.id, lazadaOrderId: { in: orderIds } }, select: { id: true, lazadaOrderId: true } }) : [];
+        const orderLinks = new Map(linkedOrders.map((row) => [row.lazadaOrderId, row.id]));
         let created = 0;
         let updated = 0;
         const errors: string[] = [];
@@ -573,10 +543,14 @@ export async function syncLazadaFinance(
             const externalId = financeExternalId(transaction);
             const parsedAmount = parseSourceNumber(transaction.amount, "lazada.finance.amount");
             const exactAmount = toExactMinorUnits(transaction.amount);
-            const occurredAt = transaction.transaction_date ? new Date(transaction.transaction_date) : null;
+            const occurredAt = lazadaSourceDate(transaction.transaction_date, shop.countryCode);
+            const orderExternalId = typeof transaction.order_no === "string" && transaction.order_no.trim() ? transaction.order_no.trim() : null;
+            const orderInternalId = orderExternalId ? orderLinks.get(orderExternalId) ?? null : null;
             const data = {
               statementExternalId: documentedStatementReference(transaction.statement),
-              orderExternalId: typeof transaction.order_no === "string" ? transaction.order_no : null,
+              orderExternalId,
+              orderInternalId,
+              orderLinkState: orderExternalId ? orderInternalId ? "linked" : "unmatched" : "not_applicable",
               itemExternalId: typeof transaction.orderItem_no === "string" ? transaction.orderItem_no : null,
               transactionType: typeof transaction.transaction_type === "string" ? transaction.transaction_type : null,
               feeType: typeof transaction.fee_type === "string" ? transaction.fee_type : null,
@@ -584,6 +558,7 @@ export async function syncLazadaFinance(
               amountMinor: exactAmount?.amountMinor ?? null,
               amountScale: exactAmount?.amountScale ?? 2,
               amount: null,
+              currency: typeof transaction.currency === "string" && /^[A-Z]{3}$/.test(transaction.currency) ? transaction.currency : null,
               financialQuality: parsedAmount.quality,
               unknownReason: parsedAmount.unknownReason,
               sourceObservedAt: new Date(),
@@ -592,7 +567,7 @@ export async function syncLazadaFinance(
             };
             const existing = await prisma.marketplaceFinancialRecord.findUnique({
               where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
-              select: { id: true, statementExternalId: true, orderExternalId: true, itemExternalId: true, transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, financialQuality: true, unknownReason: true, currency: true, occurredAt: true, rawPayload: true },
+              select: { id: true, statementExternalId: true, orderExternalId: true, orderInternalId: true, orderLinkState: true, itemExternalId: true, transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, financialQuality: true, unknownReason: true, currency: true, occurredAt: true, rawPayload: true },
             });
             await prisma.marketplaceFinancialRecord.upsert({
               where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
@@ -624,7 +599,7 @@ export async function syncLazadaFinance(
 
         // Also sync logistics fee details for shipping discrepancy detection
         try {
-          await syncLazadaLogisticsFees(sellerId, userId, createdAfter, actorId);
+          if (!range) await syncLazadaLogisticsFees(sellerId, userId, typeof createdAfter === "string" ? createdAfter : undefined, actorId);
         } catch (logisticsError) {
           const msg = logisticsError instanceof Error ? logisticsError.message : String(logisticsError);
           logger.warn(`[Lazada Finance Sync] Logistics fee sync failed (non-blocking): ${msg}`);
@@ -823,7 +798,7 @@ function parseLazadaZoneDate(zoneDate: Record<string, unknown>): Date | null {
 export async function syncLazadaPayoutStatements(
   sellerId: string,
   userId: string,
-  createdAfter?: string,
+  createdAfter?: string | LazadaSyncRange,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
   const shop = await prisma.lazadaShop.findFirst({ where: { sellerId, userId } });
@@ -838,7 +813,13 @@ export async function syncLazadaPayoutStatements(
         throw new Error(`Lazada token is invalid or expired: ${tokenCheck.error}. Please re-authorize the seller by connecting again.`);
       }
 
-      const statements = await withLazadaRetry(() => getPayoutStatusCustom(context, createdAfter || defaultFinanceStart()));
+      const range = typeof createdAfter === "object" ? createdAfter : null;
+      const fetched = await withLazadaRetry(() => getPayoutStatusCustom(context, range?.from ?? (typeof createdAfter === "string" ? createdAfter : defaultFinanceStart())));
+      const statements = range ? fetched.filter((statement) => {
+        const created = lazadaSourceDate(statement.created_at, shop.countryCode);
+        if (!created) throw new Error("Payout statement creation date is unavailable for a bounded query");
+        return created >= new Date(range.from) && created <= new Date(range.to);
+      }) : fetched;
       const errors: string[] = [];
       let created = 0;
       let updated = 0;
@@ -865,7 +846,7 @@ export async function syncLazadaPayoutStatements(
             unknownReason: payout ? "source_observed_unverified" : "source_value_malformed",
             currency: payout?.currency ?? null,
             sourceObservedAt: new Date(),
-            occurredAt: validDate(statement.updated_at) ?? validDate(statement.created_at),
+            occurredAt: lazadaSourceDate(statement.updated_at, shop.countryCode) ?? lazadaSourceDate(statement.created_at, shop.countryCode),
             rawPayload: sanitizeMarketplaceRawPayload(statement),
           };
           const where = {

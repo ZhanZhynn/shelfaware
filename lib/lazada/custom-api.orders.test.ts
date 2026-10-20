@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/env", () => ({ getEnvVar: () => "fixture-value" }));
-import { getAllOrdersCustom, getOrdersPageCustom, getFinanceTransactionDetailsCustom, validateFinanceDateRange } from "./custom-api";
+import { getAllOrdersCustom, getOrdersPageCustom, getFinanceTransactionDetailsCustom, getAllFinanceTransactionDetailsCustom, validateFinanceDateRange } from "./custom-api";
 import { LazadaProviderError } from "./provider-error";
 import { lazadaSourceDate } from "./time";
 import { lazadaOrderStatus, lazadaPaymentStatus } from "./status";
@@ -43,5 +43,22 @@ describe("Lazada bounded provider reads", () => {
     const error = await getFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" }).catch((value: unknown) => value);
     expect(error).toMatchObject({ code: `MALFORMED_FINANCE_${shape}`, providerRequestId: "fixture-request" });
     expect(String(error)).not.toContain("private");
+  });
+  it("deduplicates identical finance observations but rejects conflicting values under one source ID", async () => {
+    const first = { transaction_number: "source-1", amount: "7.93", fee_name: "Reversal Commission" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [first, { ...first }] }) }));
+    expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toHaveLength(1);
+    vi.mocked(fetch).mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [first, { ...first, amount: "8.00" }] }) } as Response);
+    await expect(getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).rejects.toMatchObject({ code: "INCONSISTENT_FINANCE_TRANSACTION_ID" });
+  });
+  it("normalizes numeric finance IDs and reports missing identities without logging source values", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [{ transaction_number: 123, amount: "1.00" }] }) }));
+    expect((await getFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" }))[0]?.transaction_number).toBe("123");
+    vi.mocked(fetch).mockResolvedValue({ status: 200, json: async () => ({ code: "0", request_id: "fixture-request", data: [{ amount: "1.00", private_field: "private-value" }] }) } as Response);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(getFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).rejects.toMatchObject({ code: "MISSING_FINANCE_TRANSACTION_ID" });
+      expect(JSON.stringify(warning.mock.calls)).not.toContain("private-value");
+    } finally { warning.mockRestore(); }
   });
 });

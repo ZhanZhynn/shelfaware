@@ -8,7 +8,7 @@ import { getLazadaEndpoint } from "./server";
 import type { LazadaShopContext } from "./server";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { createHmac } from "crypto";
+import { createHash, createHmac } from "crypto";
 import { lazadaCalendarDate, lazadaTimestamp } from "./time";
 import { assertLazadaSuccess, LazadaProviderError, lazadaIdentifier, lazadaResponseShape } from "./provider-error";
 
@@ -418,7 +418,21 @@ export async function getFinanceTransactionDetailsCustom(
 
   assertLazadaSuccess(data, response.status);
   if (!Array.isArray(data.data)) throw new LazadaProviderError(`MALFORMED_FINANCE_${lazadaResponseShape(data.data)}`, 502, data.request_id);
-  return data.data;
+  return data.data.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw new LazadaProviderError(`MALFORMED_FINANCE_ROW_${lazadaResponseShape(row)}`, 502, data.request_id);
+    const sourceId: unknown = row.transaction_number;
+    const transactionNumber = typeof sourceId === "string" ? sourceId.trim()
+      : typeof sourceId === "number" && Number.isSafeInteger(sourceId) && sourceId > 0 ? String(sourceId) : null;
+    if (!transactionNumber) {
+      console.warn("Lazada finance source identity schema", {
+        providerRequestId: new LazadaProviderError("MISSING_FINANCE_TRANSACTION_ID", 502, data.request_id).providerRequestId,
+        sourceIdType: lazadaResponseShape(sourceId),
+        fields: Object.keys(row).filter((key) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)).slice(0, 40),
+      });
+      throw new LazadaProviderError("MISSING_FINANCE_TRANSACTION_ID", 502, data.request_id);
+    }
+    return { ...row, transaction_number: transactionNumber };
+  });
 }
 
 /** Fetch all finance transaction pages using Lazada's documented 500-row limit. */
@@ -430,15 +444,26 @@ export async function getAllFinanceTransactionDetailsCustom(
   const pageSize = 500;
   let offset = 0;
 
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   while (offset < 500_000) {
     const page = await getFinanceTransactionDetailsCustom(context, { ...params, offset, limit: pageSize });
+    const previousCount = transactions.length;
     for (const row of page) {
-      if (!row.transaction_number || seen.has(row.transaction_number)) throw new LazadaProviderError("INVALID_FINANCE_TRANSACTION_ID", 502);
-      seen.add(row.transaction_number);
+      const id = row.transaction_number!;
+      const fingerprint = createHash("sha256").update(JSON.stringify(Object.fromEntries(Object.entries(row).sort(([a], [b]) => a.localeCompare(b))))).digest("hex");
+      const previous = seen.get(id);
+      if (previous && previous !== fingerprint) {
+        const first = transactions.find((item) => item.transaction_number === id)!;
+        const fields = [...new Set([...Object.keys(first), ...Object.keys(row)])].filter((key) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) && JSON.stringify(first[key]) !== JSON.stringify(row[key])).slice(0, 40);
+        console.warn("Lazada finance source identity conflict", { offset, differingFields: fields });
+        throw new LazadaProviderError("INCONSISTENT_FINANCE_TRANSACTION_ID", 502);
+      }
+      if (previous) continue; // Identical source-ID observations are not new money.
+      seen.set(id, fingerprint);
+      transactions.push(row);
     }
-    transactions.push(...page);
     if (page.length < pageSize) break;
+    if (transactions.length === previousCount) throw new LazadaProviderError("INCONSISTENT_FINANCE_PAGINATION", 502);
     offset += pageSize;
     if (offset >= 500_000) throw new Error("Lazada finance pagination exceeded its bounded record budget");
   }

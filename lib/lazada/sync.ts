@@ -21,7 +21,7 @@ import type { OrderItem } from "./custom-api";
 import { lazadaOrderStatus, lazadaPaymentStatus, normalizeLazadaStatus } from "./status";
 import { lazadaSourceDate, lazadaFinanceDate, type LazadaSyncRange } from "./time";
 import { lazadaIdentifier, LazadaProviderError } from "./provider-error";
-import { lazadaFinanceIdentity } from "./finance-identity";
+import { lazadaFinanceIdentity, lazadaFinanceLegacyIdentity, lazadaFinanceSameComponent } from "./finance-identity";
 
 // Lazada order status mapping to our internal status
 // ─── Sync Lock (per-seller mutex) ─────────────────────────────────────────
@@ -529,7 +529,7 @@ export async function syncLazadaFinance(
         const orderIds = [...new Set(transactions.flatMap((row) => { const id = lazadaFinanceIdentity(row).orderNumber; return id ? [id] : []; }))];
         const linkedOrders = orderIds.length ? await prisma.lazadaOrder.findMany({ where: { shopId: shop.id, lazadaOrderId: { in: orderIds } }, select: { id: true, lazadaOrderId: true } }) : [];
         const orderLinks = new Map(linkedOrders.map((row) => [row.lazadaOrderId, row.id]));
-        const legacyIds = [...new Set(transactions.map((row) => row.transaction_number).filter((id): id is string => typeof id === "string"))];
+        const legacyIds = [...new Set(transactions.flatMap((row) => [lazadaFinanceIdentity(row).transactionNumber, lazadaFinanceIdentity(row).legacyExternalId]))];
         const legacyRows = legacyIds.length ? await prisma.marketplaceFinancialRecord.findMany({
           where: { platform: "lazada", shopId: shop.id, externalId: { in: legacyIds } },
           select: { id: true, externalId: true, statementExternalId: true, orderExternalId: true, orderInternalId: true, orderLinkState: true, itemExternalId: true, transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, financialQuality: true, unknownReason: true, currency: true, occurredAt: true, rawPayload: true },
@@ -571,18 +571,22 @@ export async function syncLazadaFinance(
               where: { platform_shopId_externalId: { platform: "lazada", shopId: shop.id, externalId } },
               select: { id: true, statementExternalId: true, orderExternalId: true, orderInternalId: true, orderLinkState: true, itemExternalId: true, transactionType: true, feeType: true, feeName: true, amountMinor: true, amountScale: true, financialQuality: true, unknownReason: true, currency: true, occurredAt: true, rawPayload: true },
             });
-            const legacy = legacyById.get(identity.transactionNumber);
+            const legacy = legacyById.get(identity.transactionNumber) ?? legacyById.get(identity.legacyExternalId);
             let migratedLegacy = false;
             if (legacy) {
               const raw = legacy.rawPayload && typeof legacy.rawPayload === "object" && !Array.isArray(legacy.rawPayload) ? legacy.rawPayload as Record<string, unknown> : {};
-              const legacyIdentity = lazadaFinanceIdentity({ transaction_number: legacy.externalId, fee_type: legacy.feeType ?? raw.fee_type, order_no: legacy.orderExternalId ?? raw.order_no, orderItem_no: legacy.itemExternalId ?? raw.orderItem_no });
-              if (!legacyIdentity.feeType && identity.feeType) throw new LazadaProviderError("INCONSISTENT_LEGACY_FINANCE_IDENTITY", 502);
-              if (legacyIdentity.externalId === externalId) {
+              const legacySource = { transaction_number: raw.transaction_number ?? identity.transactionNumber,
+                fee_type: legacy.feeType ?? raw.fee_type, fee_name: legacy.feeName ?? raw.fee_name,
+                order_no: legacy.orderExternalId ?? raw.order_no, orderItem_no: legacy.itemExternalId ?? raw.orderItem_no };
+              const oldKey = legacy.externalId.startsWith("finance:v2:") ? lazadaFinanceLegacyIdentity(legacySource) : legacy.externalId;
+              const legacyKeyMatches = legacy.externalId === identity.transactionNumber || oldKey === identity.legacyExternalId;
+              if (legacyKeyMatches && lazadaFinanceSameComponent(legacySource, transaction)) {
                 if (existing && existing.id !== legacy.id) throw new LazadaProviderError("INCONSISTENT_LEGACY_FINANCE_DUPLICATE", 502);
                 await prisma.marketplaceFinancialRecord.update({ where: { id: legacy.id }, data: { externalId, ...data } });
                 existing = legacy;
                 migratedLegacy = true;
                 legacyById.delete(identity.transactionNumber);
+                legacyById.delete(identity.legacyExternalId);
               }
             }
             if (!migratedLegacy) await prisma.marketplaceFinancialRecord.upsert({

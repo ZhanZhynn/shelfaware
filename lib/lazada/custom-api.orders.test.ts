@@ -73,8 +73,9 @@ describe("Lazada bounded provider reads", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [
       { transaction_number: "shared-source", fee_type: "13", fee_name: "Item Price Credit", amount: "20.00" },
       { transaction_number: "shared-source", fee_type: "14", fee_name: "Commission", amount: "-2.00" },
+      { transaction_number: "shared-source", fee_type: "14", fee_name: "Second commission component", amount: "-0.10" },
     ] }) }));
-    expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toHaveLength(2);
+    expect(await getAllFinanceTransactionDetailsCustom(context, { start_time: "2026-08-01", end_time: "2026-08-01" })).toHaveLength(3);
   });
   it("treats numeric and string representations of component identifiers as the same observation", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200, json: async () => ({ code: "0", data: [

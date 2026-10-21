@@ -57,4 +57,25 @@ describe("Shopify order-line source facts", () => {
       shopifyVariantGid: null,
     });
   });
+
+  it.each(["", " ", "12junk", "NaN", "Infinity", "1e3"])("keeps malformed source money unknown rather than coercing %j", (amount) => {
+    const bag = { shopMoney: { amount, currencyCode: "USD" } };
+    expect(shopifyOrderLineSourceFacts(lineItem({ originalUnitPriceSet: bag, discountedUnitPriceSet: bag, discountedTotalSet: bag }))).toMatchObject({
+      originalUnitPriceAmount: null, originalUnitPriceScale: null, originalUnitPriceCurrency: null,
+      discountedUnitPriceAmount: null, discountedUnitPriceScale: null, discountedUnitPriceCurrency: null,
+      discountedLineAmount: null, discountedLineScale: null, discountedLineCurrency: null,
+    });
+  });
+
+  it.each(["0", "-0.00", "+0012.340", "9007199254740993.01"])("retains exact source digits, signs and scale for %s", (amount) => {
+    const bag = { shopMoney: { amount, currencyCode: "MYR" } };
+    const facts = shopifyOrderLineSourceFacts(lineItem({ originalUnitPriceSet: bag }));
+    expect(facts.originalUnitPriceAmount).toBe(amount);
+    expect(facts.originalUnitPriceScale).toBe(amount.split(".")[1]?.length ?? 0);
+    expect(facts.originalUnitPriceCurrency).toBe("MYR");
+  });
+
+  it("uses the variant's upstream product identity if the order-line product is absent", () => {
+    expect(shopifyOrderLineSourceFacts(lineItem({ product: null }))).toMatchObject({ shopifyProductGid: "gid://shopify/Product/10", shopifyVariantGid: "gid://shopify/ProductVariant/20" });
+  });
 });

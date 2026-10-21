@@ -5,7 +5,8 @@ const { prismaMock, getAllFinanceTransactionDetailsCustom, setMarketplaceCapabil
     lazadaShop: { findFirst: vi.fn() },
     lazadaOrder: { findMany: vi.fn() },
     syncLog: { create: vi.fn(), update: vi.fn() },
-    marketplaceFinancialRecord: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), update: vi.fn() },
+    marketplaceFinancialRecord: { findUnique: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), update: vi.fn(), updateMany: vi.fn(), deleteMany: vi.fn() },
+    $transaction: vi.fn(),
   },
   getAllFinanceTransactionDetailsCustom: vi.fn(),
   setMarketplaceCapability: vi.fn(),
@@ -33,6 +34,9 @@ describe("Lazada finance sync", () => {
     prismaMock.marketplaceFinancialRecord.findUnique.mockResolvedValue(null);
     prismaMock.marketplaceFinancialRecord.findMany.mockResolvedValue([]);
     prismaMock.marketplaceFinancialRecord.upsert.mockResolvedValue({});
+    prismaMock.marketplaceFinancialRecord.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.marketplaceFinancialRecord.deleteMany.mockResolvedValue({ count: 1 });
+    prismaMock.$transaction.mockImplementation((work) => work(prismaMock));
     prismaMock.lazadaOrder.findMany.mockResolvedValue([]);
     validateLazadaToken.mockResolvedValue({ valid: true });
     setMarketplaceCapability.mockResolvedValue({});
@@ -75,7 +79,7 @@ describe("Lazada finance sync", () => {
     const result = await syncLazadaFinance("seller-record", "user-record", { from: "2026-08-01T00:00:00+08:00", to: "2026-08-01T23:59:59+08:00" });
     expect(result.synced).toBe(2);
     expect(getAllFinanceTransactionDetailsCustom).toHaveBeenCalledWith(expect.anything(), { start_time: "2026-08-01T00:00:00+08:00", end_time: "2026-08-01T23:59:59+08:00" });
-    expect(prismaMock.lazadaOrder.findMany).toHaveBeenCalledWith({ where: { shopId: "shop-record", lazadaOrderId: { in: ["order-1"] } }, select: { id: true, lazadaOrderId: true } });
+    expect(prismaMock.lazadaOrder.findMany).toHaveBeenCalledWith({ where: { shopId: "shop-record", lazadaOrderId: { in: ["order-1"] } }, select: { id: true, lazadaOrderId: true, items: { select: { lazadaOrderItemId: true } } } });
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ rawPayload: expect.objectContaining({ transaction_number: "inside" }), amountMinor: "793", currency: "MYR", orderInternalId: "internal-order", orderLinkState: "linked" }) }));
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ rawPayload: expect.objectContaining({ transaction_number: "weight" }), orderExternalId: null, orderLinkState: "not_applicable" }) }));
   });
@@ -96,7 +100,7 @@ describe("Lazada finance sync", () => {
   it("upgrades a provably matching legacy component in place without double-counting it", async () => {
     const source = { transaction_number: "legacy-source", fee_type: "13", amount: "20.00", order_no: "order-1", orderItem_no: "line-1" };
     getAllFinanceTransactionDetailsCustom.mockResolvedValue([source]);
-    prismaMock.marketplaceFinancialRecord.findMany.mockResolvedValue([{ id: "legacy-id", externalId: "legacy-source", feeType: "13", orderExternalId: "order-1", itemExternalId: "line-1", rawPayload: source, statementExternalId: null }]);
+    prismaMock.marketplaceFinancialRecord.findMany.mockResolvedValue([{ id: "legacy-id", shopId: "shop-record", externalId: "legacy-source", feeType: "13", orderExternalId: "order-1", itemExternalId: "line-1", rawPayload: source, statementExternalId: null }]);
     const result = await syncLazadaFinance("seller-record", "user-record");
     expect(result).toMatchObject({ created: 0, updated: 1, errors: [] });
     expect(prismaMock.marketplaceFinancialRecord.update).toHaveBeenCalledWith({ where: { id: "legacy-id" }, data: expect.objectContaining({ externalId: lazadaFinanceIdentity(source).externalId, amountMinor: "2000" }) });
@@ -131,5 +135,30 @@ describe("Lazada finance sync", () => {
     expect(prismaMock.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ occurredAt: new Date("2026-07-31T16:00:00Z") }) }));
     getAllFinanceTransactionDetailsCustom.mockResolvedValue([{ transaction_number: "source", amount: "20.00", transaction_date: "01/08/2026" }]);
     await expect(syncLazadaFinance("seller-record", "user-record", range)).rejects.toMatchObject({ code: "MISSING_FINANCE_TIMESTAMP", fields: ["timestamp_shape_DD_DD_DDDD"] });
+  });
+
+  it("atomically consolidates a matching v2 duplicate even when the raw alias belongs to a different fee, and resolves its provider line reference", async () => {
+    const source = { transaction_number: "1001", fee_type: "239", fee_name: "Sponsored Affiliates", amount: "-0.64", transaction_date: "02 Aug 2026", order_no: "order-1", statement: "statement" };
+    const identity = lazadaFinanceIdentity(source);
+    const facts = { shopId: "shop-record", feeType: "239", feeName: "Sponsored Affiliates", amountMinor: "-64", amountScale: 2, currency: null, occurredAt: new Date("2026-08-01T16:00:00Z"), statementExternalId: "statement", orderExternalId: "order-1", orderInternalId: "internal-order", financialQuality: "unknown", updatedAt: new Date("2026-10-20T00:00:00Z"), rawPayload: source };
+    getAllFinanceTransactionDetailsCustom.mockResolvedValue([source]);
+    prismaMock.lazadaOrder.findMany.mockResolvedValue([{ id: "internal-order", lazadaOrderId: "order-1", items: [{ lazadaOrderItemId: 1001 }] }]);
+    prismaMock.marketplaceFinancialRecord.findUnique.mockResolvedValue({ id: "canonical", externalId: identity.externalId, ...facts });
+    prismaMock.marketplaceFinancialRecord.findMany.mockResolvedValue([
+      { id: "raw-credit", ...facts, externalId: "1001", feeType: "13", feeName: "Item Price Credit", rawPayload: { ...source, fee_type: "13", fee_name: "Item Price Credit" } },
+      { id: "old-affiliate", externalId: identity.legacyExternalId, ...facts },
+    ]);
+    expect(await syncLazadaFinance("seller-record", "user-record")).toMatchObject({ created: 0, updated: 1, mergedAliases: 1, errors: [] });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.marketplaceFinancialRecord.updateMany).toHaveBeenCalledWith({ where: expect.objectContaining({ id: "canonical", shopId: "shop-record", updatedAt: facts.updatedAt }), data: expect.objectContaining({ itemExternalId: "1001", rawPayload: expect.objectContaining({ shelfaware_alias_merges: [expect.objectContaining({ id: "old-affiliate" })], shelfaware_item_link_basis: "provider_transaction_number" }) }) });
+    expect(prismaMock.marketplaceFinancialRecord.deleteMany).toHaveBeenCalledWith({ where: expect.objectContaining({ platform: "lazada", shopId: "shop-record", OR: [expect.objectContaining({ id: "old-affiliate", amountMinor: "-64", financialQuality: "unknown" })] }) });
+    expect(JSON.stringify(prismaMock.marketplaceFinancialRecord.deleteMany.mock.calls)).not.toContain("raw-credit");
+
+    prismaMock.marketplaceFinancialRecord.deleteMany.mockResolvedValueOnce({ count: 0 });
+    await expect(syncLazadaFinance("seller-record", "user-record")).rejects.toMatchObject({ code: "INCONSISTENT_FINANCE_ALIAS_CONCURRENT_CHANGE" });
+    prismaMock.marketplaceFinancialRecord.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.marketplaceFinancialRecord.deleteMany.mockClear();
+    await expect(syncLazadaFinance("seller-record", "user-record")).rejects.toMatchObject({ code: "INCONSISTENT_FINANCE_ALIAS_CONCURRENT_CHANGE" });
+    expect(prismaMock.marketplaceFinancialRecord.deleteMany).not.toHaveBeenCalled();
   });
 });

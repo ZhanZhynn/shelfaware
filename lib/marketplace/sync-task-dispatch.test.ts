@@ -87,6 +87,13 @@ describe("dispatchMarketplaceSyncTask", () => {
     expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ checkpoint: expect.objectContaining({ inclusive: true, windowsCompleted: 1 }) }));
     expect(mocks.invalidateMarketplaceAnalytics).toHaveBeenCalledWith("lazada");
   });
+  it("carries alias repair counts forward across finance window checkpoints", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "finance", metrics: { aliasesMerged: 2 }, run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-03T23:59:59+08:00" } } }));
+    mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });
+    mocks.syncLazadaFinance.mockResolvedValue({ synced: 1, created: 0, updated: 1, mergedAliases: 1, errors: [] });
+    await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a")).resolves.toMatchObject({ status: "checkpointed" });
+    expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ metrics: expect.objectContaining({ aliasesMerged: 3 }) }));
+  });
   it("checkpoints a completed 24-hour orders window and republishes the same task", async () => {
     const now = new Date("2026-10-13T00:00:00.000Z");
     await expect(dispatchMarketplaceSyncTask("a".repeat(24), "worker-a", now)).resolves.toEqual({ status: "checkpointed", nextTaskId: "a".repeat(24) });

@@ -46,6 +46,7 @@ const feeCategories: Record<string, Category> = {
   "sponsored affiliates refund": "fees",
   "shipping fee subsidy (by seller)": "shipping",
   "wrong weight adjustment": "shipping",
+  "wrong shipping fee adjustment": "shipping",
 };
 
 export function lazadaFeeCategory(row: Pick<LazadaFinancialRow, "feeName" | "transactionType">): Category | null {
@@ -57,6 +58,7 @@ export function lazadaFeeCategory(row: Pick<LazadaFinancialRow, "feeName" | "tra
 const diagnosticTypes = new Set(["logistics_fee", "shipping_fee_comparison", "payout_statement"]);
 const validMoney = (row: LazadaFinancialRow) => typeof row.amountMinor === "string" && /^-?\d+$/.test(row.amountMinor)
   && Number.isInteger(row.amountScale) && row.amountScale >= 0 && row.amountScale <= 12;
+const validCurrency = (currency: string | null) => /^[A-Z]{3}$/.test(currency ?? "");
 
 /** Scale alignment is exact. Never silently round large values into a JS number. */
 export function sumLazadaMoney(rows: readonly LazadaFinancialRow[]): number | null {
@@ -72,9 +74,10 @@ const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
 
 export function buildLazadaProfitReport(records: readonly LazadaFinancialRow[], orders: readonly LazadaReportOrder[], financeReady = false): ProfitDetailResponse {
   const ledger = records.filter((row) => !diagnosticTypes.has((row.transactionType ?? "").toLowerCase()));
-  const currencies = [...new Set(ledger.map((row) => row.currency).filter((value): value is string => Boolean(value)))];
-  const orderCurrencies = [...new Set(orders.map((order) => order.currency).filter((value): value is string => Boolean(value)))];
-  const currency = currencies.length === 1 ? currencies[0]! : !currencies.length && orderCurrencies.length === 1 ? orderCurrencies[0]! : "unknown";
+  const currencies = [...new Set(ledger.map((row) => row.currency).filter((value): value is string => validCurrency(value)))];
+  // An order's denomination is evidence for its merchandise, not for a finance
+  // posting whose provider omitted currency. Keep those source bases separate.
+  const currency = currencies.length === 1 ? currencies[0]! : "unknown";
   const reasons = [
     ...(!ledger.length ? ["no imported Lazada transaction records"] : []),
     ...(ledger.some((row) => !validMoney(row)) ? ["some transaction amounts or scales are missing or invalid"] : []),
@@ -104,7 +107,7 @@ export function buildLazadaProfitReport(records: readonly LazadaFinancialRow[], 
   const sellerIncome = complete ? observedLedgerNet : null;
 
   const nonCancelled = orders.filter((order) => !/cancel|fail/i.test(order.orderStatus));
-  type Product = { row: ProductProfitRow; amounts: Array<number | null>; quantities: Array<number | null>; orders: Set<string>; records: LazadaFinancialRow[] };
+  type Product = { row: ProductProfitRow; amounts: Array<number | null>; quantities: Array<number | null>; currencies: Set<string | null>; orders: Set<string>; records: LazadaFinancialRow[] };
   const products = new Map<string, Product>();
   const lineProducts = new Map<string, string>();
   for (const order of nonCancelled) for (const item of order.items) {
@@ -115,10 +118,11 @@ export function buildLazadaProfitReport(records: readonly LazadaFinancialRow[], 
     const product = products.get(key) ?? {
       row: { productName: item.productName, productId: item.itemId?.toString() ?? null, variantId: item.skuId, sku, sourceProductKey: key,
         revenue: null, revenueBasis: "paid_line_amount", quantitySold: null, quantitySourceConfidence: "partial", orderCount: 0, estimatedFees: null, estimatedProfit: null, margin: null },
-      amounts: [], quantities: [], orders: new Set<string>(), records: [],
+      amounts: [], quantities: [], currencies: new Set<string | null>(), orders: new Set<string>(), records: [],
     };
     product.amounts.push(item.paidPrice);
     product.quantities.push(item.quantity);
+    product.currencies.add(order.currency);
     product.orders.add(order.id);
     products.set(key, product);
     lineProducts.set(`${order.shopId}:${order.lazadaOrderId}:${item.lazadaOrderItemId}`, key);
@@ -132,11 +136,12 @@ export function buildLazadaProfitReport(records: readonly LazadaFinancialRow[], 
   const byProduct = [...products.values()].map((product) => {
     const knownAmounts = product.amounts.every((value) => typeof value === "number" && Number.isFinite(value));
     const knownQuantities = product.quantities.every((value) => typeof value === "number" && Number.isFinite(value));
-    const paid = knownAmounts ? round((product.amounts as number[]).reduce((sum, value) => sum + value, 0)) : null;
+    const revenueCurrency = product.currencies.size === 1 && validCurrency([...product.currencies][0]!) ? [...product.currencies][0]! : null;
+    const paid = knownAmounts && revenueCurrency ? round((product.amounts as number[]).reduce((sum, value) => sum + value, 0)) : null;
     const ownFees = product.records.filter((row) => ["fees", "shipping"].includes(lazadaFeeCategory(row) ?? ""));
     const fees = complete && unallocated.length === 0 && product.records.length ? (ownFees.length ? sumLazadaMoney(ownFees) : 0) : null;
     const proceeds = complete && unallocated.length === 0 ? sumLazadaMoney(product.records) : null;
-    return { ...product.row, revenue: paid, quantitySold: knownQuantities ? (product.quantities as number[]).reduce((sum, value) => sum + value, 0) : null,
+    return { ...product.row, revenue: paid, revenueCurrency, quantitySold: knownQuantities ? (product.quantities as number[]).reduce((sum, value) => sum + value, 0) : null,
       quantitySourceConfidence: knownQuantities ? "observed" as const : "partial" as const, orderCount: product.orders.size,
       estimatedFees: fees === null ? null : -fees, estimatedProfit: proceeds,
       // Paid merchandise and gross ledger credits have different discount bases.
@@ -150,10 +155,14 @@ export function buildLazadaProfitReport(records: readonly LazadaFinancialRow[], 
     byName.set(name, [...(byName.get(name) ?? []), row]);
   }
   const feeBreakdown = [...byName].flatMap(([name, rows]) => {
+    if (rows.some((row) => row.currency !== currency)) return [];
     const amount = sumLazadaMoney(rows);
     return amount === null ? [] : [{ name, amount: -amount, percentage: sales !== null && sales > 0 ? round(-amount / sales * 100) : 0 }];
   });
   const knownRecords = ledger.filter((row) => validMoney(row) && /^[A-Z]{3}$/.test(row.currency ?? "") && row.currency === currency);
+  const amountRecords = ledger.filter(validMoney);
+  const currencyRecords = ledger.filter((row) => validCurrency(row.currency));
+  const classifiedRecords = ledger.filter((row) => lazadaFeeCategory(row) !== null);
   return {
     summary: { totalRevenue: sales, totalFees, totalShipping, sellerIncome,
       overallMargin: sales !== null && sales > 0 && sellerIncome !== null ? round(sellerIncome / sales * 100) : null,
@@ -164,7 +173,9 @@ export function buildLazadaProfitReport(records: readonly LazadaFinancialRow[], 
     coverage: { state: !knownRecords.length ? "unavailable" : complete ? "ready" : "provisional", basis: "imported-records",
       sourceQualityBasis: "signed Lazada transaction postings; product revenue is paid merchandise excluding shipping",
       provisional: knownRecords.length > 0 && !complete, exclusions: ["COGS", "advertising outside imported postings", "payroll", "overhead"],
-      fieldCoverage: { transactionAmounts: { known: knownRecords.length, missing: ledger.length - knownRecords.length },
+      fieldCoverage: { transactionAmounts: { known: amountRecords.length, missing: ledger.length - amountRecords.length },
+        transactionCurrencies: { known: currencyRecords.length, missing: ledger.length - currencyRecords.length },
+        transactionCategories: { known: classifiedRecords.length, missing: ledger.length - classifiedRecords.length },
         quantity: { known: nonCancelled.flatMap((order) => order.items).filter((item) => item.quantity !== null).length, missing: nonCancelled.flatMap((order) => order.items).filter((item) => item.quantity === null).length } },
       missingCostCategories: ["fees", "shipping"].filter((category) => !categoryRows(category as Category).length && !complete),
       unavailableReasons: reasons,

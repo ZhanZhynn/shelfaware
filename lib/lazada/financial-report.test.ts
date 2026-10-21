@@ -67,4 +67,31 @@ describe("Lazada financial source completeness", () => {
     const result = buildLazadaProfitReport([row("Item Price Credit", "1000"), row("Wrong Weight Adjustment", "-50", { transactionType: "logistics_fee" }), row("Payout", "1000", { transactionType: "payout_statement" })], [order()]);
     expect(result.summary.observedLedgerNet).toBe(10);
   });
+
+  it("recognizes the API's shipping adjustment label while retaining its signed amount and source name", () => {
+    const result = buildLazadaProfitReport([row("Item Price Credit", "2000"), row("Wrong Shipping Fee Adjustment", "-125", { orderExternalId: null, itemExternalId: null })], [order()], true);
+    expect(result.coverage.state).toBe("ready");
+    expect(result.summary).toMatchObject({ totalShipping: 1.25, observedLedgerNet: 18.75, unallocatedLedgerNet: -1.25 });
+    expect(result.feeBreakdown).toContainEqual({ name: "Wrong Shipping Fee Adjustment", amount: 1.25, percentage: 6.25 });
+  });
+
+  it("counts observed amounts separately from missing currency without borrowing the order currency", () => {
+    const result = buildLazadaProfitReport([row("Item Price Credit", "2000", { currency: null }), row("Commission", "-200", { currency: null })], [order()], true);
+    expect(result.currency).toBe("unknown");
+    expect(result.summary).toMatchObject({ totalRevenue: null, totalFees: null, sellerIncome: null, observedLedgerNet: null });
+    expect(result.coverage.state).toBe("unavailable");
+    expect(result.coverage.fieldCoverage).toMatchObject({ transactionAmounts: { known: 2, missing: 0 }, transactionCurrencies: { known: 0, missing: 2 }, transactionCategories: { known: 2, missing: 0 } });
+    expect(result.byProduct[0]).toMatchObject({ revenue: 20, revenueCurrency: "MYR" });
+    expect(result.feeBreakdown).toEqual([]);
+  });
+
+  it("does not add product merchandise across different or missing source currencies", () => {
+    for (const currency of [null, "SGD"]) {
+      const result = buildLazadaProfitReport([row("Item Price Credit", "2000")], [order(), order({ id: "other-order", currency })]);
+      expect(result.byProduct[0]).toMatchObject({ revenue: null, revenueCurrency: null });
+    }
+    const result = buildLazadaProfitReport([row("Item Price Credit", "2000", { currency: "USD" })], [order()]);
+    expect(result.currency).toBe("USD");
+    expect(result.byProduct[0]).toMatchObject({ revenue: 20, revenueCurrency: "MYR", estimatedProfit: null });
+  });
 });

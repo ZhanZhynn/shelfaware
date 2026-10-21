@@ -150,11 +150,15 @@ export async function listMarketplaceFinancialRecords(platform: MarketplacePlatf
   const data = rows.slice(0, query.limit).map(({ rawPayload, ...row }) => {
     const source = rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload) ? rawPayload as Record<string, unknown> : {};
     const paid = typeof source.paid_status === "string" ? source.paid_status.trim().toLowerCase() : "";
+    const itemLinkBasis = typeof source.shelfaware_item_link_basis === "string" && ["provider_orderItem_no", "provider_reference", "provider_transaction_number", "unverified_provider_orderItem_no", "unavailable"].includes(source.shelfaware_item_link_basis)
+      ? source.shelfaware_item_link_basis : row.itemExternalId ? "unverified_provider_orderItem_no" : "unavailable";
+    const sourceTransactionNumber = typeof source.transaction_number === "string" ? source.transaction_number
+      : typeof source.transaction_number === "number" && Number.isSafeInteger(source.transaction_number) ? String(source.transaction_number) : null;
     return {
       ...row,
       // Preserve the documented Yes/No fact without equating it to a verified
       // release-to-balance event or a bank withdrawal.
-      ...(platform === "lazada" ? { sourceTransactionNumber: typeof source.transaction_number === "string" ? source.transaction_number : null, providerPaidStatus: paid === "yes" ? "Yes" : paid === "no" ? "No" : null, releaseStatus: null, releasedAt: null, releaseDateState: "unavailable" } : {}),
+      ...(platform === "lazada" ? { sourceTransactionNumber, itemLinkBasis, providerPaidStatus: paid === "yes" ? "Yes" : paid === "no" ? "No" : null, releaseStatus: null, releasedAt: null, releaseDateState: "unavailable" } : {}),
       occurredAt: iso(row.occurredAt),
       sourceObservedAt: iso(row.sourceObservedAt),
       createdAt: row.createdAt.toISOString(),

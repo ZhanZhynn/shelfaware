@@ -102,7 +102,7 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
   const provisional = detail?.coverage?.state === "provisional";
   const usable = detail && detail.coverage.state !== "unavailable";
   const currency = detail?.currency || financialReportingCurrency({ financialCoverage: coverage });
-  const money = (value: number | null | undefined) => displayValue(value, currency ? (number) => formatMoney(number, currency) : undefined);
+  const money = (value: number | null | undefined) => displayValue(value, currency && /^[A-Z]{3}$/.test(currency) ? (number) => formatMoney(number, currency) : undefined);
   const percent = (value: number | null | undefined) => displayValue(value, (number) => `${number}%`);
 
   const apply = (requestedFilters = draft) => {
@@ -124,6 +124,7 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
       ["Coverage state", detail.coverage.state],
       ["Coverage basis", detail.coverage.basis],
       ["Source quality basis", detail.coverage.sourceQualityBasis],
+      ["Reporting currency", detail.currency],
       ["Exclusions", detail.coverage.exclusions.join("; ") || "Unavailable"],
       ["Missing cost categories", detail.coverage.missingCostCategories.join("; ") || "Unavailable"],
       ["Unavailable reasons", detail.coverage.unavailableReasons.join("; ") || "Unavailable"],
@@ -137,12 +138,13 @@ export function MarketplaceProfitDashboard({ platform, title }: { platform: Mark
       ["Coverage field", "Known", "Missing"],
       ...Object.entries(detail.coverage.fieldCoverage).map(([field, value]) => [field, value.known, value.missing]),
       [],
-      ["Product", "SKU", "Source product key", "Paid revenue", "Revenue basis", "Source/list price subtotal", "Qty sold", "Qty confidence", "Orders", "Est. fees", "Est. profit", "Margin"],
+      ["Product", "SKU", "Source product key", "Paid revenue", "Paid revenue currency", "Revenue basis", "Source/list price subtotal", "Qty sold", "Qty confidence", "Orders", "Est. fees", "Est. profit", "Margin"],
       ...detail.byProduct.map((p) => [
         p.productName,
         csvValue(p.sku),
         csvValue(p.sourceProductKey),
         csvValue(p.revenue),
+        csvValue(p.revenueCurrency === undefined ? detail.currency : p.revenueCurrency),
         csvValue(p.revenueBasis),
         csvValue(p.itemSourceSubtotal),
         csvValue(p.quantitySold),
@@ -388,7 +390,10 @@ function productColumns(money: (value: number | null | undefined) => string, sho
         </div>
       ),
     },
-    { accessorKey: "revenue", header: "Paid Revenue", cell: ({ row }) => money(row.original.revenue) },
+    { accessorKey: "revenue", header: "Paid Revenue", cell: ({ row }) => {
+      const currency = row.original.revenueCurrency;
+      return currency === undefined ? money(row.original.revenue) : displayValue(row.original.revenue, currency ? (value) => formatMoney(value, currency) : undefined);
+    } },
     { accessorKey: "quantitySold", header: "Qty Sold", cell: ({ row }) => (
       <div>
         <span>{displayValue(row.original.quantitySold)}</span>

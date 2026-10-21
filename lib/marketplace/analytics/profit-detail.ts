@@ -40,6 +40,7 @@ export type ProductProfitRow = {
   sourceProductKey?: string;
   // This is only populated where a paid line amount is explicitly available.
   revenue: number | null;
+  revenueCurrency?: string | null;
   revenueBasis?: "item_source_subtotal" | "paid_line_amount";
   itemSourceSubtotal?: number | null;
   quantitySold: number | null;

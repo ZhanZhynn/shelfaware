@@ -65,12 +65,14 @@ function numberMetric(value: unknown, key: string) {
 }
 
 function windowMetrics(previous: unknown, window: SyncWindow, result: { synced: number; created?: number; updated?: number; errors: string[] }) {
+  const aliasesMerged = numberMetric(previous, "aliasesMerged") + numberMetric(result, "mergedAliases");
   return {
     windowsCompleted: window.windowsCompleted + 1,
     ordersSynced: numberMetric(previous, "ordersSynced") + result.synced,
     ordersCreated: numberMetric(previous, "ordersCreated") + (result.created ?? 0),
     ordersUpdated: numberMetric(previous, "ordersUpdated") + (result.updated ?? 0),
     orderErrors: numberMetric(previous, "orderErrors") + result.errors.length,
+    ...(aliasesMerged ? { aliasesMerged } : {}),
   };
 }
 

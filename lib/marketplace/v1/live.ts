@@ -10,6 +10,7 @@ import { lazadaOrderStatus, lazadaRevenue } from "@/lib/lazada/status";
 import { lazadaOrderFacts } from "@/lib/lazada/order-facts";
 import { lazadaSourceDate } from "@/lib/lazada/time";
 import { searchOrders, searchProducts } from "@/lib/tiktok/custom-api";
+import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 import { shopifyGraphQL } from "@/lib/shopify/server";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
@@ -51,6 +52,14 @@ export class MarketplaceLiveProviderError extends Error {
 }
 
 export function classifyLiveProviderError(error: unknown) {
+  if (error instanceof TikTokProviderError) {
+    const provider = { code: error.code, requestId: error.providerRequestId };
+    if (error.kind === "auth") return new MarketplaceLiveProviderError("LIVE_PROVIDER_AUTH_REQUIRED", false, undefined, provider);
+    if (error.kind === "rate_limit") return new MarketplaceLiveProviderError("LIVE_PROVIDER_RATE_LIMITED", true, 60, provider);
+    if (error.kind === "invalid_query") return new MarketplaceLiveProviderError("LIVE_PROVIDER_INVALID_QUERY", false, undefined, provider);
+    if (error.kind === "unsupported") return new MarketplaceLiveProviderError("LIVE_PROVIDER_UNSUPPORTED", false, undefined, provider);
+    return new MarketplaceLiveProviderError("LIVE_PROVIDER_TEMPORARY", true, 30, provider);
+  }
   if (error instanceof LazadaProviderError) {
     const provider = { code: error.code, requestId: error.providerRequestId };
     if (error.status === 401 || error.status === 403 || /IllegalAccessToken|InvalidAccessToken|AccessDenied|Unauthorized|MissingAccessToken/i.test(error.code)) return new MarketplaceLiveProviderError("LIVE_PROVIDER_AUTH_REQUIRED", false, undefined, provider);
@@ -258,7 +267,7 @@ async function lazadaProducts(query: LiveQuery, ownerIds: string[]): Promise<Liv
 async function tiktokOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {
   const shop = await prisma.tikTokShop.findFirst({ where: { id: query.shopId, userId: { in: ownerIds } }, select: { accessToken: true, shopCipher: true } });
   if (!shop) throw new MarketplaceLiveNotFoundError("Shop not found");
-  const response = await searchOrders(shop.accessToken, shop.shopCipher, { order_status: query.status, create_time_ge: Math.floor(new Date(query.createdAfter ?? defaultFrom()).getTime() / 1000), create_time_lt: Math.floor(new Date(query.createdBefore ?? defaultTo()).getTime() / 1000) }, query.limit, query.cursor, "CREATE_TIME", "DESC");
+  const response = await searchOrders(shop.accessToken, shop.shopCipher, { order_status: query.status, create_time_ge: Math.floor(new Date(query.createdAfter ?? defaultFrom()).getTime() / 1000), create_time_lt: Math.floor(new Date(query.createdBefore ?? defaultTo()).getTime() / 1000) }, query.limit, query.cursor, "create_time", "DESC");
   return { data: (response.orders ?? []).map((item) => { const totalAmount = finiteNumber(item.payment?.total_amount); return { shopId: query.shopId, externalId: item.id, status: item.status, totalAmount, ...liveRevenue(item.status, totalAmount), currency: item.payment?.currency ?? null, fulfillmentStatus: item.fulfillment_type ?? null, shippingType: item.shipping_type ?? null, createdAt: isoSeconds(item.create_time), updatedAt: isoSeconds(item.update_time) }; }), page: { limit: query.limit, nextCursor: response.next_page_token || null } };
 }
 

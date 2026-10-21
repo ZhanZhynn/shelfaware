@@ -8,6 +8,7 @@
  */
 
 import { generateSign } from "./signing";
+import { TikTokProviderError } from "./provider-error";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import type {
@@ -81,17 +82,21 @@ async function tiktokRequest<T>(
     body: bodyString,
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    logger.error(`[TikTok API] HTTP ${response.status}: ${text}`);
-    throw new Error(`TikTok API HTTP ${response.status}: ${text}`);
-  }
-
-  const data = (await response.json()) as TikTokBaseResponse<T>;
-
-  if (data.code !== 0) {
-    logger.error(`[TikTok API] Error ${data.code}: ${data.message} (request_id: ${data.request_id})`);
-    throw new Error(`TikTok API error ${data.code}: ${data.message}`);
+  // TikTok returns structured error envelopes for both HTTP failures and
+  // nonzero provider codes on HTTP 200. Never log or throw the raw payload.
+  const payload: unknown = await response.json().catch(() => null);
+  const data = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as TikTokBaseResponse<T>
+    : null;
+  if (!response.ok || !data || data.code !== 0) {
+    const error = new TikTokProviderError(
+      data?.code ?? "INVALID_RESPONSE",
+      response.ok && !data ? 502 : response.status,
+      data?.request_id,
+      data?.message,
+    );
+    logger.error(error, { code: error.code, status: error.status, providerRequestId: error.providerRequestId });
+    throw error;
   }
 
   // Debug: log response structure (first item only for large responses)
@@ -211,7 +216,7 @@ export async function searchOrders(
   body: SearchOrdersBody = {},
   pageSize: number = 50,
   pageToken?: string,
-  sortField?: string,
+  sortField?: "create_time" | "update_time",
   sortOrder?: "ASC" | "DESC",
 ): Promise<TikTokSearchOrdersData> {
   const params: Record<string, string> = {

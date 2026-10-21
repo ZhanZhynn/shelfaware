@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   marketplaceOwnerIds: vi.fn(),
@@ -7,23 +8,74 @@ const mocks = vi.hoisted(() => ({
   getOrderList: vi.fn(),
   getOrdersDetail: vi.fn(),
   lazadaShopFindFirst: vi.fn(), lazadaOrdersPage: vi.fn(), lazadaItems: vi.fn(),
+  tikTokShopFindFirst: vi.fn(), tiktokOrders: vi.fn(),
+  requireApiActor: vi.fn(), withRateLimit: vi.fn(),
 }));
-vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: { findFirst: mocks.shopeeShopFindFirst }, lazadaShop: { findFirst: mocks.lazadaShopFindFirst } } }));
+vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: { findFirst: mocks.shopeeShopFindFirst }, lazadaShop: { findFirst: mocks.lazadaShopFindFirst }, tikTokShop: { findFirst: mocks.tikTokShopFindFirst } } }));
 vi.mock("@/lib/marketplace/access", () => ({ marketplaceOwnerIds: mocks.marketplaceOwnerIds }));
 vi.mock("@/lib/shopee/server", () => ({ getTransientShopeeSDK: mocks.getTransientShopeeSDK }));
 vi.mock("@/lib/lazada/server", () => ({ createLazadaShopContext: (shop: unknown) => shop }));
 vi.mock("@/lib/lazada/custom-api", () => ({ getOrdersPageCustom: mocks.lazadaOrdersPage, getMultipleOrderItemsCustom: mocks.lazadaItems, getProductsCustom: vi.fn() }));
-vi.mock("@/lib/tiktok/custom-api", () => ({ searchOrders: vi.fn(), searchProducts: vi.fn() }));
+vi.mock("@/lib/tiktok/custom-api", () => ({ searchOrders: mocks.tiktokOrders, searchProducts: vi.fn() }));
 vi.mock("@/lib/shopify/server", () => ({ shopifyGraphQL: vi.fn() }));
+vi.mock("@/lib/auth/require-api-scope", () => ({ requireApiActor: mocks.requireApiActor, ApiScopeError: class extends Error {} }));
+vi.mock("@/lib/auth/api-token", () => ({ ApiTokenAuthenticationError: class extends Error {} }));
+vi.mock("@/lib/api/rate-limit", () => ({ withRateLimit: mocks.withRateLimit, defaultRateLimits: { standard: {} } }));
 
 import { classifyLiveProviderError, listMarketplaceLive, liveRevenue, MarketplaceLiveValidationError, parseLiveQuery } from "./live";
 import { LazadaProviderError } from "@/lib/lazada/provider-error";
+import { TikTokProviderError } from "@/lib/tiktok/provider-error";
+import { liveMarketplaceGet } from "./live-route";
 
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.marketplaceOwnerIds.mockResolvedValue(["owner-1"]);
   mocks.shopeeShopFindFirst.mockResolvedValue({ shopId: 123, accessToken: "access", refreshToken: "refresh", tokenExpiry: null });
   mocks.getTransientShopeeSDK.mockReturnValue({ order: { getOrderList: mocks.getOrderList, getOrdersDetail: mocks.getOrdersDetail } });
+  mocks.tikTokShopFindFirst.mockResolvedValue({ accessToken: "seller-token", shopCipher: "shop-cipher" });
+  mocks.requireApiActor.mockResolvedValue({ user: { id: "actor-1", role: "admin" }, authType: "api_token", tokenId: "token-1" });
+  mocks.withRateLimit.mockResolvedValue(null);
+});
+
+describe("live TikTok orders", () => {
+  it("uses lowercase create_time with the requested shop and bounded filters", async () => {
+    mocks.tiktokOrders.mockResolvedValue({ orders: [{ id: "order-1", status: "COMPLETED", payment: { total_amount: "18.50", currency: "MYR" } }], next_page_token: "next-page" });
+    const query = parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), limit: "1", cursor: "page-token", status: "COMPLETED", createdAfter: "2026-08-01T00:00:00+08:00", createdBefore: "2026-09-01T00:00:00+08:00" }), "orders");
+
+    const result = await listMarketplaceLive("tiktok", { id: "actor-1", role: "admin" }, "orders", query);
+
+    expect(mocks.tikTokShopFindFirst).toHaveBeenCalledWith({ where: { id: "a".repeat(24), userId: { in: ["owner-1"] } }, select: { accessToken: true, shopCipher: true } });
+    expect(mocks.tiktokOrders).toHaveBeenCalledWith("seller-token", "shop-cipher", { order_status: "COMPLETED", create_time_ge: 1785513600, create_time_lt: 1788192000 }, 1, "page-token", "create_time", "DESC");
+    expect(result).toMatchObject({ data: [{ externalId: "order-1", totalAmount: 18.5, currency: "MYR" }], page: { limit: 1, nextCursor: "next-page" } });
+  });
+
+  it.each([
+    { status: 400, providerCode: 36009004, message: "Invalid sort field", code: "LIVE_PROVIDER_INVALID_QUERY", retryable: false },
+    { status: 200, providerCode: 36009004, message: "Invalid sort field", code: "LIVE_PROVIDER_INVALID_QUERY", retryable: false },
+    { status: 401, providerCode: 12345, message: "", code: "LIVE_PROVIDER_AUTH_REQUIRED", retryable: false },
+    { status: 200, providerCode: 12345, message: "Access token is invalid", code: "LIVE_PROVIDER_AUTH_REQUIRED", retryable: false },
+    { status: 429, providerCode: 12345, message: "", code: "LIVE_PROVIDER_RATE_LIMITED", retryable: true },
+    { status: 200, providerCode: 12345, message: "Too many requests", code: "LIVE_PROVIDER_RATE_LIMITED", retryable: true },
+    { status: 404, providerCode: 12345, message: "", code: "LIVE_PROVIDER_UNSUPPORTED", retryable: false },
+    { status: 503, providerCode: 12345, message: "", code: "LIVE_PROVIDER_TEMPORARY", retryable: true },
+  ])("maps HTTP $status to $code while retaining safe provider identifiers", ({ status, providerCode, message, code, retryable }) => {
+    expect(classifyLiveProviderError(new TikTokProviderError(providerCode, status, "provider-id", message)))
+      .toMatchObject({ code, retryable, provider: { code: String(providerCode), requestId: "provider-id" } });
+  });
+
+  it("returns a non-retryable 422 with the provider code and request ID for invalid sorting", async () => {
+    mocks.tiktokOrders.mockRejectedValue(new TikTokProviderError(36009004, 400, "provider-id", "SortField is invalid, allowed values: create_time,update_time."));
+    const request = new NextRequest(`http://localhost/api/v1/marketplaces/tiktok/live/orders?shopId=${"a".repeat(24)}&limit=1`, { headers: { "x-request-id": "shelfaware-id" } });
+
+    const response = await liveMarketplaceGet("orders", request, { params: Promise.resolve({ platform: "tiktok" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get("x-request-id")).toBe("shelfaware-id");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(body).toMatchObject({ error: { code: "LIVE_PROVIDER_INVALID_QUERY", requestId: "shelfaware-id", details: { platform: "tiktok", retryable: false, retryAfterSeconds: null, providerCode: "36009004", providerRequestId: "provider-id" } } });
+    expect(JSON.stringify(body)).not.toMatch(/seller-token|shop-cipher|SortField is invalid/);
+  });
 });
 
 describe("live Lazada source contracts", () => {

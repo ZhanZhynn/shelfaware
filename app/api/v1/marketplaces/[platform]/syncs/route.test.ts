@@ -23,6 +23,7 @@ vi.mock("@/lib/marketplace/sync-runs", () => ({
 }));
 
 import { POST } from "./route";
+import { MarketplaceSyncExecutionConflictError } from "@/lib/marketplace/sync-execution";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -37,6 +38,38 @@ beforeEach(() => {
 });
 
 describe("v1 marketplace sync creation", () => {
+  it.each(["shopee", "lazada", "tiktok", "shopify"])("persists %s foreground work without delivering any queue message", async (platform) => {
+    const response = await POST(new NextRequest(`http://localhost:3000/api/v1/marketplaces/${platform}/syncs`, {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "orders", executionMode: "foreground" }),
+    }), { params: Promise.resolve({ platform }) });
+    expect(response.status).toBe(202);
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform, execution: { mode: "foreground", target: "http://localhost:3000" } }));
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).not.toHaveBeenCalled();
+    expect(mocks.enqueueMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect((await response.json()).meta.execution).toBe("foreground");
+  });
+
+  it("returns an execution conflict rather than reusing queued work for foreground execution", async () => {
+    mocks.createMarketplaceSyncRun.mockRejectedValue(new MarketplaceSyncExecutionConflictError("Execution owner differs"));
+    const response = await POST(new NextRequest("http://localhost:3000/api/v1/marketplaces/lazada/syncs", {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all", executionMode: "foreground" }),
+    }), { params: Promise.resolve({ platform: "lazada" }) });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("SYNC_EXECUTION_CONFLICT");
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown execution modes without falling back to queued execution", async () => {
+    const response = await POST(new NextRequest("http://localhost:3000/api/v1/marketplaces/lazada/syncs", {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all", executionMode: "typo" }),
+    }), { params: Promise.resolve({ platform: "lazada" }) });
+    expect(response.status).toBe(422);
+    expect(mocks.createMarketplaceSyncRun).not.toHaveBeenCalled();
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect(mocks.enqueueMarketplaceSyncJob).not.toHaveBeenCalled();
+  });
+
   it("routes Lazada historical finance through checkpointed task delivery", async () => {
     const input = { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-09-14T23:59:59+08:00" };
     const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/lazada/syncs", { method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "finance", input }) }), { params: Promise.resolve({ platform: "lazada" }) });

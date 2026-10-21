@@ -21,6 +21,7 @@ describe("getOpenApiSpec", () => {
       "/api/v1/marketplaces/{platform}/live/orders": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:live"] } },
       "/api/v1/marketplaces/{platform}/syncs": { post: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:sync"] } },
       "/api/v1/marketplaces/{platform}/syncs/{id}": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:read"] } },
+      "/api/v1/marketplaces/{platform}/syncs/{id}/execute": { post: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:sync"] } },
       "/api/v1/marketplaces/{platform}/analytics/{metric}": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:read"] } },
       "/api/v1/marketplaces/{platform}/financial-records": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:finance"] } },
       "/api/v1/marketplaces/{platform}/reconciliation-status": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:finance"] } },

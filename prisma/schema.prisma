@@ -2311,13 +2311,16 @@ model MarketplaceSyncJob {
 
 // A run is the user-visible request.  It is intentionally separate from the
 // legacy MarketplaceSyncJob so the existing single-stream APIs keep their
-// durable identity and behaviour while Shopee's `all` graph is rolled out.
+// durable identity and behaviour. Execution mode isolates foreground work from
+// queued deliveries even when multiple API instances share the same database.
 model MarketplaceSyncRun {
   id                String    @id @default(auto()) @map("_id") @db.ObjectId
   platform          String
   shopId            String    @db.ObjectId
-  syncType          String    // Initial slice: shopee/all only.
+  syncType          String
   requestedByUserId String    @db.ObjectId
+  executionMode     String    @default("queued") // queued | foreground
+  executionTarget   String?   // API origin that owns foreground execution.
   idempotencyKey    String?
   input             Json?
   status            String    @default("pending") // pending | running | completed | completed_with_warnings | failed | cancelled
@@ -2341,7 +2344,7 @@ model MarketplaceSyncTask {
   runId          String    @db.ObjectId
   platform       String
   shopId         String    @db.ObjectId
-  stream         String    // orders_and_escrow | products | ads
+  stream         String    // orders_and_escrow | orders | products | finance | returns | payouts | ads
   sequence       Int
   required       Boolean   @default(true)
   status         String    @default("pending") // pending | running | retrying | completed | failed | cancelled

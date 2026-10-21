@@ -4,6 +4,7 @@ import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 import type { MarketplacePlatform } from "./analytics/types";
 import { marketplaceSyncTaskGraph } from "./sync-plan";
 import { PermanentDispatchError, runMarketplaceSync } from "./sync-provider";
+import type { MarketplaceSyncExecution } from "./sync-execution";
 import {
   checkpointMarketplaceSyncTask,
   claimMarketplaceSyncTask,
@@ -77,8 +78,9 @@ function windowMetrics(previous: unknown, window: SyncWindow, result: { synced: 
 }
 
 /** Claim, execute, and settle one provider-safe, checkpointed stream window. */
-export async function dispatchMarketplaceSyncTask(id: string, workerId: string, now = new Date()): Promise<MarketplaceSyncTaskDispatchResult> {
-  if (!(await claimMarketplaceSyncTask(id, workerId, now))) return { status: "skipped" };
+export async function dispatchMarketplaceSyncTask(id: string, workerId: string, now = new Date(), execution?: MarketplaceSyncExecution): Promise<MarketplaceSyncTaskDispatchResult> {
+  const claimed = execution ? await claimMarketplaceSyncTask(id, workerId, now, execution) : await claimMarketplaceSyncTask(id, workerId, now);
+  if (!claimed) return { status: "skipped" };
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
   const platform = task?.platform as MarketplacePlatform;
   if (!task || !marketplaceSyncTaskGraph(platform, task.run.syncType).some(({ stream }) => stream === task.stream)) {

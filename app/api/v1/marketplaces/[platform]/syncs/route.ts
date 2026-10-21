@@ -14,6 +14,7 @@ import {
 import { enqueueMarketplaceSyncJob } from "@/lib/marketplace/sync-enqueue";
 import { createMarketplaceSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
 import { supportsMarketplaceSync, supportsMarketplaceSyncRange } from "@/lib/marketplace/sync-plan";
+import { MarketplaceSyncExecutionConflictError } from "@/lib/marketplace/sync-execution";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
@@ -24,6 +25,7 @@ const dateTimeSchema = z.string().datetime({ offset: true });
 const bodySchema = z.object({
   shopId: z.string().regex(objectId, "shopId must be an internal shop ID"),
   syncType: z.enum(marketplaceSyncTypes),
+  executionMode: z.enum(["queued", "foreground"]).default("queued"),
   input: z.record(z.unknown()).optional(),
 }).strict();
 
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await assertMarketplaceSyncShop(platform as MarketplacePlatform, body.shopId, actor.user);
     // Every all-sync uses a task graph, regardless of whether dates were given.
     // Historical and TikTok/Shopify stream requests share the same engine.
-    if (body.syncType === "all" || ["tiktok", "shopify"].includes(platform) || (body.input && Object.hasOwn(body.input, "dateFrom"))) {
+    if (body.executionMode === "foreground" || body.syncType === "all" || ["tiktok", "shopify"].includes(platform) || (body.input && Object.hasOwn(body.input, "dateFrom"))) {
       const result = await createMarketplaceSyncRun({
         platform: selectedPlatform,
         shopId: body.shopId,
@@ -98,13 +100,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         syncType: body.syncType,
         idempotencyKey,
         input: body.input as MarketplaceSyncInput | undefined,
+        ...(body.executionMode === "foreground" ? { execution: { mode: "foreground" as const, target: new URL(request.url).origin } } : {}),
       });
-      const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
+      const queued = body.executionMode === "queued" && result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
       return NextResponse.json(
         {
           apiVersion: "2026-marketplace-v1",
           data: marketplaceSyncRunResponse(result.run),
-          meta: { requestId, platform, execution: queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced },
+          meta: { requestId, platform, execution: body.executionMode === "foreground" ? "foreground" : queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced },
         },
         { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
       );
@@ -131,6 +134,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
     );
   } catch (error) {
+    if (error instanceof MarketplaceSyncExecutionConflictError) return failure(requestId, "SYNC_EXECUTION_CONFLICT", error.message, 409);
     if (error instanceof MarketplaceSyncJobNotFoundError) return failure(requestId, "NOT_FOUND", "Shop not found", 404);
     return failure(requestId, "INTERNAL_ERROR", "Marketplace request failed", 500);
   }

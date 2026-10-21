@@ -387,6 +387,7 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
                   properties: {
                     shopId: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
                     syncType: { type: "string", enum: ["products", "orders", "finance", "returns", "ads", "payouts", "all"] },
+                    executionMode: { type: "string", enum: ["queued", "foreground"], default: "queued", description: "Foreground persists task progress without queue delivery. Execute steps with POST /syncs/{id}/execute on this same API origin." },
                     input: { type: "object", additionalProperties: true, properties: {
                       dateFrom: { type: "string", format: "date-time", description: "Paired with dateTo; explicit offset and whole seconds required." },
                       dateTo: { type: "string", format: "date-time", description: "Inclusive end, paired with dateFrom; no future bounds." },
@@ -408,6 +409,17 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           "x-requiredApiTokenScopes": ["marketplace:read"],
           parameters: [platformParameter, { name: "id", in: "path", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }],
           responses: { "200": { description: "Sync job" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read" }, "404": { description: "Sync job not found" } },
+        },
+      },
+      "/api/v1/marketplaces/{platform}/syncs/{id}/execute": {
+        post: {
+          summary: "Execute one foreground sync task/window",
+          description: "Executes one database-leased step of an owned foreground run on the API origin that created it. Queued runs and different origins return 409. Provider work uses the shared checkpoint/retry engine without QStash. The response includes current run data and meta.retryAfterSeconds; the caller drives subsequent steps until terminal. Unlike the queue-only creation endpoint, this endpoint performs bounded provider work.",
+          tags: ["Marketplace v1"],
+          security: marketplaceSyncSecurity,
+          "x-requiredApiTokenScopes": ["marketplace:sync"],
+          parameters: [platformParameter, { name: "id", in: "path", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } }],
+          responses: { "200": { description: "Current run and foreground step outcome, including any retry delay" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:sync" }, "404": { description: "Run or owned shop not found" }, "409": { description: "Wrong execution mode or API origin" } },
         },
       },
       "/api/v1/marketplaces/{platform}/analytics/{metric}": {

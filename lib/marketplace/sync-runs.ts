@@ -5,6 +5,7 @@ import type { MarketplacePlatform } from "./analytics/types";
 import { enqueueMarketplaceSyncTask } from "./sync-enqueue";
 import { marketplaceSyncDateRange, marketplaceSyncErrorCode, marketplaceSyncRetryAt, MAX_MARKETPLACE_SYNC_ATTEMPTS, type MarketplaceSyncInput, type MarketplaceSyncType } from "./sync-jobs";
 import { marketplaceSyncTaskGraph } from "./sync-plan";
+import { matchesMarketplaceSyncExecution, MarketplaceSyncExecutionConflictError, type MarketplaceSyncExecution } from "./sync-execution";
 export { shopeeAllTaskGraph } from "./sync-plan";
 
 const taskStatuses = ["pending", "running", "retrying", "completed", "failed", "cancelled"] as const;
@@ -38,7 +39,9 @@ export async function createMarketplaceSyncRun(input: {
   syncType: MarketplaceSyncType;
   idempotencyKey?: string;
   input?: MarketplaceSyncInput;
+  execution?: MarketplaceSyncExecution;
 }) {
+  const execution = input.execution ?? { mode: "queued" };
   const graph = marketplaceSyncTaskGraph(input.platform, input.syncType);
   if (!graph.length) throw new Error("SYNC_TYPE_UNSUPPORTED");
   if (input.idempotencyKey) {
@@ -46,13 +49,16 @@ export async function createMarketplaceSyncRun(input: {
       where: { platform: input.platform, shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
       include: { tasks: { orderBy: { sequence: "asc" } } },
     });
-    if (existing) return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
+    if (existing) {
+      if (!matchesMarketplaceSyncExecution(existing, execution)) throw new MarketplaceSyncExecutionConflictError("Idempotency key belongs to a different execution mode or API origin");
+      return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
+    }
   }
 
   // Freeze catalog sync defaults once for the entire graph, not once per
   // delivery. All streams share the same range while products refresh the catalog.
   let runInput = input.input;
-  if (input.platform !== "shopee" && graph.some(({ stream }) => ["orders", "finance"].includes(stream)) && !marketplaceSyncDateRange(runInput)) {
+  if ((input.platform !== "shopee" || execution.mode === "foreground") && graph.some(({ stream }) => ["orders_and_escrow", "orders", "finance"].includes(stream)) && !marketplaceSyncDateRange(runInput)) {
     const end = Math.floor(Date.now() / 1000) * 1000;
     const days = typeof runInput?.daysBack === "number" ? runInput.daysBack : 15;
     runInput = { ...runInput, dateFrom: new Date(end - days * 86_400_000).toISOString(), dateTo: new Date(end).toISOString() };
@@ -66,12 +72,13 @@ export async function createMarketplaceSyncRun(input: {
         requestedByUserId: input.requestedByUserId,
         idempotencyKey: input.idempotencyKey ?? null,
         input: runInput ?? null,
+        ...(execution.mode === "foreground" ? { executionMode: execution.mode, executionTarget: execution.target } : {}),
       },
     });
     const tasks = await Promise.all(graph.map((task, sequence) => tx.marketplaceSyncTask.create({
       data: { runId: created.id, platform: input.platform, shopId: input.shopId, stream: task.stream, sequence, required: task.required },
     })));
-    await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: tasks[0]!.id, dedupeKey: "initial" } });
+    if (execution.mode === "queued") await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: tasks[0]!.id, dedupeKey: "initial" } });
     return { ...created, tasks };
   });
   return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
@@ -109,6 +116,8 @@ export function createLazadaBoundedSyncRun(input: {
 
 /** A task delivery is at-least-once; this function only publishes durable work. */
 export async function deliverMarketplaceSyncTaskOutbox(taskId: string, now = new Date()) {
+  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id: taskId }, select: { nextAttemptAt: true, run: { select: { executionMode: true } } } });
+  if (!task || !matchesMarketplaceSyncExecution(task.run)) return { scheduled: false, taskId };
   const outbox = await prisma.marketplaceSyncDeliveryOutbox.findFirst({
     where: {
       taskId,
@@ -134,7 +143,6 @@ export async function deliverMarketplaceSyncTaskOutbox(taskId: string, now = new
   });
   if (claimed.count !== 1) return { scheduled: false, taskId };
 
-  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id: taskId }, select: { nextAttemptAt: true } });
   const queued = await enqueueMarketplaceSyncTask(taskId, { notBefore: task?.nextAttemptAt ?? undefined });
   await prisma.marketplaceSyncDeliveryOutbox.updateMany({
     where: { id: outbox.id, status: "publishing", leaseOwner: workerId },
@@ -187,14 +195,19 @@ async function releaseShopLease(task: { id: string; platform: string; shopId: st
   });
 }
 
-export async function claimMarketplaceSyncTask(id: string, workerId: string, now = new Date()) {
+export async function claimMarketplaceSyncTask(id: string, workerId: string, now = new Date(), execution?: MarketplaceSyncExecution) {
+  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id }, select: { id: true, runId: true, platform: true, shopId: true, run: { select: { executionMode: true, executionTarget: true } } } });
+  // Check delivery ownership before touching attempts, shop leases, or status.
+  if (!task || !matchesMarketplaceSyncExecution(task.run, execution)) return false;
   const exhausted = await prisma.marketplaceSyncTask.updateMany({
     where: { id, status: "running", attempts: { gte: MAX_MARKETPLACE_SYNC_ATTEMPTS }, leaseExpiresAt: { lte: now } },
     data: { status: "failed", completedAt: now, lastError: "ATTEMPTS_EXHAUSTED", leaseOwner: null, leaseExpiresAt: null },
   });
-  if (exhausted.count) await settleExpiredMarketplaceSyncTask(id, now);
-  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id }, select: { id: true, runId: true, platform: true, shopId: true } });
-  if (!task || !(await acquireShopLease(task, now))) return false;
+  if (exhausted.count) {
+    await settleExpiredMarketplaceSyncTask(id, now);
+    return false;
+  }
+  if (!(await acquireShopLease(task, now))) return false;
   const result = await prisma.marketplaceSyncTask.updateMany({
     where: {
       id,
@@ -272,7 +285,7 @@ export async function completeMarketplaceSyncTask(id: string, workerId: string, 
     });
     if (completed.count !== 1) return { settled: false as const };
     const next = await tx.marketplaceSyncTask.findFirst({ where: { runId: task.runId, sequence: task.sequence + 1 }, select: { id: true } });
-    if (next) await tx.marketplaceSyncDeliveryOutbox.upsert({ where: { taskId_dedupeKey: { taskId: next.id, dedupeKey: "initial" } }, create: { taskId: next.id, dedupeKey: "initial" }, update: {} });
+    if (next && task.run.executionMode !== "foreground") await tx.marketplaceSyncDeliveryOutbox.upsert({ where: { taskId_dedupeKey: { taskId: next.id, dedupeKey: "initial" } }, create: { taskId: next.id, dedupeKey: "initial" }, update: {} });
     const tasks = await tx.marketplaceSyncTask.findMany({ where: { runId: task.runId }, orderBy: { sequence: "asc" } });
     let runStatus: string | null = null;
     if (tasks.length && tasks.every((item) => terminalTaskStatuses.has(item.status))) {
@@ -316,7 +329,7 @@ export async function checkpointMarketplaceSyncTask(input: {
       },
     });
     if (checkpointed.count !== 1) return { settled: false as const };
-    await tx.marketplaceSyncDeliveryOutbox.upsert({
+    if (task.run.executionMode !== "foreground") await tx.marketplaceSyncDeliveryOutbox.upsert({
       where: { taskId_dedupeKey: { taskId: input.id, dedupeKey: input.dedupeKey } },
       create: { taskId: input.id, dedupeKey: input.dedupeKey },
       update: {},
@@ -350,7 +363,7 @@ export async function retryMarketplaceSyncTask(id: string, workerId: string, err
     });
     if (result.count !== 1) return { settled: false as const };
     if (!exhausted) {
-      await tx.marketplaceSyncDeliveryOutbox.upsert({ where: { taskId_dedupeKey: { taskId: id, dedupeKey: `retry-${task.attempts}` } }, create: { taskId: id, dedupeKey: `retry-${task.attempts}` }, update: {} });
+      if (task.run.executionMode !== "foreground") await tx.marketplaceSyncDeliveryOutbox.upsert({ where: { taskId_dedupeKey: { taskId: id, dedupeKey: `retry-${task.attempts}` } }, create: { taskId: id, dedupeKey: `retry-${task.attempts}` }, update: {} });
       const nextAttempt = await tx.marketplaceSyncTask.findUnique({ where: { id }, select: { nextAttemptAt: true } });
       return { settled: true as const, status: "retrying" as const, nextTaskId: id, nextAttemptAt: nextAttempt?.nextAttemptAt ?? null };
     }
@@ -407,6 +420,8 @@ export function marketplaceSyncRunResponse(run: Awaited<ReturnType<typeof getMar
     platform: run.platform,
     shopId: run.shopId,
     syncType: run.syncType,
+    executionMode: run.executionMode ?? "queued",
+    executionTarget: run.executionTarget ?? null,
     status: run.status,
     input: run.input,
     lastError: run.lastError,

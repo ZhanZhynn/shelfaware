@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const shopifyGraphQL = vi.hoisted(() => vi.fn());
 vi.mock("./server", () => ({
@@ -9,7 +9,7 @@ vi.mock("./server", () => ({
   FINANCE_ORDERS_QUERY: "finance-orders",
 }));
 
-import { fetchAllOrderLineItems } from "./graphql-client";
+import { fetchAllOrderLineItems, fetchAllOrders, fetchAllFinanceOrders } from "./graphql-client";
 import type { ShopifyOrderNode } from "./types";
 
 const line = (id: number) => ({
@@ -25,6 +25,22 @@ const line = (id: number) => ({
   originalUnitPriceSet: { shopMoney: { amount: "1.00", currencyCode: "USD" } },
   discountedUnitPriceSet: { shopMoney: { amount: "1.00", currencyCode: "USD" } },
   discountedTotalSet: { shopMoney: { amount: "1.00", currencyCode: "USD" } },
+});
+
+beforeEach(() => vi.resetAllMocks());
+
+describe("Shopify bounded order and finance retrieval", () => {
+  it.each([
+    { fetch: fetchAllOrders, query: "orders", field: "created_at" },
+    { fetch: fetchAllFinanceOrders, query: "finance-orders", field: "updated_at" },
+  ])("quotes both $field timestamp bounds on every page", async ({ fetch, query, field }) => {
+    shopifyGraphQL.mockResolvedValueOnce({ orders: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "page-2" } } });
+    shopifyGraphQL.mockResolvedValueOnce({ orders: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
+    await fetch("shop.myshopify.com", "token", "2026-10-21T00:00:00+08:00", "2026-10-21T23:59:59+08:00");
+    const filter = `${field}:>="2026-10-20T16:00:00.000Z" ${field}:<="2026-10-21T15:59:59.000Z"`;
+    expect(shopifyGraphQL).toHaveBeenNthCalledWith(1, "shop.myshopify.com", "token", query, { first: 50, after: null, query: filter });
+    expect(shopifyGraphQL).toHaveBeenNthCalledWith(2, "shop.myshopify.com", "token", query, { first: 50, after: "page-2", query: filter });
+  });
 });
 
 describe("Shopify nested order pagination", () => {

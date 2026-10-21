@@ -1,8 +1,9 @@
 import { cacheKeys, invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
-import { syncShopeeAds, syncShopeeOrders, syncShopeePayoutStatements, syncShopeeProducts, syncShopeeReturns } from "@/lib/shopee";
-import { syncLazadaOrders, syncLazadaFinance, syncLazadaPayoutStatements } from "@/lib/lazada";
 import { LazadaProviderError, lazadaSyncFailure } from "@/lib/lazada/provider-error";
-import { prisma } from "@/prisma/client";
+import { TikTokProviderError } from "@/lib/tiktok/provider-error";
+import type { MarketplacePlatform } from "./analytics/types";
+import { marketplaceSyncTaskGraph } from "./sync-plan";
+import { PermanentDispatchError, runMarketplaceSync } from "./sync-provider";
 import {
   checkpointMarketplaceSyncTask,
   claimMarketplaceSyncTask,
@@ -34,9 +35,8 @@ const ORDER_LOOKBACK_SECONDS = 15 * ORDER_WINDOW_SECONDS;
 type SyncWindow = { from: number; to: number; end: number; windowsCompleted: number; windowSeconds: number; inclusive: boolean };
 
 function taskWindow(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, now: Date): SyncWindow | undefined {
-  const windowSeconds = task.platform === "lazada" && ["orders", "finance"].includes(task.stream) ? ORDER_WINDOW_SECONDS
-    : task.stream === "orders_and_escrow" ? ORDER_WINDOW_SECONDS
-    : task.stream === "returns" || task.stream === "payouts" ? FINANCIAL_WINDOW_SECONDS
+  const windowSeconds = ["orders_and_escrow", "orders", "finance"].includes(task.stream) ? ORDER_WINDOW_SECONDS
+    : task.stream === "returns" || (task.stream === "payouts" && task.platform !== "tiktok") ? FINANCIAL_WINDOW_SECONDS
       : undefined;
   if (!windowSeconds) return undefined;
   const value = task.checkpoint && typeof task.checkpoint === "object" && !Array.isArray(task.checkpoint)
@@ -76,38 +76,12 @@ function windowMetrics(previous: unknown, window: SyncWindow, result: { synced: 
   };
 }
 
-async function runShopeeTask(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, window?: SyncWindow) {
-  const shop = await prisma.shopeeShop.findUnique({ where: { id: task.shopId }, select: { shopId: true, userId: true } });
-  if (!shop) throw new PermanentTaskDispatchError("SHOP_NOT_FOUND");
-  // Preserve the prior `all` products/ads defaults while isolating provider calls.
-  switch (task.stream) {
-    case "orders_and_escrow": return syncShopeeOrders(shop.shopId, shop.userId, window?.from, window?.to, task.run.requestedByUserId);
-    case "returns": return syncShopeeReturns(shop.shopId, shop.userId, window?.from, window?.to, task.run.requestedByUserId);
-    case "payouts": return syncShopeePayoutStatements(shop.shopId, shop.userId, window ? { timeFrom: window.from, timeTo: window.to } : undefined, task.run.requestedByUserId);
-    case "products": return syncShopeeProducts(shop.shopId, shop.userId, task.run.requestedByUserId);
-    case "ads": return syncShopeeAds(shop.shopId, shop.userId, 30, task.run.requestedByUserId);
-    default: throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
-  }
-}
-
-async function runLazadaTask(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, window?: SyncWindow) {
-  if (!window) throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
-  const shop = await prisma.lazadaShop.findUnique({ where: { id: task.shopId }, select: { sellerId: true, userId: true } });
-  if (!shop) throw new PermanentTaskDispatchError("SHOP_NOT_FOUND");
-  const range = { from: new Date(window.from * 1000).toISOString(), to: new Date(window.to * 1000).toISOString() };
-  switch (task.stream) {
-    case "orders": return syncLazadaOrders(shop.sellerId, shop.userId, range, task.run.requestedByUserId);
-    case "finance": return syncLazadaFinance(shop.sellerId, shop.userId, range, task.run.requestedByUserId);
-    case "payouts": return syncLazadaPayoutStatements(shop.sellerId, shop.userId, range, task.run.requestedByUserId);
-    default: throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
-  }
-}
-
 /** Claim, execute, and settle one provider-safe, checkpointed stream window. */
 export async function dispatchMarketplaceSyncTask(id: string, workerId: string, now = new Date()): Promise<MarketplaceSyncTaskDispatchResult> {
   if (!(await claimMarketplaceSyncTask(id, workerId, now))) return { status: "skipped" };
   const task = await getClaimedMarketplaceSyncTask(id, workerId, now);
-  if (!task || !["shopee", "lazada"].includes(task.platform) || !["all", "orders", "finance", "returns", "payouts"].includes(task.run.syncType)) {
+  const platform = task?.platform as MarketplacePlatform;
+  if (!task || !marketplaceSyncTaskGraph(platform, task.run.syncType).some(({ stream }) => stream === task.stream)) {
     await failMarketplaceSyncTask(id, workerId, "TASK_STREAM_UNSUPPORTED", now);
     return { status: "failed" };
   }
@@ -117,10 +91,12 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     // cannot settle after it loses its durable four-minute lease.
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
     const window = taskWindow(task, now);
-    const result = task.platform === "lazada" ? await runLazadaTask(task, window) : await runShopeeTask(task, window);
+    const input = window ? { dateFrom: new Date(window.from * 1000).toISOString(), dateTo: new Date(window.to * 1000).toISOString() }
+      : task.stream === "ads" ? { daysBack: 30 } : task.run.input;
+    const result = await runMarketplaceSync(platform, task.shopId, task.run.requestedByUserId, task.stream, input);
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
+    if (!("synced" in result) || !("errors" in result)) throw new PermanentTaskDispatchError("TASK_STREAM_UNSUPPORTED");
     if (result.errors.length) throw new Error("PROVIDER_RETURNED_ERRORS");
-    const platform = task.platform as "shopee" | "lazada";
     await Promise.all([invalidateCache(cacheKeys[platform].pattern), invalidateMarketplaceAnalytics(platform)]);
     if (window && window.to < window.end) {
       const metrics = windowMetrics(task.metrics, window, result);
@@ -135,13 +111,16 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     }
     const metrics = window
       ? windowMetrics(task.metrics, window, result)
-      : undefined;
+      : { recordsSynced: result.synced, recordsCreated: "created" in result ? result.created : 0, recordsUpdated: "updated" in result ? result.updated : 0 };
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {
-    if (error instanceof LazadaProviderError) {
-      const failure = lazadaSyncFailure(error);
-      const provider = { code: error.code, requestId: error.providerRequestId, fields: error.fields };
+    if (error instanceof LazadaProviderError || error instanceof TikTokProviderError) {
+      const failure = error instanceof LazadaProviderError ? lazadaSyncFailure(error) : {
+        code: `TIKTOK_${error.code.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`.slice(0, 64),
+        retryable: ["temporary", "rate_limit"].includes(error.kind),
+      };
+      const provider = { code: error.code, requestId: error.providerRequestId, fields: error instanceof LazadaProviderError ? error.fields : [] };
       console.warn("Marketplace provider task failure", { taskId: id, platform: task.platform, providerCode: error.code, providerRequestId: error.providerRequestId, httpStatus: error.status, retryable: failure.retryable });
       if (!failure.retryable) {
         const settled = await failMarketplaceSyncTask(id, workerId, failure.code, undefined, provider);
@@ -151,8 +130,8 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
       if (!settled.settled) return { status: "skipped" };
       return settled.status === "retrying" ? { status: "retrying", nextTaskId: settled.nextTaskId, nextAttemptAt: settled.nextAttemptAt } : { status: "failed" };
     }
-    if (error instanceof PermanentTaskDispatchError) {
-      const settled = await failMarketplaceSyncTask(id, workerId, error.code);
+    if (error instanceof PermanentTaskDispatchError || error instanceof PermanentDispatchError) {
+      const settled = await failMarketplaceSyncTask(id, workerId, error.code === "SYNC_TYPE_UNSUPPORTED" ? "TASK_STREAM_UNSUPPORTED" : error.code);
       return settled.settled ? { status: "failed" } : { status: "skipped" };
     }
     const settled = await retryMarketplaceSyncTask(id, workerId, "SYNC_ATTEMPT_FAILED");

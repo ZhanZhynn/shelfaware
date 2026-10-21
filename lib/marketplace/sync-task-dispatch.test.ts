@@ -5,8 +5,11 @@ const mocks = vi.hoisted(() => ({
   invalidateCache: vi.fn(), invalidateMarketplaceAnalytics: vi.fn(),
   shopeeShop: { findUnique: vi.fn() },
   lazadaShop: { findUnique: vi.fn() },
-  syncLazadaOrders: vi.fn(), syncLazadaFinance: vi.fn(), syncLazadaPayoutStatements: vi.fn(),
+  tikTokShop: { findUnique: vi.fn() }, shopifyShop: { findUnique: vi.fn() },
+  syncLazadaOrders: vi.fn(), syncLazadaFinance: vi.fn(), syncLazadaPayoutStatements: vi.fn(), syncLazadaProducts: vi.fn(),
   syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(), syncShopeeReturns: vi.fn(), syncShopeePayoutStatements: vi.fn(),
+  syncTikTokOrders: vi.fn(), syncTikTokFinance: vi.fn(), syncTikTokProducts: vi.fn(),
+  syncShopifyOrders: vi.fn(), syncShopifyFinance: vi.fn(), syncShopifyProducts: vi.fn(),
 }));
 
 vi.mock("./sync-runs", () => ({
@@ -18,17 +21,20 @@ vi.mock("./sync-runs", () => ({
   renewMarketplaceSyncTaskLease: mocks.renew,
   retryMarketplaceSyncTask: mocks.retry,
 }));
-vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: mocks.shopeeShop, lazadaShop: mocks.lazadaShop } }));
+vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: mocks.shopeeShop, lazadaShop: mocks.lazadaShop, tikTokShop: mocks.tikTokShop, shopifyShop: mocks.shopifyShop } }));
 vi.mock("@/lib/cache/cache-utils", () => ({
-  cacheKeys: { shopee: { pattern: "shopee:*" }, lazada: { pattern: "lazada:*" } },
+  cacheKeys: { shopee: { pattern: "shopee:*" }, lazada: { pattern: "lazada:*" }, tiktok: { pattern: "tiktok:*" }, shopify: { pattern: "shopify:*" } },
   invalidateCache: mocks.invalidateCache,
   invalidateMarketplaceAnalytics: mocks.invalidateMarketplaceAnalytics,
 }));
 vi.mock("@/lib/shopee", () => ({ syncShopeeOrders: mocks.syncShopeeOrders, syncShopeeProducts: mocks.syncShopeeProducts, syncShopeeAds: mocks.syncShopeeAds, syncShopeeReturns: mocks.syncShopeeReturns, syncShopeePayoutStatements: mocks.syncShopeePayoutStatements }));
-vi.mock("@/lib/lazada", () => ({ syncLazadaOrders: mocks.syncLazadaOrders, syncLazadaFinance: mocks.syncLazadaFinance, syncLazadaPayoutStatements: mocks.syncLazadaPayoutStatements }));
+vi.mock("@/lib/lazada", () => ({ syncLazadaOrders: mocks.syncLazadaOrders, syncLazadaFinance: mocks.syncLazadaFinance, syncLazadaPayoutStatements: mocks.syncLazadaPayoutStatements, syncLazadaProducts: mocks.syncLazadaProducts }));
+vi.mock("@/lib/tiktok", () => ({ syncTikTokOrders: mocks.syncTikTokOrders, syncTikTokFinance: mocks.syncTikTokFinance, syncTikTokProducts: mocks.syncTikTokProducts, syncTikTokAll: vi.fn(), syncTikTokPayoutStatements: vi.fn() }));
+vi.mock("@/lib/shopify", () => ({ syncShopifyOrders: mocks.syncShopifyOrders, syncShopifyFinance: mocks.syncShopifyFinance, syncShopifyProducts: mocks.syncShopifyProducts, syncShopifyAll: vi.fn() }));
 
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
 import { LazadaProviderError } from "@/lib/lazada/provider-error";
+import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 
 const task = (overrides: Record<string, unknown> = {}) => ({
   id: "a".repeat(24), platform: "shopee", shopId: "b".repeat(24), stream: "orders_and_escrow", sequence: 0,
@@ -52,6 +58,85 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it.each([
+    undefined,
+    { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-31T23:59:59+08:00" },
+  ])("refreshes Lazada products once without applying the order/finance date window", async (input) => {
+    mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "products", sequence: 1, run: { syncType: "all", requestedByUserId: "requester", input } }));
+    mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });
+    mocks.syncLazadaProducts.mockResolvedValue({ synced: 12, created: 2, updated: 10, errors: [] });
+
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.syncLazadaProducts).toHaveBeenCalledExactlyOnceWith("seller", "owner", "requester");
+    expect(mocks.complete).toHaveBeenCalledWith("task", "worker", undefined, { recordsSynced: 12, recordsCreated: 2, recordsUpdated: 10 });
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
+    expect(mocks.syncLazadaFinance).not.toHaveBeenCalled();
+    expect(mocks.invalidateMarketplaceAnalytics).toHaveBeenCalledWith("lazada");
+  });
+
+  it.each(["tiktok", "shopify"] as const)("checkpoints %s orders and resumes the exact next second under the same lease engine", async (platform) => {
+    const run = { syncType: "all", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-03T23:59:59+08:00" } };
+    mocks.claimed.mockResolvedValue(task({ platform, stream: "orders", run }));
+    mocks.tikTokShop.findUnique.mockResolvedValue({ shopId: "provider-t", userId: "owner-t" });
+    mocks.shopifyShop.findUnique.mockResolvedValue({ id: "shop-s", userId: "owner-s" });
+    mocks.syncTikTokOrders.mockResolvedValue({ synced: 2, created: 1, updated: 1, errors: [] });
+    mocks.syncShopifyOrders.mockResolvedValue({ synced: 2, created: 1, updated: 1, errors: [] });
+
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "checkpointed" });
+
+    const sync = platform === "tiktok" ? mocks.syncTikTokOrders : mocks.syncShopifyOrders;
+    const args = platform === "tiktok"
+      ? ["provider-t", "owner-t", { from: 1785513600, to: 1785599999 }, "requester"]
+      : ["shop-s", "owner-s", { from: "2026-07-31T16:00:00.000Z", to: "2026-08-01T15:59:59.000Z" }, "requester"];
+    expect(sync).toHaveBeenCalledWith(...args);
+    const checkpoint = mocks.checkpoint.mock.calls[0]![0].checkpoint;
+    expect(checkpoint).toMatchObject({ from: 1785600000, windowsCompleted: 1, inclusive: true });
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.renew).toHaveBeenCalledTimes(2);
+    expect(mocks.invalidateMarketplaceAnalytics).toHaveBeenCalledWith(platform);
+
+    mocks.claimed.mockResolvedValue(task({ platform, stream: "orders", run, checkpoint }));
+    await dispatchMarketplaceSyncTask("task", "worker");
+    expect(sync.mock.calls[1]![2]).toEqual(platform === "tiktok"
+      ? { from: 1785600000, to: 1785686399 }
+      : { from: "2026-08-01T16:00:00.000Z", to: "2026-08-02T15:59:59.000Z" });
+  });
+
+  it.each(["tiktok", "shopify"] as const)("bounds %s finance without changing shop ownership or actor attribution", async (platform) => {
+    mocks.claimed.mockResolvedValue(task({ platform, stream: "finance", run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-01T23:59:59+08:00" } } }));
+    mocks.tikTokShop.findUnique.mockResolvedValue({ shopId: "provider-t", userId: "owner-t" });
+    mocks.shopifyShop.findUnique.mockResolvedValue({ id: "shop-s", userId: "owner-s" });
+    mocks.syncTikTokFinance.mockResolvedValue({ synced: 1, created: 1, updated: 0, errors: [] });
+    mocks.syncShopifyFinance.mockResolvedValue({ synced: 1, created: 1, updated: 0, errors: [] });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "completed" });
+    if (platform === "tiktok") expect(mocks.syncTikTokFinance).toHaveBeenCalledWith("provider-t", "owner-t", "requester", { from: 1785513600, to: 1785599999 });
+    else expect(mocks.syncShopifyFinance).toHaveBeenCalledWith("shop-s", "owner-s", { from: "2026-07-31T16:00:00.000Z", to: "2026-08-01T15:59:59.000Z" }, "requester");
+    expect(mocks.complete).toHaveBeenCalledWith("task", "worker", undefined, expect.objectContaining({ ordersSynced: 1 }));
+  });
+
+  it("does not checkpoint or advance new platform streams when the provider reports per-record errors", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "shopify", stream: "orders" }));
+    mocks.shopifyShop.findUnique.mockResolvedValue({ id: "shop-s", userId: "owner-s" });
+    mocks.syncShopifyOrders.mockResolvedValue({ synced: 1, errors: ["private provider detail"] });
+    mocks.retry.mockResolvedValue({ settled: true, status: "retrying", nextTaskId: "task", nextAttemptAt: null });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "retrying" });
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.retry.mock.calls)).not.toContain("private provider detail");
+  });
+
+  it("fails deterministic TikTok auth errors with safe provider diagnostics", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "tiktok", stream: "orders" }));
+    mocks.tikTokShop.findUnique.mockResolvedValue({ shopId: "provider-t", userId: "owner-t" });
+    mocks.syncTikTokOrders.mockRejectedValue(new TikTokProviderError(12345, 401, "provider-id", "private-token"));
+    mocks.fail.mockResolvedValue({ settled: true });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toEqual({ status: "failed" });
+    expect(mocks.fail).toHaveBeenCalledWith("task", "worker", "TIKTOK_12345", undefined, { code: "12345", requestId: "provider-id", fields: [] });
+    expect(mocks.retry).not.toHaveBeenCalled();
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
+  });
+
   it("fails permanent Lazada response errors with a safe actionable code rather than repeatedly advancing or retrying", async () => {
     mocks.claimed.mockResolvedValue(task({ platform: "lazada", stream: "finance", run: { syncType: "finance", requestedByUserId: "requester", input: { dateFrom: "2026-08-01T00:00:00Z", dateTo: "2026-08-01T23:59:59Z" } } }));
     mocks.lazadaShop.findUnique.mockResolvedValue({ sellerId: "seller", userId: "owner" });

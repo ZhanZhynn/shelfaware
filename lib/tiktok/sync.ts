@@ -356,6 +356,8 @@ const variantData = normalizeSkuData(sku);
 
 // ─── Order Sync ───────────────────────────────────────────────────────────
 
+type TikTokSyncRange = { from: number; to: number };
+
 /**
  * Sync orders from a TikTok Shop.
  * Paginates using next_page_token, then batch-fetches order details.
@@ -363,7 +365,7 @@ const variantData = normalizeSkuData(sku);
 export async function syncTikTokOrders(
   shopId: string,
   userId: string,
-  createdAfter?: number,
+  createdAfter?: number | TikTokSyncRange,
   actorId = userId,
 ): Promise<{
   synced: number;
@@ -398,7 +400,8 @@ export async function syncTikTokOrders(
       const cipher = await getTikTokShopCipher(shopContext);
 
       // Default to last 15 days if no date specified
-      const createTimeFrom = createdAfter || Math.floor(Date.now() / 1000) - 15 * 24 * 60 * 60;
+      const range = typeof createdAfter === "object" ? createdAfter : null;
+      const createTimeFrom = range?.from ?? (typeof createdAfter === "number" ? createdAfter : Math.floor(Date.now() / 1000) - 15 * 24 * 60 * 60);
 
       // Collect all order IDs from search
       const allOrderIds: string[] = [];
@@ -409,7 +412,7 @@ export async function syncTikTokOrders(
           searchOrders(
             accessToken,
             cipher,
-            { create_time_ge: createTimeFrom },
+            { create_time_ge: createTimeFrom, ...(range ? { create_time_lt: range.to + 1 } : {}) },
             50,
             pageToken,
             "create_time",
@@ -621,6 +624,7 @@ export async function syncTikTokFinance(
   shopId: string,
   userId: string,
   actorId = userId,
+  range?: TikTokSyncRange,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
   const shop = await prisma.tikTokShop.findFirst({ where: { shopId, userId } });
   if (!shop) throw new Error(`TikTok shop ${shopId} not found for user ${userId}`);
@@ -639,7 +643,9 @@ export async function syncTikTokFinance(
         const [cipher, orders] = await Promise.all([
           getTikTokShopCipher(shopContext),
           prisma.tikTokOrder.findMany({
-            where: { shopId: shop.id },
+            // This endpoint reports finance for known orders, so a bounded
+            // finance task uses the same order-created cohort as its order task.
+            where: { shopId: shop.id, ...(range ? { tiktokCreatedAt: { gte: new Date(range.from * 1000), lte: new Date(range.to * 1000) } } : {}) },
             select: { tiktokOrderId: true },
           }),
         ]);

@@ -9,15 +9,16 @@ const mocks = vi.hoisted(() => ({
   getOrdersDetail: vi.fn(),
   lazadaShopFindFirst: vi.fn(), lazadaOrdersPage: vi.fn(), lazadaItems: vi.fn(),
   tikTokShopFindFirst: vi.fn(), tiktokOrders: vi.fn(),
+  shopifyShopFindFirst: vi.fn(), shopifyGraphQL: vi.fn(),
   requireApiActor: vi.fn(), withRateLimit: vi.fn(),
 }));
-vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: { findFirst: mocks.shopeeShopFindFirst }, lazadaShop: { findFirst: mocks.lazadaShopFindFirst }, tikTokShop: { findFirst: mocks.tikTokShopFindFirst } } }));
+vi.mock("@/prisma/client", () => ({ prisma: { shopeeShop: { findFirst: mocks.shopeeShopFindFirst }, lazadaShop: { findFirst: mocks.lazadaShopFindFirst }, tikTokShop: { findFirst: mocks.tikTokShopFindFirst }, shopifyShop: { findFirst: mocks.shopifyShopFindFirst } } }));
 vi.mock("@/lib/marketplace/access", () => ({ marketplaceOwnerIds: mocks.marketplaceOwnerIds }));
 vi.mock("@/lib/shopee/server", () => ({ getTransientShopeeSDK: mocks.getTransientShopeeSDK }));
 vi.mock("@/lib/lazada/server", () => ({ createLazadaShopContext: (shop: unknown) => shop }));
 vi.mock("@/lib/lazada/custom-api", () => ({ getOrdersPageCustom: mocks.lazadaOrdersPage, getMultipleOrderItemsCustom: mocks.lazadaItems, getProductsCustom: vi.fn() }));
 vi.mock("@/lib/tiktok/custom-api", () => ({ searchOrders: mocks.tiktokOrders, searchProducts: vi.fn() }));
-vi.mock("@/lib/shopify/server", () => ({ shopifyGraphQL: vi.fn() }));
+vi.mock("@/lib/shopify/server", () => ({ shopifyGraphQL: mocks.shopifyGraphQL }));
 vi.mock("@/lib/auth/require-api-scope", () => ({ requireApiActor: mocks.requireApiActor, ApiScopeError: class extends Error {} }));
 vi.mock("@/lib/auth/api-token", () => ({ ApiTokenAuthenticationError: class extends Error {} }));
 vi.mock("@/lib/api/rate-limit", () => ({ withRateLimit: mocks.withRateLimit, defaultRateLimits: { standard: {} } }));
@@ -35,6 +36,16 @@ beforeEach(() => {
   mocks.tikTokShopFindFirst.mockResolvedValue({ accessToken: "seller-token", shopCipher: "shop-cipher" });
   mocks.requireApiActor.mockResolvedValue({ user: { id: "actor-1", role: "admin" }, authType: "api_token", tokenId: "token-1" });
   mocks.withRateLimit.mockResolvedValue(null);
+});
+
+describe("live Shopify orders", () => {
+  it("quotes timestamp filters so a today query does not include yesterday", async () => {
+    mocks.shopifyShopFindFirst.mockResolvedValue({ shopDomain: "shop.myshopify.com", accessToken: "shop-token" });
+    mocks.shopifyGraphQL.mockResolvedValue({ orders: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
+    const query = parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), createdAfter: "2026-10-21T00:00:00+08:00", createdBefore: "2026-10-21T23:59:59+08:00" }), "orders");
+    await expect(listMarketplaceLive("shopify", { id: "owner", role: null }, "orders", query)).resolves.toMatchObject({ data: [], page: { nextCursor: null } });
+    expect(mocks.shopifyGraphQL).toHaveBeenCalledWith("shop.myshopify.com", "shop-token", expect.any(String), expect.objectContaining({ query: 'created_at:>="2026-10-20T16:00:00.000Z" created_at:<="2026-10-21T15:59:59.000Z"' }));
+  });
 });
 
 describe("live TikTok orders", () => {

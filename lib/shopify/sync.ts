@@ -238,10 +238,17 @@ export async function syncShopifyProducts(
 
 // ─── Order Sync ───────────────────────────────────────────────────────────
 
+type ShopifySyncScope = number | { from: string; to: string };
+
+function syncDateBounds(scope?: ShopifySyncScope) {
+  if (typeof scope === "object") return { from: scope.from, to: scope.to };
+  return { from: scope ? new Date(Date.now() - scope * 86_400_000).toISOString() : undefined, to: undefined };
+}
+
 export async function syncShopifyOrders(
   shopId: string,
   userId: string,
-  daysBack?: number,
+  daysBack?: ShopifySyncScope,
   actorId = userId,
 ): Promise<{
   synced: number;
@@ -279,12 +286,10 @@ export async function syncShopifyOrders(
       }
 
       const accessToken = tokenContext.accessToken;
-      const createdAfter = daysBack
-        ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
-        : undefined;
+      const bounds = syncDateBounds(daysBack);
 
       const orders = await withShopifyRetry(() =>
-        fetchAllOrders(shop.shopDomain, accessToken, createdAfter),
+        fetchAllOrders(shop.shopDomain, accessToken, bounds.from, bounds.to),
       );
 
       logger.info(`[Shopify Sync] Fetched ${orders.length} orders from ${shop.shopDomain}`);
@@ -422,7 +427,7 @@ export async function syncShopifyOrders(
 export async function syncShopifyFinance(
   shopId: string,
   userId: string,
-  daysBack?: number,
+  daysBack?: ShopifySyncScope,
   actorId = userId,
 ): Promise<{ synced: number; created: number; updated: number; errors: string[] }> {
   const shop = await prisma.shopifyShop.findFirst({
@@ -447,11 +452,9 @@ export async function syncShopifyFinance(
           if (!tokenCheck.valid) throw new Error(`Token validation failed: ${tokenCheck.error}`);
 
           const accessToken = tokenContext.accessToken;
-          const updatedAfter = daysBack
-            ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
-            : undefined;
+          const bounds = syncDateBounds(daysBack);
           const orders = await withShopifyRetry(() =>
-            fetchAllFinanceOrders(shop.shopDomain, accessToken, updatedAfter),
+            fetchAllFinanceOrders(shop.shopDomain, accessToken, bounds.from, bounds.to),
           );
           const errors: string[] = [];
           let synced = 0;

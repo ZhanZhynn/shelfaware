@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), assertMarketplaceSyncShop: vi.fn(), createMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), enqueueMarketplaceSyncJob: vi.fn(), createShopeeAllSyncRun: vi.fn(), createShopeeBoundedSyncRun: vi.fn(), createLazadaBoundedSyncRun: vi.fn(), deliverMarketplaceSyncTaskOutbox: vi.fn(), marketplaceSyncRunResponse: vi.fn() }));
+const mocks = vi.hoisted(() => ({ requireApiActor: vi.fn(), withRateLimit: vi.fn(), assertMarketplaceSyncShop: vi.fn(), createMarketplaceSyncJob: vi.fn(), marketplaceSyncJobResponse: vi.fn(), enqueueMarketplaceSyncJob: vi.fn(), createMarketplaceSyncRun: vi.fn(), deliverMarketplaceSyncTaskOutbox: vi.fn(), marketplaceSyncRunResponse: vi.fn() }));
 vi.mock("@/lib/auth/require-api-scope", () => ({
   requireApiActor: mocks.requireApiActor,
   ApiScopeError: class ApiScopeError extends Error {},
@@ -17,9 +17,7 @@ vi.mock("@/lib/marketplace/sync-jobs", () => ({
 }));
 vi.mock("@/lib/marketplace/sync-enqueue", () => ({ enqueueMarketplaceSyncJob: mocks.enqueueMarketplaceSyncJob }));
 vi.mock("@/lib/marketplace/sync-runs", () => ({
-  createShopeeAllSyncRun: mocks.createShopeeAllSyncRun,
-  createShopeeBoundedSyncRun: mocks.createShopeeBoundedSyncRun,
-  createLazadaBoundedSyncRun: mocks.createLazadaBoundedSyncRun,
+  createMarketplaceSyncRun: mocks.createMarketplaceSyncRun,
   deliverMarketplaceSyncTaskOutbox: mocks.deliverMarketplaceSyncTaskOutbox,
   marketplaceSyncRunResponse: mocks.marketplaceSyncRunResponse,
 }));
@@ -33,9 +31,7 @@ beforeEach(() => {
   mocks.createMarketplaceSyncJob.mockResolvedValue({ job: { id: "a".repeat(24) }, coalesced: false });
   mocks.marketplaceSyncJobResponse.mockReturnValue({ id: "a".repeat(24), status: "pending" });
   mocks.enqueueMarketplaceSyncJob.mockResolvedValue({ scheduled: false });
-  mocks.createShopeeAllSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
-  mocks.createShopeeBoundedSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
-  mocks.createLazadaBoundedSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
+  mocks.createMarketplaceSyncRun.mockResolvedValue({ run: { id: "d".repeat(24) }, coalesced: false, firstTaskId: "e".repeat(24) });
   mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: false });
   mocks.marketplaceSyncRunResponse.mockReturnValue({ id: "d".repeat(24), status: "pending", tasks: [] });
 });
@@ -45,7 +41,7 @@ describe("v1 marketplace sync creation", () => {
     const input = { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-09-14T23:59:59+08:00" };
     const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/lazada/syncs", { method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "finance", input }) }), { params: Promise.resolve({ platform: "lazada" }) });
     expect(response.status).toBe(202);
-    expect(mocks.createLazadaBoundedSyncRun).toHaveBeenCalledWith(expect.objectContaining({ syncType: "finance", input }));
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "lazada", syncType: "finance", input }));
     expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
   });
   it("requires marketplace:sync, persists the idempotency key, and leaves execution pending without a queue", async () => {
@@ -78,14 +74,14 @@ describe("v1 marketplace sync creation", () => {
     expect(mocks.enqueueMarketplaceSyncJob).toHaveBeenCalledTimes(1);
   });
 
-  it("creates only Shopee all as a run with an initial durable task delivery", async () => {
+  it("creates Shopee all as a run with an initial durable task delivery", async () => {
     mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: true });
     const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/shopee/syncs", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all" }),
     }), { params: Promise.resolve({ platform: "shopee" }) });
 
     expect(response.status).toBe(202);
-    expect(mocks.createShopeeAllSyncRun).toHaveBeenCalledWith(expect.objectContaining({ shopId: "b".repeat(24), requestedByUserId: "c".repeat(24) }));
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "shopee", syncType: "all", shopId: "b".repeat(24), requestedByUserId: "c".repeat(24) }));
     expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("e".repeat(24));
     expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
     expect((await response.json()).meta.execution).toBe("scheduled");
@@ -98,7 +94,7 @@ describe("v1 marketplace sync creation", () => {
     }), { params: Promise.resolve({ platform: "shopee" }) });
 
     expect(response.status).toBe(202);
-    expect(mocks.createShopeeBoundedSyncRun).toHaveBeenCalledWith(expect.objectContaining({ syncType: "orders", input }));
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "shopee", syncType: "orders", input }));
     expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
     expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("e".repeat(24));
   });
@@ -109,7 +105,53 @@ describe("v1 marketplace sync creation", () => {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all", input }),
     }), { params: Promise.resolve({ platform: "shopee" }) });
 
-    expect(mocks.createShopeeAllSyncRun).toHaveBeenCalledWith(expect.objectContaining({ input }));
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "shopee", syncType: "all", input }));
+  });
+
+  it.each(["lazada", "tiktok", "shopify"])("queues %s historical syncs through the shared task engine using API-token ownership", async (platform) => {
+    const input = { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-31T23:59:59+08:00" };
+    mocks.deliverMarketplaceSyncTaskOutbox.mockResolvedValue({ scheduled: true });
+    const response = await POST(new NextRequest(`http://localhost/api/v1/marketplaces/${platform}/syncs`, {
+      method: "POST", headers: { "idempotency-key": "sync_1" }, body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all", input }),
+    }), { params: Promise.resolve({ platform }) });
+
+    expect(response.status).toBe(202);
+    expect(mocks.requireApiActor).toHaveBeenCalledWith(expect.any(NextRequest), ["marketplace:sync"]);
+    expect(mocks.assertMarketplaceSyncShop).toHaveBeenCalledWith(platform, "b".repeat(24), { id: "c".repeat(24), role: "admin" });
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith({ platform, shopId: "b".repeat(24), requestedByUserId: "c".repeat(24), syncType: "all", input, idempotencyKey: "sync_1" });
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("e".repeat(24));
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect((await response.json()).meta.execution).toBe("scheduled");
+  });
+
+  it("routes Lazada all without date flags through the same task graph as historical all", async () => {
+    const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/lazada/syncs", {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "all" }),
+    }), { params: Promise.resolve({ platform: "lazada" }) });
+    expect(response.status).toBe(202);
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "lazada", syncType: "all" }));
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("e".repeat(24));
+  });
+
+  it.each(["tiktok", "shopify"])("uses the task engine for %s without explicit bounds too", async (platform) => {
+    const response = await POST(new NextRequest(`http://localhost/api/v1/marketplaces/${platform}/syncs`, {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "orders" }),
+    }), { params: Promise.resolve({ platform }) });
+    expect(response.status).toBe(202);
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform, syncType: "orders" }));
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+    expect((await response.json()).meta.execution).toBe("pending");
+  });
+
+  it.each([["tiktok", "returns"], ["shopify", "payouts"], ["shopify", "ads"]])("rejects unsupported %s %s work before creating a run", async (platform, syncType) => {
+    const response = await POST(new NextRequest(`http://localhost/api/v1/marketplaces/${platform}/syncs`, {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType }),
+    }), { params: Promise.resolve({ platform }) });
+    expect(response.status).toBe(422);
+    expect((await response.json()).error.code).toBe("SYNC_TYPE_UNSUPPORTED");
+    expect(mocks.assertMarketplaceSyncShop).not.toHaveBeenCalled();
+    expect(mocks.createMarketplaceSyncRun).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -119,6 +161,9 @@ describe("v1 marketplace sync creation", () => {
     [{ dateFrom: "2024-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "orders"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "lazada", "returns"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "ads"],
+    [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "tiktok", "payouts"],
+    [{ dateFrom: "2025-01-01T00:00:00Z" }, "shopify", "orders"],
+    [{ daysBack: 0 }, "tiktok", "orders"],
   ])("rejects unsupported or invalid date ranges", async (input, platform, syncType) => {
     const response = await POST(new NextRequest(`http://localhost/api/v1/marketplaces/${platform}/syncs`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shopId: "b".repeat(24), syncType, input }),

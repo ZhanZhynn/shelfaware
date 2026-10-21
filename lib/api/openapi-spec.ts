@@ -3,6 +3,8 @@
  * Single source of truth for API documentation; consumed by GET /api/openapi and API docs page.
  */
 
+import { marketplaceSyncTypesByPlatform } from "@/lib/marketplace/sync-plan";
+
 export interface OpenApiSpecOptions {
   baseUrl: string;
 }
@@ -368,10 +370,11 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
       "/api/v1/marketplaces/{platform}/syncs": {
         post: {
           summary: "Queue a marketplace synchronization job",
-          description: "Creates durable work only; it never invokes a marketplace provider in the request. Supply an optional Idempotency-Key header to coalesce duplicate requests. Shopee orders, finance, returns, payouts, and all accept paired input.dateFrom/dateTo whole-second RFC3339 boundaries, at most 365 days and not in the future. Historical orders/finance execute in checkpointed daily tasks; returns/payouts use bounded provider windows. For all, the dates bound orders/escrow only; product and ads defaults are unchanged.",
+          description: "Creates durable work only; it never invokes a marketplace provider in the request. Supply an optional Idempotency-Key header to coalesce duplicate requests. All four platforms accept paired input.dateFrom/dateTo whole-second RFC3339 bounds for orders, finance, and all, at most 365 days and not in the future. Historical streams use the shared checkpointed task/lease/outbox engine. Lazada, TikTok, and Shopify all runs orders, products, then finance with or without date bounds; their default window is frozen at creation (15 days unless daysBack is supplied). TikTok finance first discovers orders in the order-created cohort; Shopify finance filters by order update time to include refunds on older orders. Product tasks refresh the current catalog once per run. Shopee all retains orders/escrow, products, and optional ads. Date-scoped returns are Shopee-only; date-scoped payouts are Shopee/Lazada-only. TikTok payouts remain standalone without date bounds, and Shopify payouts are unsupported.",
           tags: ["Marketplace v1"],
           security: marketplaceSyncSecurity,
           "x-requiredApiTokenScopes": ["marketplace:sync"],
+          "x-supportedSyncTypesByPlatform": marketplaceSyncTypesByPlatform,
           parameters: [platformParameter, { name: "Idempotency-Key", in: "header", schema: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" } }],
           requestBody: {
             required: true,
@@ -387,6 +390,7 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
                     input: { type: "object", additionalProperties: true, properties: {
                       dateFrom: { type: "string", format: "date-time", description: "Paired with dateTo; explicit offset and whole seconds required." },
                       dateTo: { type: "string", format: "date-time", description: "Inclusive end, paired with dateFrom; no future bounds." },
+                      daysBack: { type: "integer", minimum: 1, maximum: 365, description: "Optional rolling lookback; Lazada/TikTok/Shopify catalog task runs freeze it into exact bounds when created." },
                     } },
                   },
                 },

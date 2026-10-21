@@ -5,6 +5,7 @@
  */
 
 import { shopifyGraphQL, PRODUCTS_QUERY, ORDERS_QUERY, ORDER_LINE_ITEMS_QUERY, FINANCE_ORDERS_QUERY } from "./server";
+import { shopifyDateQuery } from "./search";
 import type {
   ShopifyProductNode,
   ShopifyProductsResponse,
@@ -70,6 +71,7 @@ export async function fetchAllOrders(
   shopDomain: string,
   accessToken: string,
   createdAfter?: string,
+  createdBefore?: string,
 ): Promise<ShopifyOrderNode[]> {
   const allOrders: ShopifyOrderNode[] = [];
   let cursor: string | null = null;
@@ -79,7 +81,7 @@ export async function fetchAllOrders(
   const filterDate = createdAfter
     ? createdAfter
     : new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
-  const queryString = `created_at:>=${filterDate}`;
+  const queryString = shopifyDateQuery("created_at", filterDate, createdBefore);
 
   while (hasNextPage) {
     const data: ShopifyOrdersResponse = await shopifyGraphQL<ShopifyOrdersResponse>(
@@ -149,6 +151,7 @@ export async function fetchAllFinanceOrders(
   shopDomain: string,
   accessToken: string,
   updatedAfter?: string,
+  updatedBefore?: string,
 ): Promise<ShopifyFinanceOrderNode[]> {
   const allOrders: ShopifyFinanceOrderNode[] = [];
   let cursor: string | null = null;
@@ -156,7 +159,7 @@ export async function fetchAllFinanceOrders(
   const filterDate = updatedAfter
     ? updatedAfter
     : new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
-  const queryString = `updated_at:>=${filterDate}`;
+  const queryString = shopifyDateQuery("updated_at", filterDate, updatedBefore);
 
   while (hasNextPage) {
     const data: ShopifyFinanceOrdersResponse = await shopifyGraphQL<ShopifyFinanceOrdersResponse>(

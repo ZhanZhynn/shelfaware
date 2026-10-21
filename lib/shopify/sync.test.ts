@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { prismaMock, fetchAllOrders, validateShopifyToken } = vi.hoisted(() => {
+const { prismaMock, fetchAllOrders, fetchAllFinanceOrders, validateShopifyToken } = vi.hoisted(() => {
   const tx = {
     shopifyOrder: { update: vi.fn(), create: vi.fn() },
     shopifyOrderItem: { deleteMany: vi.fn(), create: vi.fn() },
@@ -16,16 +16,17 @@ const { prismaMock, fetchAllOrders, validateShopifyToken } = vi.hoisted(() => {
   return {
     prismaMock,
     fetchAllOrders: vi.fn(),
+    fetchAllFinanceOrders: vi.fn(),
     validateShopifyToken: vi.fn().mockResolvedValue({ valid: true }),
   };
 });
 
 vi.mock("@/prisma/client", () => ({ default: prismaMock }));
-vi.mock("./graphql-client", () => ({ fetchAllOrders, fetchAllProducts: vi.fn(), fetchAllFinanceOrders: vi.fn() }));
+vi.mock("./graphql-client", () => ({ fetchAllOrders, fetchAllProducts: vi.fn(), fetchAllFinanceOrders }));
 vi.mock("./server", () => ({ validateShopifyToken, SHOPIFY_API_VERSION: "2025-07" }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability: vi.fn() }));
 
-import { syncShopifyOrders } from "./sync";
+import { syncShopifyOrders, syncShopifyFinance } from "./sync";
 
 const order = {
   id: "gid://shopify/Order/1", name: "#1", email: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", processedAt: "2026-01-01T00:00:00Z", closedAt: null, cancelledAt: null, cancelReason: null, closed: false, confirmed: true, test: false, note: null, tags: [], currencyCode: "USD", displayFinancialStatus: "PAID", displayFulfillmentStatus: "UNFULFILLED", totalPriceSet: { shopMoney: { amount: "1.00", currencyCode: "USD" } }, subtotalPriceSet: { shopMoney: { amount: "1.00", currencyCode: "USD" } }, totalShippingPriceSet: { shopMoney: { amount: "0.00", currencyCode: "USD" } }, totalTaxSet: null, customer: null, shippingAddress: null,
@@ -47,6 +48,20 @@ beforeEach(() => {
 });
 
 describe("Shopify order persistence", () => {
+  it("passes an exact update-time window to finance retrieval", async () => {
+    fetchAllFinanceOrders.mockResolvedValueOnce([]);
+    const scope = { from: "2026-08-01T00:00:00+08:00", to: "2026-08-01T23:59:59+08:00" };
+    await expect(syncShopifyFinance("shop-record", "user-record", scope, "requester")).resolves.toMatchObject({ synced: 0, errors: [] });
+    expect(fetchAllFinanceOrders).toHaveBeenCalledWith("shop.myshopify.com", "shop-token", scope.from, scope.to);
+  });
+
+  it("passes an exact historical window to order retrieval instead of a moving daysBack cutoff", async () => {
+    const scope = { from: "2026-08-01T00:00:00+08:00", to: "2026-08-01T23:59:59+08:00" };
+    await syncShopifyOrders("shop-record", "user-record", scope, "requester");
+    expect(fetchAllOrders).toHaveBeenCalledWith("shop.myshopify.com", "shop-token", scope.from, scope.to);
+    expect(prismaMock.syncLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ userId: "requester" }) }));
+  });
+
   it("does not count or partially replace an order when an item write fails", async () => {
     prismaMock.tx.shopifyOrderItem.create.mockRejectedValueOnce(new Error("write failed"));
 
@@ -57,7 +72,7 @@ describe("Shopify order persistence", () => {
       shopDomain: "shop.myshopify.com",
       accessToken: "shop-token",
     });
-    expect(fetchAllOrders).toHaveBeenCalledWith("shop.myshopify.com", "shop-token", undefined);
+    expect(fetchAllOrders).toHaveBeenCalledWith("shop.myshopify.com", "shop-token", undefined, undefined);
     expect(result).toMatchObject({ synced: 0, created: 0, updated: 0 });
     expect(result.errors).toEqual([expect.stringContaining("write failed")]);
     // The real Mongo transaction rolls back the preceding order update and item delete.

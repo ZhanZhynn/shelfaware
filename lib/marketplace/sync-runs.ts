@@ -3,25 +3,14 @@ import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import { prisma } from "@/prisma/client";
 import type { MarketplacePlatform } from "./analytics/types";
 import { enqueueMarketplaceSyncTask } from "./sync-enqueue";
-import { marketplaceSyncErrorCode, marketplaceSyncRetryAt, MAX_MARKETPLACE_SYNC_ATTEMPTS, type MarketplaceSyncInput } from "./sync-jobs";
+import { marketplaceSyncDateRange, marketplaceSyncErrorCode, marketplaceSyncRetryAt, MAX_MARKETPLACE_SYNC_ATTEMPTS, type MarketplaceSyncInput, type MarketplaceSyncType } from "./sync-jobs";
+import { marketplaceSyncTaskGraph } from "./sync-plan";
+export { shopeeAllTaskGraph } from "./sync-plan";
 
 const taskStatuses = ["pending", "running", "retrying", "completed", "failed", "cancelled"] as const;
 const terminalTaskStatuses = new Set(["completed", "failed", "cancelled"]);
 const TASK_LEASE_MS = 4 * 60 * 1000;
 const OUTBOX_LEASE_MS = 60 * 1000;
-
-export const shopeeAllTaskGraph = [
-  { stream: "orders_and_escrow", required: true },
-  { stream: "products", required: true },
-  { stream: "ads", required: false },
-] as const;
-
-const shopeeBoundedTaskStreams = {
-  orders: "orders_and_escrow",
-  finance: "orders_and_escrow",
-  returns: "returns",
-  payouts: "payouts",
-} as const;
 
 export class MarketplaceSyncRunNotFoundError extends Error {}
 
@@ -42,33 +31,45 @@ export function marketplaceSyncRunStatus(tasks: Array<{ status: string; required
 }
 
 /** Create the full graph atomically before attempting any external delivery. */
-export async function createShopeeAllSyncRun(input: {
+export async function createMarketplaceSyncRun(input: {
+  platform: MarketplacePlatform;
   shopId: string;
   requestedByUserId: string;
+  syncType: MarketplaceSyncType;
   idempotencyKey?: string;
   input?: MarketplaceSyncInput;
 }) {
+  const graph = marketplaceSyncTaskGraph(input.platform, input.syncType);
+  if (!graph.length) throw new Error("SYNC_TYPE_UNSUPPORTED");
   if (input.idempotencyKey) {
     const existing = await prisma.marketplaceSyncRun.findFirst({
-      where: { platform: "shopee", shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
+      where: { platform: input.platform, shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
       include: { tasks: { orderBy: { sequence: "asc" } } },
     });
     if (existing) return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
   }
 
+  // Freeze catalog sync defaults once for the entire graph, not once per
+  // delivery. All streams share the same range while products refresh the catalog.
+  let runInput = input.input;
+  if (input.platform !== "shopee" && graph.some(({ stream }) => ["orders", "finance"].includes(stream)) && !marketplaceSyncDateRange(runInput)) {
+    const end = Math.floor(Date.now() / 1000) * 1000;
+    const days = typeof runInput?.daysBack === "number" ? runInput.daysBack : 15;
+    runInput = { ...runInput, dateFrom: new Date(end - days * 86_400_000).toISOString(), dateTo: new Date(end).toISOString() };
+  }
   const run = await prisma.$transaction(async (tx) => {
     const created = await tx.marketplaceSyncRun.create({
       data: {
-        platform: "shopee",
+        platform: input.platform,
         shopId: input.shopId,
-        syncType: "all",
+        syncType: input.syncType,
         requestedByUserId: input.requestedByUserId,
         idempotencyKey: input.idempotencyKey ?? null,
-        input: input.input ?? null,
+        input: runInput ?? null,
       },
     });
-    const tasks = await Promise.all(shopeeAllTaskGraph.map((task, sequence) => tx.marketplaceSyncTask.create({
-      data: { runId: created.id, platform: "shopee", shopId: input.shopId, stream: task.stream, sequence, required: task.required },
+    const tasks = await Promise.all(graph.map((task, sequence) => tx.marketplaceSyncTask.create({
+      data: { runId: created.id, platform: input.platform, shopId: input.shopId, stream: task.stream, sequence, required: task.required },
     })));
     await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: tasks[0]!.id, dedupeKey: "initial" } });
     return { ...created, tasks };
@@ -76,67 +77,34 @@ export async function createShopeeAllSyncRun(input: {
   return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
 }
 
-/** Date-scoped Shopee streams are always executed as checkpointed tasks. */
-export async function createShopeeBoundedSyncRun(input: {
+// Compatibility entry points for callers of the original platform helpers.
+export function createShopeeAllSyncRun(input: {
   shopId: string;
   requestedByUserId: string;
-  syncType: keyof typeof shopeeBoundedTaskStreams;
+  idempotencyKey?: string;
+  input?: MarketplaceSyncInput;
+}) {
+  return createMarketplaceSyncRun({ ...input, platform: "shopee", syncType: "all" });
+}
+
+export function createShopeeBoundedSyncRun(input: {
+  shopId: string;
+  requestedByUserId: string;
+  syncType: "orders" | "finance" | "returns" | "payouts";
   idempotencyKey?: string;
   input: MarketplaceSyncInput;
 }) {
-  if (input.idempotencyKey) {
-    const existing = await prisma.marketplaceSyncRun.findFirst({
-      where: { platform: "shopee", shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
-      include: { tasks: { orderBy: { sequence: "asc" } } },
-    });
-    if (existing) return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
-  }
-
-  const run = await prisma.$transaction(async (tx) => {
-    const created = await tx.marketplaceSyncRun.create({
-      data: {
-        platform: "shopee",
-        shopId: input.shopId,
-        syncType: input.syncType,
-        requestedByUserId: input.requestedByUserId,
-        idempotencyKey: input.idempotencyKey ?? null,
-        input: input.input,
-      },
-    });
-    const task = await tx.marketplaceSyncTask.create({
-      data: { runId: created.id, platform: "shopee", shopId: input.shopId, stream: shopeeBoundedTaskStreams[input.syncType], sequence: 0, required: true },
-    });
-    await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: task.id, dedupeKey: "initial" } });
-    return { ...created, tasks: [task] };
-  });
-  return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
+  return createMarketplaceSyncRun({ ...input, platform: "shopee" });
 }
 
-/** Lazada historical streams share the durable lease/checkpoint/outbox engine. */
-export async function createLazadaBoundedSyncRun(input: {
+export function createLazadaBoundedSyncRun(input: {
   shopId: string;
   requestedByUserId: string;
   syncType: "orders" | "finance" | "payouts" | "all";
   idempotencyKey?: string;
   input: MarketplaceSyncInput;
 }) {
-  if (input.idempotencyKey) {
-    const existing = await prisma.marketplaceSyncRun.findFirst({
-      where: { platform: "lazada", shopId: input.shopId, requestedByUserId: input.requestedByUserId, idempotencyKey: input.idempotencyKey },
-      include: { tasks: { orderBy: { sequence: "asc" } } },
-    });
-    if (existing) return { run: existing, coalesced: true, firstTaskId: existing.tasks[0]?.id };
-  }
-  const run = await prisma.$transaction(async (tx) => {
-    const created = await tx.marketplaceSyncRun.create({ data: { platform: "lazada", shopId: input.shopId, requestedByUserId: input.requestedByUserId,
-      syncType: input.syncType, idempotencyKey: input.idempotencyKey ?? null, input: input.input } });
-    const streams = input.syncType === "all" ? ["orders", "finance"] : [input.syncType];
-    const tasks = [];
-    for (const [sequence, stream] of streams.entries()) tasks.push(await tx.marketplaceSyncTask.create({ data: { runId: created.id, platform: "lazada", shopId: input.shopId, stream, sequence, required: true } }));
-    await tx.marketplaceSyncDeliveryOutbox.create({ data: { taskId: tasks[0]!.id, dedupeKey: "initial" } });
-    return { ...created, tasks };
-  });
-  return { run, coalesced: false, firstTaskId: run.tasks[0]?.id };
+  return createMarketplaceSyncRun({ ...input, platform: "lazada" });
 }
 
 /** A task delivery is at-least-once; this function only publishes durable work. */
@@ -421,12 +389,14 @@ const ownedRun = async (platform: MarketplacePlatform, id: string, ownerIds: str
 });
 
 export async function getMarketplaceSyncRun(platform: MarketplacePlatform, id: string, actor: MarketplaceActor) {
-  if (platform !== "shopee" && platform !== "lazada") throw new MarketplaceSyncRunNotFoundError("Sync run not found");
   const ownerIds = await marketplaceOwnerIds(actor);
   const run = await ownedRun(platform, id, ownerIds);
   if (!run) throw new MarketplaceSyncRunNotFoundError("Sync run not found");
   const where = { id: run.shopId, userId: { in: ownerIds } };
-  const shop = platform === "shopee" ? await prisma.shopeeShop.findFirst({ where, select: { id: true } }) : await prisma.lazadaShop.findFirst({ where, select: { id: true } });
+  const shop = platform === "shopee" ? await prisma.shopeeShop.findFirst({ where, select: { id: true } })
+    : platform === "lazada" ? await prisma.lazadaShop.findFirst({ where, select: { id: true } })
+      : platform === "tiktok" ? await prisma.tikTokShop.findFirst({ where, select: { id: true } })
+        : await prisma.shopifyShop.findFirst({ where, select: { id: true } });
   if (!shop) throw new MarketplaceSyncRunNotFoundError("Sync run not found");
   return run;
 }

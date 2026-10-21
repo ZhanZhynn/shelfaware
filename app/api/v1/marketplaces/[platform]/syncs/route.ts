@@ -12,7 +12,8 @@ import {
   MarketplaceSyncJobNotFoundError,
 } from "@/lib/marketplace/sync-jobs";
 import { enqueueMarketplaceSyncJob } from "@/lib/marketplace/sync-enqueue";
-import { createShopeeAllSyncRun, createShopeeBoundedSyncRun, createLazadaBoundedSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
+import { createMarketplaceSyncRun, deliverMarketplaceSyncTaskOutbox, marketplaceSyncRunResponse } from "@/lib/marketplace/sync-runs";
+import { supportsMarketplaceSync, supportsMarketplaceSyncRange } from "@/lib/marketplace/sync-plan";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const platforms = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
@@ -30,12 +31,11 @@ function failure(requestId: string, code: string, message: string, status: numbe
   return NextResponse.json({ error: { code, message, requestId } }, { status, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
 }
 
-function dateRangeError(platform: string, syncType: string, input: Record<string, unknown> | undefined, now = Date.now()) {
+function dateRangeError(platform: MarketplacePlatform, syncType: string, input: Record<string, unknown> | undefined, now = Date.now()) {
   const hasDateFrom = input && Object.hasOwn(input, "dateFrom");
   const hasDateTo = input && Object.hasOwn(input, "dateTo");
   if (!hasDateFrom && !hasDateTo) return null;
-  const supported = platform === "shopee" ? ["orders", "finance", "returns", "payouts", "all"] : platform === "lazada" ? ["orders", "finance", "payouts", "all"] : [];
-  if (!supported.includes(syncType)) return "Date ranges are not supported for this platform or sync type";
+  if (!supportsMarketplaceSyncRange(platform, syncType)) return "Date ranges are not supported for this platform or sync type";
   const dateFrom = input?.dateFrom;
   const dateTo = input?.dateTo;
   if (typeof dateFrom !== "string" || typeof dateTo !== "string" || !rfc3339WithOffset.test(dateFrom) || !rfc3339WithOffset.test(dateTo) || !dateTimeSchema.safeParse(dateFrom).success || !dateTimeSchema.safeParse(dateTo).success) return "dateFrom and dateTo must be paired RFC3339 timestamps with an offset";
@@ -80,41 +80,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!parsed.success) return failure(requestId, "INVALID_BODY", "shopId and syncType are required", 422);
   try {
     const body = parsed.data;
-    const rangeError = dateRangeError(platform, body.syncType, body.input);
+    const selectedPlatform = platform as MarketplacePlatform;
+    const rangeError = dateRangeError(selectedPlatform, body.syncType, body.input);
     if (rangeError) return failure(requestId, "INVALID_DATE_RANGE", rangeError, 422);
-    await assertMarketplaceSyncShop(platform as MarketplacePlatform, body.shopId, actor.user);
-    if (platform === "lazada" && body.input && Object.hasOwn(body.input, "dateFrom")) {
-      const result = await createLazadaBoundedSyncRun({ shopId: body.shopId, requestedByUserId: actor.user.id,
-        syncType: body.syncType as "orders" | "finance" | "payouts" | "all", idempotencyKey, input: body.input as MarketplaceSyncInput });
-      const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
-      return NextResponse.json({ apiVersion: "2026-marketplace-v1", data: marketplaceSyncRunResponse(result.run), meta: { requestId, platform, execution: queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced } }, { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+    if (!supportsMarketplaceSync(selectedPlatform, body.syncType)) return failure(requestId, "SYNC_TYPE_UNSUPPORTED", "Sync type is not supported for this platform", 422);
+    if (body.input && Object.hasOwn(body.input, "daysBack") && (!Number.isInteger(body.input.daysBack) || Number(body.input.daysBack) < 1 || Number(body.input.daysBack) > 365)) {
+      return failure(requestId, "INVALID_DATE_RANGE", "daysBack must be an integer from 1 to 365", 422);
     }
-    // The first bounded graph is intentionally narrow. All other platforms and
-    // stream-specific requests retain their existing MarketplaceSyncJob path.
-    if (platform === "shopee" && body.syncType === "all") {
-      const result = await createShopeeAllSyncRun({
+    await assertMarketplaceSyncShop(platform as MarketplacePlatform, body.shopId, actor.user);
+    // Every all-sync uses a task graph, regardless of whether dates were given.
+    // Historical and TikTok/Shopify stream requests share the same engine.
+    if (body.syncType === "all" || ["tiktok", "shopify"].includes(platform) || (body.input && Object.hasOwn(body.input, "dateFrom"))) {
+      const result = await createMarketplaceSyncRun({
+        platform: selectedPlatform,
         shopId: body.shopId,
         requestedByUserId: actor.user.id,
+        syncType: body.syncType,
         idempotencyKey,
         input: body.input as MarketplaceSyncInput | undefined,
-      });
-      const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
-      return NextResponse.json(
-        {
-          apiVersion: "2026-marketplace-v1",
-          data: marketplaceSyncRunResponse(result.run),
-          meta: { requestId, platform, execution: queued.scheduled ? "scheduled" : "pending", coalesced: result.coalesced },
-        },
-        { status: 202, headers: { "x-request-id": requestId, "cache-control": "no-store" } },
-      );
-    }
-    if (platform === "shopee" && body.input && Object.hasOwn(body.input, "dateFrom")) {
-      const result = await createShopeeBoundedSyncRun({
-        shopId: body.shopId,
-        requestedByUserId: actor.user.id,
-        syncType: body.syncType as "orders" | "finance" | "returns" | "payouts",
-        idempotencyKey,
-        input: body.input as MarketplaceSyncInput,
       });
       const queued = result.firstTaskId ? await deliverMarketplaceSyncTaskOutbox(result.firstTaskId) : { scheduled: false };
       return NextResponse.json(

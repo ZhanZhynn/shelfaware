@@ -12,6 +12,7 @@ import { lazadaSourceDate } from "@/lib/lazada/time";
 import { searchOrders, searchProducts } from "@/lib/tiktok/custom-api";
 import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 import { shopifyGraphQL } from "@/lib/shopify/server";
+import { shopifyDateQuery } from "@/lib/shopify/search";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
 
 const objectId = /^[a-f\d]{24}$/i;
@@ -291,8 +292,7 @@ async function shopifyProducts(query: LiveQuery, ownerIds: string[]): Promise<Li
 async function shopifyOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {
   const shop = await prisma.shopifyShop.findFirst({ where: { id: query.shopId, userId: { in: ownerIds } }, select: { shopDomain: true, accessToken: true } });
   if (!shop) throw new MarketplaceLiveNotFoundError("Shop not found");
-  const filters = [`created_at:>=${query.createdAfter ?? defaultFrom()}`];
-  if (query.createdBefore) filters.push(`created_at:<=${query.createdBefore}`);
+  const filters = [shopifyDateQuery("created_at", query.createdAfter ?? defaultFrom(), query.createdBefore)];
   if (query.status) filters.push(`status:${query.status}`);
   const response = await shopifyGraphQL<{ orders: { nodes: Array<Record<string, any>>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }>(shop.shopDomain, shop.accessToken, LIVE_ORDERS_QUERY, { first: query.limit, after: query.cursor ?? null, query: filters.join(" ") });
   return { data: response.orders.nodes.map((item) => { const orderStatus = item.cancelledAt ? "CANCELLED" : item.closed ? "CLOSED" : "OPEN"; const totalAmount = finiteNumber(item.totalPriceSet?.shopMoney?.amount); return { shopId: query.shopId, externalId: item.id, reference: item.name ?? null, status: orderStatus, paymentStatus: item.displayFinancialStatus ?? null, fulfillmentStatus: item.displayFulfillmentStatus ?? null, totalAmount, ...liveRevenue(orderStatus, totalAmount), currency: item.currencyCode ?? item.totalPriceSet?.shopMoney?.currencyCode ?? null, createdAt: item.createdAt ?? null, updatedAt: item.updatedAt ?? null }; }), page: { limit: query.limit, nextCursor: response.orders.pageInfo.hasNextPage ? response.orders.pageInfo.endCursor : null } };

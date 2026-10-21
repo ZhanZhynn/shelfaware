@@ -8,9 +8,10 @@ const {
   validateTikTokToken,
   ensureFreshToken,
   getTikTokShopCipher,
+  searchOrders,
 } = vi.hoisted(() => ({
   prismaMock: {
-    tikTokShop: { findFirst: vi.fn() },
+    tikTokShop: { findFirst: vi.fn(), update: vi.fn() },
     tikTokOrder: { findMany: vi.fn() },
     marketplaceFinancialRecord: { findMany: vi.fn(), findUnique: vi.fn(), upsert: vi.fn() },
     syncLog: { create: vi.fn(), update: vi.fn() },
@@ -21,6 +22,7 @@ const {
   validateTikTokToken: vi.fn(),
   ensureFreshToken: vi.fn(),
   getTikTokShopCipher: vi.fn(),
+  searchOrders: vi.fn(),
 }));
 
 vi.mock("./server", () => ({
@@ -28,11 +30,11 @@ vi.mock("./server", () => ({
   ensureFreshToken,
   getTikTokShopCipher,
 }));
-vi.mock("./custom-api", () => ({ getOrderStatementTransactions, getStatementTransactions }));
+vi.mock("./custom-api", () => ({ getOrderStatementTransactions, getStatementTransactions, searchOrders }));
 vi.mock("@/prisma/client", () => ({ default: prismaMock, prisma: prismaMock }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability }));
 
-import { syncTikTokFinance, syncTikTokPayoutStatements } from "./sync";
+import { syncTikTokFinance, syncTikTokPayoutStatements, syncTikTokOrders } from "./sync";
 
 describe("TikTok final statement evidence sync", () => {
   beforeEach(() => {
@@ -74,6 +76,20 @@ describe("TikTok final statement evidence sync", () => {
         amountScale: 2,
       }),
     }));
+  });
+
+  it("uses an exclusive upper provider bound for an inclusive order-sync window on every page", async () => {
+    searchOrders.mockResolvedValueOnce({ orders: [], next_page_token: "next" }).mockResolvedValueOnce({ orders: [], next_page_token: "" });
+    await syncTikTokOrders("shop-1", "user-1", { from: 1785513600, to: 1785599999 }, "actor");
+    expect(searchOrders).toHaveBeenNthCalledWith(1, "seller-token", "shop-cipher", { create_time_ge: 1785513600, create_time_lt: 1785600000 }, 50, undefined, "create_time", "DESC");
+    expect(searchOrders).toHaveBeenNthCalledWith(2, "seller-token", "shop-cipher", { create_time_ge: 1785513600, create_time_lt: 1785600000 }, 50, "next", "create_time", "DESC");
+  });
+
+  it("scopes per-order finance to the bounded creation-time cohort", async () => {
+    prismaMock.tikTokOrder.findMany.mockResolvedValueOnce([]);
+    await syncTikTokFinance("shop-1", "user-1", "actor", { from: 1785513600, to: 1785599999 });
+    expect(prismaMock.tikTokOrder.findMany).toHaveBeenCalledWith({ where: { shopId: "shop-record", tiktokCreatedAt: { gte: new Date("2026-07-31T16:00:00Z"), lte: new Date("2026-08-01T15:59:59Z") } }, select: { tiktokOrderId: true } });
+    expect(getOrderStatementTransactions).not.toHaveBeenCalled();
   });
 
   it("paginates distinct ledger statement IDs and persists only final settled payouts", async () => {

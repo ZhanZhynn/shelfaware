@@ -34,4 +34,14 @@ describe("getOpenApiSpec", () => {
     expect(spec.paths["/api/api-tokens"].post.responses["201"].description).toBe("Token created");
     expect(spec.paths["/api/api-tokens/{id}"].delete.summary).toBe("Revoke an API token");
   });
+
+  it("documents platform-specific sync support from the shared registry", () => {
+    const spec = getOpenApiSpec({ baseUrl: "http://localhost:3000" }) as any;
+    const post = spec.paths["/api/v1/marketplaces/{platform}/syncs"].post;
+    expect(post["x-supportedSyncTypesByPlatform"]).toMatchObject({
+      tiktok: ["products", "orders", "finance", "payouts", "all"],
+      shopify: ["products", "orders", "finance", "all"],
+    });
+    expect(post.description).toContain("checkpointed task/lease/outbox");
+  });
 });

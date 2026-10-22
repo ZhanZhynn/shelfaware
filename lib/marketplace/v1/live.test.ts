@@ -23,7 +23,7 @@ vi.mock("@/lib/auth/require-api-scope", () => ({ requireApiActor: mocks.requireA
 vi.mock("@/lib/auth/api-token", () => ({ ApiTokenAuthenticationError: class extends Error {} }));
 vi.mock("@/lib/api/rate-limit", () => ({ withRateLimit: mocks.withRateLimit, defaultRateLimits: { standard: {} } }));
 
-import { classifyLiveProviderError, listMarketplaceLive, liveRevenue, MarketplaceLiveValidationError, parseLiveQuery } from "./live";
+import { classifyLiveProviderError, getMarketplaceLiveOrder, listMarketplaceLive, liveRevenue, MarketplaceLiveValidationError, parseLiveOrderDetailQuery, parseLiveOrderId, parseLiveQuery } from "./live";
 import { LazadaProviderError } from "@/lib/lazada/provider-error";
 import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 import { liveMarketplaceGet } from "./live-route";
@@ -147,6 +147,75 @@ describe("live revenue eligibility", () => {
 });
 
 describe("live Shopee orders", () => {
+  const line = { item_id: 123, model_id: 1, item_name: "Paper Bag", item_sku: "PARENT", model_sku: "RED", model_name: "Red", model_quantity_purchased: 2, model_original_price: 15, model_discounted_price: 10, order_item_id: 123, image_info: { image_url: "bag.jpg" }, private_field: "not-returned" };
+
+  it("optionally returns normalized listing/variant lines using the discounted sales price", async () => {
+    mocks.getOrderList.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1" }], more: false } });
+    mocks.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1", order_status: "SHIPPED", total_amount: 20, currency: "MYR", buyer_username: "not-returned", item_list: [line, { ...line, model_id: 2, model_sku: "BLUE", model_discounted_price: 0 }] }] } });
+    const query = parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), includeItems: "true" }), "orders");
+    const result = await listMarketplaceLive("shopee", { id: "owner", role: null }, "orders", query);
+    expect(mocks.getOrdersDetail).toHaveBeenCalledWith({ order_sn_list: ["ORDER-1"], response_optional_fields: "total_amount,shipping_carrier,package_list,item_list" });
+    expect(result.data[0]).toMatchObject({ lineItemsCoverage: { state: "ready" }, lineItems: [
+      { productExternalId: "123", variantExternalId: "1", title: "Paper Bag", sku: "RED", quantity: 2, unitPrice: 10, originalUnitPrice: 15, subtotal: 20, unitPriceBasis: "discounted_unit_price", currency: "MYR" },
+      { productExternalId: "123", variantExternalId: "2", quantity: 2, unitPrice: 0, subtotal: 0 },
+    ] });
+    expect(JSON.stringify(result)).not.toContain("not-returned");
+    expect(mocks.getOrdersDetail).toHaveBeenCalledTimes(1);
+    const without = await listMarketplaceLive("shopee", { id: "owner", role: null }, "orders", { ...query, includeItems: false });
+    expect(without.data[0]).not.toHaveProperty("lineItems");
+    expect(mocks.getOrdersDetail).toHaveBeenLastCalledWith({ order_sn_list: ["ORDER-1"], response_optional_fields: "total_amount,shipping_carrier,package_list" });
+  });
+
+  it.each([
+    { items: undefined, state: "unavailable" },
+    { items: null, state: "unavailable" },
+    { items: [null], state: "unavailable" },
+    { items: [], state: "ready" },
+    { items: [{ item_id: 123, item_name: "Bag" }], state: "partial" },
+  ])("distinguishes $state item coverage from empty item lines", async ({ items, state }) => {
+    mocks.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1", item_list: items }] } });
+    const result = await getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "ORDER-1");
+    expect(result).toMatchObject({ lineItemsCoverage: { state } });
+    if (state === "unavailable") expect(result).toHaveProperty("lineItems", null);
+    if (items?.length === 0) expect(result).toHaveProperty("lineItems", []);
+  });
+
+  it("looks up an external order ID directly within its owned shop without listing or syncing", async () => {
+    mocks.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ order_sn: "OTHER" }, { order_sn: "261022ORDER", order_status: "SHIPPED", item_list: [{ ...line, model_id: 0, model_sku: "", model_discounted_price: null }] }] } });
+    const result = await getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "261022ORDER");
+    expect(result).toMatchObject({ externalId: "261022ORDER", lineItems: [{ productExternalId: "123", variantExternalId: null, sku: "PARENT", unitPrice: 15, subtotal: 30, unitPriceBasis: "original_unit_price" }] });
+    expect(mocks.shopeeShopFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a".repeat(24), userId: { in: ["owner-1"] } } }));
+    expect(mocks.getOrdersDetail).toHaveBeenCalledWith({ order_sn_list: ["261022ORDER"], response_optional_fields: "total_amount,shipping_carrier,package_list,item_list" });
+    expect(mocks.getOrderList).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported platforms and missing ownership before a detail fetch", async () => {
+    await expect(getMarketplaceLiveOrder("lazada", { id: "owner", role: null }, "a".repeat(24), "ORDER-1")).rejects.toMatchObject({ code: "LIVE_PROVIDER_UNSUPPORTED" });
+    mocks.shopeeShopFindFirst.mockResolvedValue(null);
+    await expect(getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "ORDER-1")).rejects.toThrow("Shop not found");
+    expect(mocks.getOrdersDetail).not.toHaveBeenCalled();
+  });
+
+  it("never substitutes another order or a missing provider response for the requested detail", async () => {
+    mocks.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ order_sn: "OTHER" }] } });
+    await expect(getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "ORDER-1")).rejects.toThrow("Order not found");
+    mocks.getOrdersDetail.mockResolvedValue({});
+    await expect(getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "ORDER-1")).rejects.toMatchObject({ code: "LIVE_PROVIDER_TEMPORARY" });
+  });
+
+  it("strictly validates item and direct-order query options", async () => {
+    expect(parseLiveOrderDetailQuery(new URLSearchParams({ shopId: "a".repeat(24) }))).toEqual({ shopId: "a".repeat(24) });
+    const invalidQueries: Record<string, string>[] = [{}, { shopId: "bad" }, { shopId: "a".repeat(24), includeItems: "true" }];
+    for (const params of invalidQueries) {
+      expect(() => parseLiveOrderDetailQuery(new URLSearchParams(params))).toThrow(MarketplaceLiveValidationError);
+    }
+    expect(() => parseLiveOrderDetailQuery(new URLSearchParams(`shopId=${"a".repeat(24)}&shopId=${"a".repeat(24)}`))).toThrow("Duplicate");
+    for (const id of ["", "a,b", "path/id", "?query", "a".repeat(65)]) expect(() => parseLiveOrderId(id)).toThrow();
+    for (const flag of ["1", "yes", "FALSE"]) expect(() => parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), includeItems: flag }), "orders")).toThrow();
+    expect(() => parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), includeItems: "true" }), "products")).toThrow();
+    await expect(listMarketplaceLive("tiktok", { id: "owner", role: null }, "orders", { shopId: "a".repeat(24), limit: 1, includeItems: true })).rejects.toThrow("only for Shopee orders");
+  });
+
   it("normalizes carrier and package facts from the existing detail read without escrow", async () => {
     mocks.getOrderList.mockResolvedValue({ response: {
       order_list: [

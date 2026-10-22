@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import { getTransientShopeeSDK } from "@/lib/shopee/server";
+import { shopeeOrderItemAmounts } from "@/lib/shopee/order-item";
 import { createLazadaShopContext } from "@/lib/lazada/server";
 import { getOrdersPageCustom, getMultipleOrderItemsCustom, getProductsCustom } from "@/lib/lazada/custom-api";
 import { LazadaProviderError, lazadaIdentifier } from "@/lib/lazada/provider-error";
@@ -30,6 +31,7 @@ const orderSchema = z.object({
   ...common,
   createdAfter: z.string().datetime({ offset: true }).optional(),
   createdBefore: z.string().datetime({ offset: true }).optional(),
+  includeItems: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
 }).strict();
 const productSchema = z.object(common).strict();
 
@@ -41,6 +43,7 @@ export type LiveQuery = {
   status?: string;
   createdAfter?: string;
   createdBefore?: string;
+  includeItems?: boolean;
 };
 export type LiveListResult = { data: Array<Record<string, unknown>>; page: { limit: number; nextCursor: string | null } };
 
@@ -107,6 +110,19 @@ export function parseLiveQuery(params: URLSearchParams, resource: LiveResource):
   return query;
 }
 
+export function parseLiveOrderDetailQuery(params: URLSearchParams): Pick<LiveQuery, "shopId"> {
+  const duplicate = duplicateQueryKey(params);
+  if (duplicate) throw new MarketplaceLiveValidationError(`Duplicate query parameter: ${duplicate}`);
+  const parsed = z.object({ shopId: common.shopId }).strict().safeParse(Object.fromEntries(params));
+  if (!parsed.success) throw new MarketplaceLiveValidationError("Invalid query parameters");
+  return parsed.data;
+}
+
+export function parseLiveOrderId(id: string) {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new MarketplaceLiveValidationError("Invalid Shopee order ID");
+  return id;
+}
+
 const isoSeconds = (value: unknown) => {
   const seconds = Number(value);
   return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : null;
@@ -140,14 +156,72 @@ function nextOffset(cursor: string | undefined) {
   return offset;
 }
 
-async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {
-  const shop = await prisma.shopeeShop.findFirst({ where: { id: query.shopId, userId: { in: ownerIds } }, select: { shopId: true, accessToken: true, refreshToken: true, tokenExpiry: true } });
+async function liveShopeeSDK(shopId: string, ownerIds: string[]) {
+  const shop = await prisma.shopeeShop.findFirst({ where: { id: shopId, userId: { in: ownerIds } }, select: { shopId: true, accessToken: true, refreshToken: true, tokenExpiry: true } });
   if (!shop) throw new MarketplaceLiveNotFoundError("Shop not found");
-  const sdk = getTransientShopeeSDK(shop.shopId, {
+  return getTransientShopeeSDK(shop.shopId, {
     access_token: shop.accessToken, refresh_token: shop.refreshToken,
     expire_in: shop.tokenExpiry ? Math.max(0, Math.floor((shop.tokenExpiry.getTime() - Date.now()) / 1000)) : 14_400,
     request_id: "", error: "", message: "", expired_at: shop.tokenExpiry?.getTime(), shop_id: shop.shopId,
   });
+}
+
+function shopeeLineItems(value: Record<string, unknown>, currency: string | null) {
+  if (!Array.isArray(value.item_list) || value.item_list.some((line) => !line || typeof line !== "object" || Array.isArray(line))) {
+    return { lineItems: null, lineItemsCoverage: { state: "unavailable", reason: "Shopee did not return a valid item_list." } };
+  }
+  const identifier = (id: unknown) => typeof id === "string" && /^\d+$/.test(id) ? id : typeof id === "number" && Number.isSafeInteger(id) && id >= 0 ? String(id) : null;
+  const lineItems = value.item_list.map((line) => {
+    const item = record(line);
+    const amounts = shopeeOrderItemAmounts(item);
+    const modelId = identifier(item.model_id);
+    return {
+      externalLineId: identifier(item.order_item_id),
+      productExternalId: identifier(item.item_id),
+      variantExternalId: modelId === "0" ? null : modelId,
+      title: typeof item.item_name === "string" ? item.item_name : null,
+      variantTitle: typeof item.model_name === "string" ? item.model_name : null,
+      sku: typeof item.model_sku === "string" && item.model_sku ? item.model_sku : typeof item.item_sku === "string" ? item.item_sku : null,
+      ...amounts,
+      currency,
+      imageUrl: typeof record(item.image_info).image_url === "string" ? record(item.image_info).image_url : null,
+    };
+  });
+  const partial = lineItems.some((line) => line.productExternalId === null || line.quantity === null || line.subtotal === null);
+  return { lineItems, lineItemsCoverage: { state: partial ? "partial" : "ready", reason: partial ? "Some listing identifiers, quantities, or prices are unavailable." : null } };
+}
+
+function normalizeShopeeOrder(value: Record<string, unknown>, shopId: string, includeItems: boolean) {
+  const totalAmount = finiteNumber(value.total_amount);
+  const buyerPaidShipping = finiteNumber(value.buyer_paid_shipping_fee ?? value.estimated_shipping_fee);
+  const discount = finiteNumber(value.total_discount ?? value.seller_discount ?? value.voucher_from_seller);
+  const orderStatus = typeof value.order_status === "string" ? value.order_status : null;
+  const currency = typeof value.currency === "string" ? value.currency : null;
+  const carrier = typeof value.shipping_carrier === "string" ? value.shipping_carrier : null;
+  const packages = Array.isArray(value.package_list) ? value.package_list.map((item) => {
+    const pkg = record(item);
+    return {
+      packageNumber: typeof pkg.package_number === "string" ? pkg.package_number : null,
+      fulfillmentStatus: typeof pkg.fulfillment_status === "string" ? pkg.fulfillment_status : null,
+      logisticsStatus: typeof pkg.logistics_status === "string" ? pkg.logistics_status : null,
+      trackingNumber: typeof pkg.tracking_number === "string" ? pkg.tracking_number : null,
+      carrier: typeof pkg.shipping_carrier === "string" ? pkg.shipping_carrier : null,
+    };
+  }) : [];
+  return {
+    shopId, externalId: String(value.order_sn ?? ""), status: orderStatus,
+    totalAmount, discountAmount: discount, shippingAmount: buyerPaidShipping, currency,
+    ...liveRevenue(orderStatus, totalAmount),
+    carrier, packages,
+    ...(includeItems ? shopeeLineItems(value, currency) : {}),
+    // Order amounts and item sales are not a seller settlement.
+    settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Unavailable because this endpoint does not request Shopee escrow details." },
+    createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time),
+  };
+}
+
+async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveListResult> {
+  const sdk = await liveShopeeSDK(query.shopId, ownerIds);
   const response = (await sdk.order.getOrderList({
     time_range_field: "create_time",
     time_from: Math.floor(new Date(query.createdAfter ?? defaultFrom()).getTime() / 1000),
@@ -164,7 +238,7 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   const detailsResponse = orderSns.length
     ? (await sdk.order.getOrdersDetail({
       order_sn_list: orderSns,
-      response_optional_fields: "total_amount,shipping_carrier,package_list",
+      response_optional_fields: `total_amount,shipping_carrier,package_list${query.includeItems ? ",item_list" : ""}`,
     }) as unknown as { response?: { order_list?: unknown[] } }).response
     : undefined;
   const details = new Map(
@@ -176,30 +250,7 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   const orders = listedOrders.map((item) => {
     const listed = record(item);
     const value = { ...listed, ...details.get(String(listed.order_sn ?? "")) };
-    const totalAmount = finiteNumber(value.total_amount);
-    const buyerPaidShipping = finiteNumber(value.buyer_paid_shipping_fee ?? value.estimated_shipping_fee);
-    const discount = finiteNumber(value.total_discount ?? value.seller_discount ?? value.voucher_from_seller);
-    const orderStatus = typeof value.order_status === "string" ? value.order_status : null;
-    const carrier = typeof value.shipping_carrier === "string" ? value.shipping_carrier : null;
-    const packages = Array.isArray(value.package_list) ? value.package_list.map((item) => {
-      const pkg = record(item);
-      return {
-        packageNumber: typeof pkg.package_number === "string" ? pkg.package_number : null,
-        fulfillmentStatus: typeof pkg.fulfillment_status === "string" ? pkg.fulfillment_status : null,
-        logisticsStatus: typeof pkg.logistics_status === "string" ? pkg.logistics_status : null,
-        trackingNumber: typeof pkg.tracking_number === "string" ? pkg.tracking_number : null,
-        carrier: typeof pkg.shipping_carrier === "string" ? pkg.shipping_carrier : null,
-      };
-    }) : [];
-    return {
-      shopId: query.shopId, externalId: String(value.order_sn ?? ""), status: orderStatus,
-      totalAmount, discountAmount: discount, shippingAmount: buyerPaidShipping, currency: typeof value.currency === "string" ? value.currency : null,
-      ...liveRevenue(orderStatus, totalAmount),
-      carrier, packages,
-      // Escrow detail is intentionally not requested by this read-only endpoint.
-      settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Unavailable because this endpoint does not request Shopee escrow details." },
-      createdAt: isoSeconds(value.create_time), updatedAt: isoSeconds(value.update_time),
-    };
+    return normalizeShopeeOrder(value, query.shopId, query.includeItems === true);
   }).filter((item) => item.externalId);
   return { data: query.status ? orders.filter((item) => item.status === query.status) : orders, page: { limit: query.limit, nextCursor: response?.more && response.next_cursor ? response.next_cursor : null } };
 }
@@ -308,6 +359,20 @@ const adapters = {
 /** Direct provider reads only: no sync jobs, writes, cache invalidation, or provider payload passthrough. */
 export async function listMarketplaceLive(platform: MarketplacePlatform, user: { id: string; role: string | null }, resource: LiveResource, query: LiveQuery): Promise<LiveListResult> {
   if (!platformSet.has(platform)) throw new MarketplaceLiveNotFoundError("Not found");
+  if (query.includeItems && (platform !== "shopee" || resource !== "orders")) throw new MarketplaceLiveValidationError("includeItems is supported only for Shopee orders");
   const ownerIds = await marketplaceOwnerIds(user);
   return adapters[platform][resource](query, ownerIds);
+}
+
+/** An upstream order ID, resolved directly within the selected owned shop. */
+export async function getMarketplaceLiveOrder(platform: MarketplacePlatform, user: { id: string; role: string | null }, shopId: string, id: string) {
+  if (platform !== "shopee") throw new MarketplaceLiveProviderError("LIVE_PROVIDER_UNSUPPORTED", false);
+  parseLiveOrderId(id);
+  const ownerIds = await marketplaceOwnerIds(user);
+  const sdk = await liveShopeeSDK(shopId, ownerIds);
+  const result = await sdk.order.getOrdersDetail({ order_sn_list: [id], response_optional_fields: "total_amount,shipping_carrier,package_list,item_list" }) as unknown as { response?: { order_list?: unknown[] } };
+  if (!Array.isArray(result.response?.order_list)) throw new MarketplaceLiveProviderError("LIVE_PROVIDER_TEMPORARY", true, 30);
+  const order = result.response.order_list.map(record).find((value) => value.order_sn === id);
+  if (!order) throw new MarketplaceLiveNotFoundError("Order not found");
+  return normalizeShopeeOrder(order, shopId, true);
 }

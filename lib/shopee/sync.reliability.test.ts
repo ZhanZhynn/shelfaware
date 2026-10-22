@@ -117,7 +117,31 @@ describe("Shopee complete order persistence", () => {
     expect(await syncShopeeOrders(123, "owner", 100, 200, "actor")).toEqual({ synced: 1, created: existing ? 0 : 1, updated: existing ? 1 : 0, errors: [] });
     const write = existing ? m.db.shopeeOrder.update : m.db.shopeeOrder.create;
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ shopId: "shop-db", userId: "owner", shopeeOrderId: "ORDER-1", shopeeCreatedAt: new Date(1700000000000), totalAmount: 25, currency: "MYR", packageNumber: "pkg", daysToShip: 2, updatedBy: "actor" }) }));
-    expect(m.db.shopeeOrderItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ orderId: "order-db", variantId: "variant-db", shopeeItemId: 1, shopeeModelId: 2, sku: "BOX-RED", quantity: 2 }) });
+    expect(m.db.shopeeOrderItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ orderId: "order-db", variantId: "variant-db", shopeeItemId: 1, shopeeModelId: 2, sku: "BOX-RED", quantity: 2, price: 10, subtotal: 20 }) });
+  });
+
+  it.each([
+    { discount: 0, price: 0 },
+    { discount: "0.00", price: 0 },
+    { discount: null, price: 12.5 },
+    { discount: undefined, price: 12.5 },
+  ])("persists discounted price $discount with presence-aware fallback", async ({ discount, price }) => {
+    m.sdk.order.getOrderList.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1" }] } });
+    const detail = sourceOrder();
+    m.sdk.order.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ ...detail, item_list: [{ ...detail.item_list[0], model_discounted_price: discount }] }] } });
+    expect(await syncShopeeOrders(123, "owner")).toMatchObject({ synced: 1, errors: [] });
+    expect(m.db.shopeeOrderItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ price, subtotal: price * 2 }) });
+  });
+
+  it("does not delete existing item lines when the new source prices are unavailable", async () => {
+    m.sdk.order.getOrderList.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1" }] } });
+    const detail = sourceOrder();
+    m.sdk.order.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ ...detail, item_list: [{ ...detail.item_list[0], model_original_price: null, model_discounted_price: null }] }] } });
+    const result = await syncShopeeOrders(123, "owner");
+    expect(result).toMatchObject({ synced: 0 });
+    expect(result.errors).toHaveLength(1);
+    expect(m.db.shopeeOrderItem.deleteMany).not.toHaveBeenCalled();
+    expect(m.db.shopeeOrderItem.create).not.toHaveBeenCalled();
   });
 
   it("fetches list cursors and detail batches without relying on provider response order", async () => {

@@ -6,6 +6,7 @@
  */
 
 import { getShopeeSDK } from "./server";
+import { shopeeOrderItemAmounts } from "./order-item";
 import type { ItemStatus } from "@congminh1254/shopee-sdk/schemas";
 import prisma from "@/prisma/client";
 import { logger } from "@/lib/logger";
@@ -910,12 +911,19 @@ export async function syncShopeeOrders(
         // Upsert order items from detail
         const orderItems = (detail?.item_list || []) as Array<Record<string, unknown>>;
         if (Array.isArray(orderItems) && orderItems.length > 0) {
+          const pricedItems = orderItems.map((item) => {
+            const amounts = shopeeOrderItemAmounts(item);
+            if (amounts.quantity === null || amounts.unitPrice === null || amounts.subtotal === null) {
+              throw new Error("Shopee order item has no usable quantity or sales price");
+            }
+            return { item, quantity: amounts.quantity, price: amounts.unitPrice, subtotal: amounts.subtotal };
+          });
           await prisma.shopeeOrderItem.deleteMany({
             where: { orderId: orderRecord.id },
           });
 
-          const itemPromises = orderItems.map(
-            (item: Record<string, unknown>) => {
+          const itemPromises = pricedItems.map(
+            ({ item, quantity, price, subtotal }) => {
               const shopeeItemId = Number(item.item_id || 0);
               // Shopee documents model_id 0 as the sentinel for an item with
               // no models. Store absence as null rather than a fake variant.
@@ -935,11 +943,9 @@ export async function syncShopeeOrders(
                   shopeeModelId: modelId,
                   productName: String(item.item_name || ""),
                   sku: String(item.model_sku || item.item_sku || ""),
-                  quantity: Number(item.model_quantity_purchased || item.quantity || 0),
-                  price: Number(item.model_original_price || item.model_discounted_price || 0),
-                  subtotal:
-                    Number(item.model_quantity_purchased || item.quantity || 0) *
-                    Number(item.model_original_price || item.model_discounted_price || 0),
+                  quantity,
+                  price,
+                  subtotal,
                 },
               });
             },

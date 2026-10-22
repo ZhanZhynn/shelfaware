@@ -1,6 +1,7 @@
 import { cacheKeys, invalidateCache, invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
 import { LazadaProviderError, lazadaSyncFailure } from "@/lib/lazada/provider-error";
 import { TikTokProviderError } from "@/lib/tiktok/provider-error";
+import { ShopifyProviderError } from "@/lib/shopify/provider-error";
 import type { MarketplacePlatform } from "./analytics/types";
 import { marketplaceSyncTaskGraph } from "./sync-plan";
 import { PermanentDispatchError, runMarketplaceSync } from "./sync-provider";
@@ -117,8 +118,11 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {
-    if (error instanceof LazadaProviderError || error instanceof TikTokProviderError) {
-      const failure = error instanceof LazadaProviderError ? lazadaSyncFailure(error) : {
+    if (error instanceof LazadaProviderError || error instanceof TikTokProviderError || error instanceof ShopifyProviderError) {
+      const failure = error instanceof LazadaProviderError ? lazadaSyncFailure(error) : error instanceof ShopifyProviderError ? {
+        code: `SHOPIFY_${error.code}`,
+        retryable: error.retryable,
+      } : {
         code: `TIKTOK_${error.code.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}`.slice(0, 64),
         retryable: ["temporary", "rate_limit"].includes(error.kind),
       };

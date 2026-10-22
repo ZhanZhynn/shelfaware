@@ -35,6 +35,7 @@ vi.mock("@/lib/shopify", () => ({ syncShopifyOrders: mocks.syncShopifyOrders, sy
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
 import { LazadaProviderError } from "@/lib/lazada/provider-error";
 import { TikTokProviderError } from "@/lib/tiktok/provider-error";
+import { ShopifyProviderError } from "@/lib/shopify/provider-error";
 
 const task = (overrides: Record<string, unknown> = {}) => ({
   id: "a".repeat(24), platform: "shopee", shopId: "b".repeat(24), stream: "orders_and_escrow", sequence: 0,
@@ -58,6 +59,40 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it.each(["SCHEMA_INVALID", "ACCESS_DENIED", "HTTP_REJECTED", "GRAPHQL_REJECTED", "THROTTLED", "TEMPORARY", "MALFORMED_RESPONSE"] as const)("settles Shopify %s with safe diagnostics and never checkpoints failed finance", async (code) => {
+    const checkpoint = { from: 1785600000, end: 1785772799, windowsCompleted: 1, inclusive: true };
+    mocks.claimed.mockResolvedValue(task({ platform: "shopify", stream: "finance", sequence: 2, checkpoint, run: { syncType: "all", requestedByUserId: "requester" } }));
+    mocks.shopifyShop.findUnique.mockResolvedValue({ id: "shop-s", userId: "owner-s" });
+    const error = new ShopifyProviderError(code, 200, "fixture-request");
+    mocks.syncShopifyFinance.mockRejectedValue(error);
+    mocks.fail.mockResolvedValue({ settled: true });
+    mocks.retry.mockResolvedValue({ settled: true, status: "retrying", nextTaskId: "task", nextAttemptAt: null });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: error.retryable ? "retrying" : "failed" });
+      expect(error.retryable ? mocks.retry : mocks.fail).toHaveBeenCalledWith("task", "worker", `SHOPIFY_${code}`, undefined, { code, requestId: "fixture-request", fields: [] });
+      expect(error.retryable ? mocks.fail : mocks.retry).not.toHaveBeenCalled();
+      expect(mocks.syncShopifyFinance).toHaveBeenCalledTimes(1);
+      expect(mocks.checkpoint).not.toHaveBeenCalled();
+      expect(mocks.complete).not.toHaveBeenCalled();
+      expect(mocks.syncShopifyOrders).not.toHaveBeenCalled();
+      expect(mocks.syncShopifyProducts).not.toHaveBeenCalled();
+      expect(mocks.invalidateMarketplaceAnalytics).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledWith("Marketplace provider task failure", expect.objectContaining({ providerCode: code, providerRequestId: "fixture-request", retryable: error.retryable }));
+    } finally { warning.mockRestore(); }
+  });
+
+  it("retries Shopify finance per-record failures without advancing its checkpoint", async () => {
+    mocks.claimed.mockResolvedValue(task({ platform: "shopify", stream: "finance" }));
+    mocks.shopifyShop.findUnique.mockResolvedValue({ id: "shop-s", userId: "owner-s" });
+    mocks.syncShopifyFinance.mockResolvedValue({ synced: 1, errors: ["private provider detail"] });
+    mocks.retry.mockResolvedValue({ settled: true, status: "retrying", nextTaskId: "task", nextAttemptAt: null });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "retrying" });
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.retry.mock.calls)).not.toContain("private provider detail");
+  });
+
   it.each([
     undefined,
     { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-31T23:59:59+08:00" },

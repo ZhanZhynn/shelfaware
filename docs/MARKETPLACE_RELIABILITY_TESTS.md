@@ -1,6 +1,7 @@
 # Marketplace reliability test baseline
 
-Verified on 2026-10-21 against backend base commit `a866e90`.
+Original baseline verified on 2026-10-21 against backend base commit `a866e90`.
+Shopify finance repair update: 2026-10-22, on the uncommitted implementation.
 
 ## Run the tests
 
@@ -30,9 +31,14 @@ as well as executed files, rather than reporting only imported happy paths.
 
 The baseline was run from an isolated worktree of `a866e90`, using the same source
 coverage scope and test runner dependencies, with the new gates disabled. It
-contained 359 passing cases in 58 files. The expanded suite contains 727 cases in
-75 files: 710 normal passes and 17 executed expected failures. That is 368 added
-cases, including the explicitly tracked defects below.
+contained 359 passing cases in 58 files. The original expanded run contained 727
+cases in 75 files: 710 normal passes and 17 executed expected failures. The
+reported post-repair marketplace run has 775 passes and 16 executed
+expected failures. `SHOPIFY-SCHEMA` is
+resolved and now runs as an ordinary required regression.
+
+The coverage measurements below are from the original 2026-10-21 expanded run;
+they are not fresh measurements of the finance repair.
 
 | Coverage measure | Baseline | Expanded suite |
 | --- | ---: | ---: |
@@ -89,8 +95,23 @@ provider falling below its own gate.
 - Lease renewal/loss, compare-and-set settlement races, retry exhaustion,
   dependent-task cancellation, bounded diagnostics, and durable outbox recovery.
 - Actual Shopify query documents are parsed, instead of replacing every query
-  with a mock label. A small documented schema projection reproduces the
-  order-transaction list/connection mismatch; it is not a full Shopify schema.
+  with a mock label. The required `SHOPIFY-SCHEMA` regression validates the entire
+  finance document's selected fields and arguments against a documented schema
+  projection, including direct list selection for `Order.transactions` and
+  connection selection for refund transactions. It also rejects an unsupported
+  cursor argument on the order transaction list.
+- Finance HTTP-boundary tests exercise response-shape validation, empty lists,
+  exact monetary strings, transaction/refund deduplication, malformed responses,
+  and non-advancing finance cursors. Typed `ShopifyProviderError` regressions
+  verify safe codes/request IDs, schema/auth fail-fast behavior, and retryable
+  throttling, temporary failures, and malformed responses through sync/task paths.
+
+The schema projection was checked against published Shopify **2026-07** docs on
+2026-10-22. The configured API version remains **2025-07**. This is not a full
+provider-introspected schema certification; live provider acceptance is unverified.
+Nested order transactions, refunds, and refund transactions still use
+`first: 100` limits without complete nested traversal. The repair does not certify
+complete financial history or payout/settlement coverage.
 
 ## Executed known-defect regressions
 
@@ -99,7 +120,7 @@ expected failures in normal mode. They are **not skipped**. An unexpected pass
 fails the suite, prompting conversion to an ordinary `it` test after the fix.
 
 Strict mode runs the same assertions as ordinary tests and currently exits
-unsuccessfully for these 17 defects. This makes the difference between a passing
+unsuccessfully for these 16 defects. This makes the difference between a passing
 test baseline and a defect-free implementation explicit.
 
 | Regression ID | Required invariant currently violated |
@@ -116,7 +137,6 @@ test baseline and a defect-free implementation explicit.
 | `LAZADA-RETRY` | HTTP 429 must be retryable independently of envelope-code wording. |
 | `LAZADA-PRODUCT-PAGING` | A non-advancing timestamp page must not be appended as new catalog data. |
 | `SHOPIFY-FRESHNESS` | Incomplete retrieval must not advance successful shop freshness. |
-| `SHOPIFY-SCHEMA` | Order transaction selections must match the documented list shape. |
 | `SHOPIFY-CURSOR` | Repeated cursors must terminate within a bounded request budget. |
 | `SHOPIFY-COVERAGE` | An order with incomplete items cannot be reported as ready. |
 | `LIVE-SHOPEE-DETAILS` | Incomplete enrichment needs explicit coverage rather than apparent completeness. |
@@ -124,8 +144,16 @@ test baseline and a defect-free implementation explicit.
 
 ## Verification and remaining coverage
 
+The reported 2026-10-22 marketplace run has 775 passes and 16 expected failures;
+strict mode retains the 16 known gaps listed above. The resolved schema regression
+is required in both modes. The remaining gap statuses are unchanged, including
+`SHOPIFY-CURSOR` for general order traversal despite the finance-specific cursor
+guard.
+
+Historical verification from 2026-10-21 (not rerun for this documentation update):
+
 - Focused coverage suite and its per-module gates pass.
-- Strict regression mode reproduces exactly the 17 documented defects as
+- Strict regression mode reproduced the then-current 17 documented defects as
   ordinary assertion failures, rather than setup errors or timeouts.
 - TypeScript check: `npx tsc --noEmit --incremental false` passes.
 - ESLint on new/modified test and configuration files passes.

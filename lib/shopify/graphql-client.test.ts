@@ -38,8 +38,9 @@ describe("Shopify bounded order and finance retrieval", () => {
     shopifyGraphQL.mockResolvedValueOnce({ orders: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
     await fetch("shop.myshopify.com", "token", "2026-10-21T00:00:00+08:00", "2026-10-21T23:59:59+08:00");
     const filter = `${field}:>="2026-10-20T16:00:00.000Z" ${field}:<="2026-10-21T15:59:59.000Z"`;
-    expect(shopifyGraphQL).toHaveBeenNthCalledWith(1, "shop.myshopify.com", "token", query, { first: 50, after: null, query: filter });
-    expect(shopifyGraphQL).toHaveBeenNthCalledWith(2, "shop.myshopify.com", "token", query, { first: 50, after: "page-2", query: filter });
+    const validators = fetch === fetchAllFinanceOrders ? [expect.any(Function)] : [];
+    expect(shopifyGraphQL).toHaveBeenNthCalledWith(1, "shop.myshopify.com", "token", query, { first: 50, after: null, query: filter }, ...validators);
+    expect(shopifyGraphQL).toHaveBeenNthCalledWith(2, "shop.myshopify.com", "token", query, { first: 50, after: "page-2", query: filter }, ...validators);
   });
 });
 

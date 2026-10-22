@@ -131,7 +131,7 @@ export async function syncShopifyProducts(
       // Pre-flight token check
       const tokenCheck = await validateShopifyToken(tokenContext);
       if (!tokenCheck.valid) {
-        throw new Error(`Token validation failed: ${tokenCheck.error}`);
+        throw tokenCheck.providerError ?? new Error(`Token validation failed: ${tokenCheck.error}`);
       }
 
       const accessToken = tokenContext.accessToken;
@@ -282,7 +282,7 @@ export async function syncShopifyOrders(
       // Pre-flight token check
       const tokenCheck = await validateShopifyToken(tokenContext);
       if (!tokenCheck.valid) {
-        throw new Error(`Token validation failed: ${tokenCheck.error}`);
+        throw tokenCheck.providerError ?? new Error(`Token validation failed: ${tokenCheck.error}`);
       }
 
       const accessToken = tokenContext.accessToken;
@@ -449,7 +449,7 @@ export async function syncShopifyFinance(
       async () => {
         try {
           const tokenCheck = await validateShopifyToken(tokenContext);
-          if (!tokenCheck.valid) throw new Error(`Token validation failed: ${tokenCheck.error}`);
+          if (!tokenCheck.valid) throw tokenCheck.providerError ?? new Error(`Token validation failed: ${tokenCheck.error}`);
 
           const accessToken = tokenContext.accessToken;
           const bounds = syncDateBounds(daysBack);
@@ -528,7 +528,7 @@ export async function syncShopifyFinance(
                 // A refund object alone does not confirm money moved; its
                 // transaction rows above are the non-duplicated ledger facts.
               }
-              for (const transaction of order.transactions.nodes) {
+              for (const transaction of order.transactions) {
                 if (!refundTransactionIds.has(transaction.id)) await storeTransaction(order.id, transaction);
               }
             } catch (error) {

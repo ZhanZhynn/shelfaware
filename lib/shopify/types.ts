@@ -194,7 +194,7 @@ export interface ShopifyRefundNode {
 export interface ShopifyFinanceOrderNode {
   id: string;
   updatedAt: string;
-  transactions: { nodes: ShopifyOrderTransactionNode[] };
+  transactions: ShopifyOrderTransactionNode[];
   refunds: ShopifyRefundNode[];
 }
 

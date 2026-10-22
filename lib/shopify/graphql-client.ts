@@ -6,6 +6,8 @@
 
 import { shopifyGraphQL, PRODUCTS_QUERY, ORDERS_QUERY, ORDER_LINE_ITEMS_QUERY, FINANCE_ORDERS_QUERY } from "./server";
 import { shopifyDateQuery } from "./search";
+import { isShopifyFinanceResponse } from "./finance-response";
+import { ShopifyProviderError } from "./provider-error";
 import type {
   ShopifyProductNode,
   ShopifyProductsResponse,
@@ -156,6 +158,7 @@ export async function fetchAllFinanceOrders(
   const allOrders: ShopifyFinanceOrderNode[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
+  const seenCursors = new Set<string>();
   const filterDate = updatedAfter
     ? updatedAfter
     : new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
@@ -167,11 +170,16 @@ export async function fetchAllFinanceOrders(
       accessToken,
       FINANCE_ORDERS_QUERY,
       { first: 50, after: cursor, query: queryString },
+      isShopifyFinanceResponse,
     );
 
-    allOrders.push(...data.orders.nodes);
     hasNextPage = data.orders.pageInfo.hasNextPage;
     cursor = data.orders.pageInfo.endCursor;
+    if (hasNextPage && (!cursor || seenCursors.has(cursor))) {
+      throw new ShopifyProviderError("MALFORMED_RESPONSE", 200);
+    }
+    if (cursor) seenCursors.add(cursor);
+    allOrders.push(...data.orders.nodes);
   }
 
   return allOrders;

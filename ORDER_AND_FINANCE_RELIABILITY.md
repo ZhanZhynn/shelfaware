@@ -38,6 +38,33 @@ for the requested financial calculation.
 
 ## CLI And v1 Order Reliability
 
+### Shopify finance repair (2026-10-22)
+
+Shopify finance reads order payment and refund transactions, not Shopify Payments
+payouts, fees, or bank settlement. `Order.transactions` is an array with direct
+field selection; refund transactions remain a connection selected through
+`nodes`. Transaction IDs deduplicate refund rows also present on the order.
+Recorded financial quality remains `unknown` (`source_observed_unverified` for
+usable source amounts); related financial reporting remains unknown/provisional
+rather than certified income or profit.
+
+Finance responses are shape-validated before use without defaulting missing
+lists to empty or converting monetary strings. Typed `ShopifyProviderError`
+failures expose fixed safe codes and validated request IDs, not raw provider
+messages/bodies. Schema and authorization failures fail fast; throttling,
+temporary failures, and malformed responses use bounded retries. Durable task
+errors preserve the classification with `SHOPIFY_`-prefixed codes.
+
+The required schema regression validates the finance document against a
+projection checked against published 2026-07 documentation. The configured API
+version remains 2025-07; full provider introspection and live acceptance are
+unverified. Nested transactions/refunds still have `first: 100` limits, so the
+repair does not establish complete nested history. See
+[`docs/MARKETPLACE_RELIABILITY_TESTS.md`](docs/MARKETPLACE_RELIABILITY_TESTS.md)
+for the resolved schema regression and the 16 remaining known gaps.
+
+### Order reads and analytics
+
 Local order lists retain ingestion-time filtering by default. Set
 `dateBasis=source` to filter the provider creation timestamp, falling back to
 ingestion only when the source timestamp is null. `dateBasis=ingested` makes

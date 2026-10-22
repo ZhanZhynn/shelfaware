@@ -129,6 +129,29 @@ describe("task settlement cannot outlive a worker lease", () => {
     expect(await failMarketplaceSyncTask("task", "worker", "SYNC_ATTEMPT_FAILED", now)).toMatchObject({ status: "failed", runStatus: "failed" });
     expect(m.task.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ runId: "run", sequence: { gt: 0 } }), data: expect.objectContaining({ status: "cancelled" }) }));
   });
+
+  it("keeps completed Shopify orders/products persisted when required finance fails the parent", async () => {
+    const predecessors = [
+      { id: "orders", sequence: 0, stream: "orders", required: true, status: "completed", metrics: { ordersSynced: 8 }, checkpoint: { from: 100 } },
+      { id: "products", sequence: 1, stream: "products", required: true, status: "completed", metrics: { recordsSynced: 107 } },
+    ];
+    const before = structuredClone(predecessors);
+    const finance = { ...task(), id: "finance", platform: "shopify", sequence: 2, stream: "finance", status: "running", checkpoint: { from: 200 }, metrics: { ordersSynced: 0 } };
+    const rows = [...predecessors, finance];
+    m.task.findFirst.mockResolvedValue(finance);
+    m.task.findMany.mockImplementation(async () => rows);
+    m.task.updateMany.mockImplementation(async ({ where, data }) => {
+      const matching = rows.filter((row) => where.id ? row.id === where.id && row.status === where.status
+        : row.sequence > where.sequence.gt && where.status.in.includes(row.status));
+      matching.forEach((row) => Object.assign(row, data));
+      return { count: matching.length };
+    });
+    expect(await failMarketplaceSyncTask("finance", "worker", "SHOPIFY_SCHEMA_INVALID", now, { code: "SCHEMA_INVALID", requestId: "fixture-request", fields: [] })).toMatchObject({ settled: true, status: "failed", runStatus: "failed" });
+    expect(predecessors).toEqual(before);
+    expect(finance).toMatchObject({ status: "failed", checkpoint: { from: 200 }, metrics: { ordersSynced: 0 }, attempts: 1 });
+    expect(m.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { status: "failed", lastError: "SHOPIFY_SCHEMA_INVALID", completedAt: now } }));
+    expect(m.outbox.upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe("durable outbox publication and hand-off recovery", () => {

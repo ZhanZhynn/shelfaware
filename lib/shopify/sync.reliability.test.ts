@@ -12,6 +12,7 @@ vi.mock("./server", () => ({ validateShopifyToken: m.token, SHOPIFY_API_VERSION:
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability: m.capability }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 import { isShopSyncing, syncShopifyAll, syncShopifyFinance, syncShopifyOrders, syncShopifyProducts } from "./sync";
+import { ShopifyProviderError } from "./provider-error";
 
 const now = new Date("2026-10-21T12:00:00Z");
 const money = (amount: string) => ({ shopMoney: { amount, currencyCode: "MYR" } });
@@ -108,7 +109,7 @@ describe("Shopify finance persistence, rather than empty-result forwarding", () 
   it("stores refund transactions once when they also occur in the order transaction list", async () => {
     const sale = transaction("sale");
     const refund = { ...transaction("refund", "-2.50"), kind: "REFUND" };
-    m.finance.mockResolvedValue([{ id: "order", transactions: { nodes: [sale, refund] }, refunds: [{ id: "refund-object", createdAt: "2026-10-02T00:00:00Z", processedAt: null, transactions: { nodes: [refund] } }] }]);
+    m.finance.mockResolvedValue([{ id: "order", transactions: [sale, refund], refunds: [{ id: "refund-object", createdAt: "2026-10-02T00:00:00Z", processedAt: null, transactions: { nodes: [refund] } }] }]);
     expect(await syncShopifyFinance("shop-db", "owner")).toEqual({ synced: 2, created: 2, updated: 0, errors: [] });
     expect(m.db.marketplaceFinancialRecord.upsert).toHaveBeenCalledTimes(2);
     expect(m.db.marketplaceFinancialRecord.upsert.mock.calls.map(([args]) => args.create.externalId)).toEqual(["refund", "sale"]);
@@ -120,14 +121,14 @@ describe("Shopify finance persistence, rather than empty-result forwarding", () 
     { amount: "0.00", minor: "0", scale: 2 }, { amount: "+0001.250", minor: "1250", scale: 3 },
     { amount: "9007199254740993.01", minor: "900719925474099301", scale: 2 }, { amount: "invalid", minor: null, scale: 2 },
   ])("preserves exact precision or marks malformed source money unknown: $amount", async ({ amount, minor, scale }) => {
-    m.finance.mockResolvedValue([{ id: "order", transactions: { nodes: [{ ...transaction("tx", amount), processedAt: "invalid", createdAt: null }] }, refunds: [] }]);
+    m.finance.mockResolvedValue([{ id: "order", transactions: [{ ...transaction("tx", amount), processedAt: "invalid", createdAt: null }], refunds: [] }]);
     m.db.marketplaceFinancialRecord.findUnique.mockResolvedValue({ id: "existing" });
     expect(await syncShopifyFinance("shop-db", "owner")).toMatchObject({ synced: 1, created: 0, updated: 1 });
     expect(m.db.marketplaceFinancialRecord.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: expect.objectContaining({ amountMinor: minor, amountScale: scale, amount: null, occurredAt: null, unknownReason: minor === null ? "source_value_malformed" : "source_observed_unverified" }) }));
   });
 
   it("reports a persistence failure and continues independent orders", async () => {
-    m.finance.mockResolvedValue(["bad", "good"].map((id) => ({ id, transactions: { nodes: [transaction(id)] }, refunds: [] })));
+    m.finance.mockResolvedValue(["bad", "good"].map((id) => ({ id, transactions: [transaction(id)], refunds: [] })));
     m.db.marketplaceFinancialRecord.upsert.mockRejectedValueOnce(new Error("write failed"));
     expect(await syncShopifyFinance("shop-db", "owner")).toEqual({ synced: 1, created: 1, updated: 0, errors: ["Order bad: write failed"] });
   });
@@ -143,6 +144,35 @@ describe("Shopify finance persistence, rather than empty-result forwarding", () 
 });
 
 describe("Shopify ownership, retry and lock lifecycle", () => {
+  it.each(["SCHEMA_INVALID", "ACCESS_DENIED", "TEMPORARY", "MALFORMED_RESPONSE"] as const)("preserves typed %s failures for durable task settlement without blind local retries", async (code) => {
+    const error = new ShopifyProviderError(code, 200, "fixture-request");
+    m.finance.mockRejectedValue(error);
+    await expect(syncShopifyFinance("shop-db", "owner")).rejects.toBe(error);
+    expect(m.finance).toHaveBeenCalledTimes(1);
+    expect(m.db.marketplaceFinancialRecord.upsert).not.toHaveBeenCalled();
+    expect(m.db.shopifyShop.update).not.toHaveBeenCalled();
+    expect(isShopSyncing("shop-db")).toBe(false);
+  });
+
+  it.each([syncShopifyProducts, syncShopifyOrders, syncShopifyFinance])("retains typed authorization errors from preflight", async (sync) => {
+    const error = new ShopifyProviderError("ACCESS_DENIED", 401, "fixture-request");
+    m.token.mockResolvedValue({ valid: false, error: error.message, providerError: error });
+    await expect(sync("shop-db", "owner")).rejects.toBe(error);
+    expect(m.products).not.toHaveBeenCalled();
+    expect(m.orders).not.toHaveBeenCalled();
+    expect(m.finance).not.toHaveBeenCalled();
+  });
+
+  it("bounds local throttle retries and preserves the final typed error", async () => {
+    const error = new ShopifyProviderError("THROTTLED", 200, "fixture-request");
+    m.finance.mockRejectedValue(error);
+    const result = syncShopifyFinance("shop-db", "owner").catch((reason: unknown) => reason);
+    await vi.runAllTimersAsync();
+    expect(await result).toBe(error);
+    expect(m.finance).toHaveBeenCalledTimes(4);
+    expect(isShopSyncing("shop-db")).toBe(false);
+  });
+
   it.each([syncShopifyProducts, syncShopifyOrders, syncShopifyFinance])("rejects unowned shops before token validation", async (sync) => {
     m.db.shopifyShop.findFirst.mockResolvedValue(null);
     await expect(sync("shop-db", "owner")).rejects.toThrow("not found");

@@ -13,6 +13,7 @@ import crypto from "crypto";
 import prisma from "@/prisma/client";
 import { getEnvVar } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { ShopifyProviderError, shopifyGraphQLErrorCode } from "./provider-error";
 import type {
   ShopifyTokenResponse,
   ShopifyGraphQLResponse,
@@ -205,38 +206,51 @@ export async function shopifyGraphQL<T>(
   accessToken: string,
   query: string,
   variables?: Record<string, unknown>,
+  validateData?: (data: unknown) => boolean,
 ): Promise<T> {
   const url = `https://${shopDomain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": accessToken,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-
-  if (response.status === 429) {
-    const text = await response.text();
-    throw new Error(`Shopify API throttled (429): ${text}`);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken,
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch {
+    throw new ShopifyProviderError("TEMPORARY", 0);
   }
 
+  const requestId = response.headers?.get("x-request-id");
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Shopify API HTTP ${response.status}: ${text}`);
+    const code = response.status === 401 || response.status === 403 ? "ACCESS_DENIED"
+      : response.status === 429 ? "THROTTLED"
+        : response.status >= 500 || response.status === 408 ? "TEMPORARY" : "HTTP_REJECTED";
+    throw new ShopifyProviderError(code, response.status, requestId);
   }
 
-  const result = (await response.json()) as ShopifyGraphQLResponse<T>;
+  let result: ShopifyGraphQLResponse<T>;
+  try {
+    result = await response.json();
+  } catch {
+    throw new ShopifyProviderError("MALFORMED_RESPONSE", response.status, requestId);
+  }
+  const malformed = () => new ShopifyProviderError("MALFORMED_RESPONSE", response.status, requestId);
+  if (!result || typeof result !== "object" || Array.isArray(result)) throw malformed();
+  if (result.errors !== undefined && (!Array.isArray(result.errors) || result.errors.some((error) =>
+    !error || typeof error !== "object" || typeof error.message !== "string" ||
+    (error.extensions != null && (typeof error.extensions !== "object" || Array.isArray(error.extensions)))
+  ))) throw malformed();
 
   if (result.errors && result.errors.length > 0) {
-    const messages = result.errors.map((e) => e.message).join("; ");
-    throw new Error(`Shopify GraphQL error: ${messages}`);
+    throw new ShopifyProviderError(shopifyGraphQLErrorCode(result.errors), response.status, requestId);
   }
 
-  if (!result.data) {
-    throw new Error("Shopify GraphQL response has no data");
-  }
+  if (!result.data || typeof result.data !== "object" || Array.isArray(result.data)) throw malformed();
+  if (validateData && !validateData(result.data)) throw malformed();
 
   return result.data;
 }
@@ -284,6 +298,7 @@ export async function fetchShopInfo(
 export async function validateShopifyToken(context: ShopifyTokenContext): Promise<{
   valid: boolean;
   error?: string;
+  providerError?: ShopifyProviderError;
 }> {
   try {
     if (!context.accessToken) {
@@ -299,7 +314,7 @@ export async function validateShopifyToken(context: ShopifyTokenContext): Promis
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     logger.warn(`[Shopify] Token validation failed: ${msg}`);
-    return { valid: false, error: msg };
+    return { valid: false, error: msg, ...(error instanceof ShopifyProviderError ? { providerError: error } : {}) };
   }
 }
 
@@ -482,15 +497,13 @@ export const FINANCE_ORDERS_QUERY = `
         id
         updatedAt
         transactions(first: 100) {
-          nodes {
-            id
-            kind
-            status
-            gateway
-            createdAt
-            processedAt
-            amountSet { shopMoney { amount currencyCode } }
-          }
+          id
+          kind
+          status
+          gateway
+          createdAt
+          processedAt
+          amountSet { shopMoney { amount currencyCode } }
         }
         refunds(first: 100) {
           id

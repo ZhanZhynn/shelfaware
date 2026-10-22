@@ -47,7 +47,7 @@ describe("Shopify actual query wiring and nested retrieval", () => {
     request.mockResolvedValueOnce({ orders: { nodes: [{ id: "o1" }], pageInfo: { hasNextPage: true, endCursor: "next" } } }).mockResolvedValueOnce({ orders: { nodes: [{ id: "o2" }], pageInfo: { hasNextPage: false, endCursor: null } } });
     const result = await fetchAllFinanceOrders("shop", "token", "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z");
     expect(result.map((item) => item.id)).toEqual(["o1", "o2"]);
-    expect(request).toHaveBeenNthCalledWith(2, "shop", "token", FINANCE_ORDERS_QUERY, { first: 50, after: "next", query: 'updated_at:>="2026-10-01T00:00:00.000Z" updated_at:<="2026-10-02T00:00:00.000Z"' });
+    expect(request).toHaveBeenNthCalledWith(2, "shop", "token", FINANCE_ORDERS_QUERY, { first: 50, after: "next", query: 'updated_at:>="2026-10-01T00:00:00.000Z" updated_at:<="2026-10-02T00:00:00.000Z"' }, expect.any(Function));
   });
 
   it.each([{ fetch: fetchProductsPage, document: PRODUCTS_QUERY }, { fetch: fetchOrdersPage, document: ORDERS_QUERY }])("forwards page filters and defaults using the real query document", async ({ fetch, document }) => {
@@ -62,22 +62,30 @@ describe("Shopify actual query wiring and nested retrieval", () => {
     expect(parse(query).definitions).toHaveLength(1);
   });
 
-  knownGap("KNOWN GAP SHOPIFY-SCHEMA: order transactions are a list, unlike refund transaction connections", () => {
-    // Deliberately small, documented schema slice—not a claimed full Shopify schema.
-    // https://shopify.dev/docs/api/admin-graphql/latest/objects/Order#field-Order.fields.transactions
+  it("SHOPIFY-SCHEMA: validates the entire finance document, including arguments and list/connection selections", () => {
+    // Projection of every selected field/argument, verified against Shopify's
+    // published supported 2026-07 contract on 2026-10-22 (not full introspection).
+    // https://shopify.dev/docs/api/admin-graphql/2026-07/queries/orders
+    // https://shopify.dev/docs/api/admin-graphql/2026-07/objects/Order
+    // https://shopify.dev/docs/api/admin-graphql/2026-07/objects/Refund
+    // https://shopify.dev/docs/api/admin-graphql/2026-07/objects/OrderTransaction
     const schema = buildSchema(`
       type Query { orders(first: Int, after: String, query: String, sortKey: OrderSortKeys, reverse: Boolean): OrderConnection! }
       enum OrderSortKeys { UPDATED_AT }
       type OrderConnection { nodes: [Order!]!, pageInfo: PageInfo! }
       type PageInfo { hasNextPage: Boolean!, endCursor: String }
-      type Order { id: ID!, updatedAt: String!, transactions(first: Int): [OrderTransaction!]!, refunds(first: Int): [Refund!]! }
-      type Refund { id: ID!, createdAt: String!, processedAt: String, totalRefundedSet: MoneyBag!, transactions(first: Int): OrderTransactionConnection! }
+      type Order { id: ID!, updatedAt: DateTime!, transactions(first: Int, capturable: Boolean, manuallyResolvable: Boolean): [OrderTransaction!]!, refunds(first: Int): [Refund!]! }
+      type Refund { id: ID!, createdAt: DateTime!, processedAt: DateTime!, totalRefundedSet: MoneyBag!, transactions(first: Int, after: String, before: String, last: Int, reverse: Boolean): OrderTransactionConnection! }
       type OrderTransactionConnection { nodes: [OrderTransaction!]! }
-      type OrderTransaction { id: ID!, kind: String!, status: String!, gateway: String, createdAt: String!, processedAt: String, amountSet: MoneyBag! }
+      scalar DateTime
+      scalar Decimal
+      type OrderTransaction { id: ID!, kind: String!, status: String!, gateway: String, createdAt: DateTime!, processedAt: DateTime, amountSet: MoneyBag! }
       type MoneyBag { shopMoney: Money! }
-      type Money { amount: String!, currencyCode: String! }
+      type Money { amount: Decimal!, currencyCode: String! }
     `);
     expect(validate(schema, parse(FINANCE_ORDERS_QUERY)).map((error) => error.message)).toEqual([]);
+    // Prove this contract rejects unsupported list pagination arguments too.
+    expect(validate(schema, parse(FINANCE_ORDERS_QUERY.replace("transactions(first: 100)", "transactions(first: 100, after: \"bad\")")))).toHaveLength(1);
   });
 
   knownGap("KNOWN GAP SHOPIFY-CURSOR: a repeated order cursor must terminate before a third request", async () => {

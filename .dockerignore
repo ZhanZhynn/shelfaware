@@ -30,7 +30,7 @@ docs
 
 # Tests
 coverage
-vitest.config.*
+vitest*.config.*
 *.test.*
 *.spec.*
 

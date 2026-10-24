@@ -59,6 +59,28 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it("checkpoints historical ads in seven-day inclusive windows and counts campaign facts", async () => {
+    const run = { syncType: "ads", requestedByUserId: "requester", input: { dateFrom: "2026-09-01T00:00:00+08:00", dateTo: "2026-09-30T23:59:59+08:00" } };
+    mocks.claimed.mockResolvedValue(task({ stream: "ads", run }));
+    mocks.syncShopeeAds.mockResolvedValue({ synced: 7, campaigns: 14, errors: [] });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "checkpointed" });
+    expect(mocks.syncShopeeAds).toHaveBeenCalledWith(123, "shop-owner", { dateFrom: "2026-08-31T16:00:00.000Z", dateTo: "2026-09-07T15:59:59.000Z" }, "requester");
+    const checkpoint = mocks.checkpoint.mock.calls[0]![0].checkpoint;
+    expect(checkpoint).toMatchObject({ windowSeconds: 7 * 86400, windowsCompleted: 1, inclusive: true, from: Date.parse("2026-09-07T16:00:00Z") / 1000 });
+    expect(mocks.checkpoint.mock.calls[0]![0].metrics).toMatchObject({ recordsSynced: 21 });
+    mocks.claimed.mockResolvedValue(task({ stream: "ads", run, checkpoint }));
+    await dispatchMarketplaceSyncTask("task", "worker");
+    expect(mocks.syncShopeeAds.mock.calls[1]![2]).toEqual({ dateFrom: "2026-09-07T16:00:00.000Z", dateTo: "2026-09-14T15:59:59.000Z" });
+  });
+
+  it("keeps all-run ads on their independent 30-day refresh", async () => {
+    mocks.claimed.mockResolvedValue(task({ stream: "ads", run: { syncType: "all", requestedByUserId: "requester", input: { dateFrom: "2026-09-01T00:00:00+08:00", dateTo: "2026-09-07T23:59:59+08:00" } } }));
+    mocks.syncShopeeAds.mockResolvedValue({ synced: 30, campaigns: 120, errors: [] });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "completed" });
+    expect(mocks.syncShopeeAds).toHaveBeenCalledWith(123, "shop-owner", 30, "requester");
+    expect(mocks.complete).toHaveBeenCalledWith("task", "worker", undefined, expect.objectContaining({ recordsSynced: 150 }));
+  });
+
   it.each(["SCHEMA_INVALID", "ACCESS_DENIED", "HTTP_REJECTED", "GRAPHQL_REJECTED", "THROTTLED", "TEMPORARY", "MALFORMED_RESPONSE"] as const)("settles Shopify %s with safe diagnostics and never checkpoints failed finance", async (code) => {
     const checkpoint = { from: 1785600000, end: 1785772799, windowsCompleted: 1, inclusive: true };
     mocks.claimed.mockResolvedValue(task({ platform: "shopify", stream: "finance", sequence: 2, checkpoint, run: { syncType: "all", requestedByUserId: "requester" } }));

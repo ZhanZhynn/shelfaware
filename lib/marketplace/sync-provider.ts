@@ -42,7 +42,7 @@ async function runShopee(shopId: string, actorId: string, syncType: string, inpu
     // Shopee financial rows are collected while syncing order escrow details.
     case "finance": return syncShopeeOrders(shop.shopId, shop.userId, timeFrom, timeTo, actorId);
     case "returns": return syncShopeeReturns(shop.shopId, shop.userId, timeFrom, timeTo, actorId);
-    case "ads": return syncShopeeAds(shop.shopId, shop.userId, days, actorId);
+    case "ads": return syncShopeeAds(shop.shopId, shop.userId, range ? { dateFrom: range.dateFrom, dateTo: range.dateTo } : days, actorId);
     case "payouts": return range
       ? syncShopeePayoutStatements(shop.shopId, shop.userId, { timeFrom: range.timeFrom, timeTo: range.timeTo }, actorId)
       : syncShopeePayoutStatements(shop.shopId, shop.userId, days, actorId);

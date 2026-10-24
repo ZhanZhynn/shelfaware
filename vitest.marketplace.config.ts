@@ -21,6 +21,7 @@ export default defineConfig({
       reporter: ["text", "json", "json-summary", "html"],
       include: [
         "lib/{shopee,lazada,tiktok,shopify}/{sync,custom-api,graphql-client,order-line-facts,order-facts,money,time,status,provider-error,search,signing}.ts",
+        "lib/shopee/ads-*.ts",
         "lib/lazada/{finance-*,financial-report}.ts",
         "lib/marketplace/{sync-*,finance-filter,json,shops}.ts",
         "lib/marketplace/{v1,analytics}/**/*.ts",

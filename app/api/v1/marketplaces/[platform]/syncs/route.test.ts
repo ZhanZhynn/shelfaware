@@ -193,7 +193,7 @@ describe("v1 marketplace sync creation", () => {
     [{ dateFrom: "2025-02-30T00:00:00Z", dateTo: "2025-03-01T00:00:00Z" }, "shopee", "orders"],
     [{ dateFrom: "2024-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "orders"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "lazada", "returns"],
-    [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "ads"],
+    [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "products"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "tiktok", "payouts"],
     [{ dateFrom: "2025-01-01T00:00:00Z" }, "shopify", "orders"],
     [{ daysBack: 0 }, "tiktok", "orders"],
@@ -205,6 +205,16 @@ describe("v1 marketplace sync creation", () => {
     expect(response.status).toBe(422);
     expect((await response.json()).error.code).toBe("INVALID_DATE_RANGE");
     expect(mocks.assertMarketplaceSyncShop).not.toHaveBeenCalled();
+  });
+
+  it("accepts bounded Shopee ads work through the foreground task engine", async () => {
+    const input = { dateFrom: "2026-09-01T00:00:00+08:00", dateTo: "2026-09-30T23:59:59+08:00" };
+    const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/shopee/syncs", {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "ads", input, executionMode: "foreground" }),
+    }), { params: Promise.resolve({ platform: "shopee" }) });
+    expect(response.status).toBe(202);
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "shopee", syncType: "ads", input }));
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).not.toHaveBeenCalled();
   });
 
   it("rejects malformed internal shop IDs before querying a shop", async () => {

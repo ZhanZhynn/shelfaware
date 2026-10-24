@@ -3,11 +3,12 @@ import { knownGap } from "@/tests/helpers/known-gap";
 
 const m = vi.hoisted(() => {
   const model = () => ({ findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn() });
-  const sdk = { product: { getItemList: vi.fn(), getItemBaseInfo: vi.fn(), getModelList: vi.fn() }, order: { getOrderList: vi.fn(), getOrdersDetail: vi.fn(), searchPackageList: vi.fn() }, payment: { getEscrowDetailBatch: vi.fn(), getPayoutInfo: vi.fn() }, returns: { getReturnList: vi.fn() }, ads: { getAllCpcAdsDailyPerformance: vi.fn(), getTotalBalance: vi.fn(), getProductLevelCampaignIdList: vi.fn(), getProductCampaignDailyPerformance: vi.fn() } };
-  return { sdk, db: { shopeeShop: model(), shopeeSyncLog: model(), shopeeProduct: model(), shopeeProductVariant: model(), shopeeOrder: model(), shopeeOrderItem: model(), shopeeReturn: model(), marketplaceFinancialRecord: model(), shopeeAdsDailyPerformance: model(), shopeeAdsCampaignDailyPerformance: model() }, getSDK: vi.fn(), capability: vi.fn() };
+  const sdk = { product: { getItemList: vi.fn(), getItemBaseInfo: vi.fn(), getModelList: vi.fn() }, order: { getOrderList: vi.fn(), getOrdersDetail: vi.fn(), searchPackageList: vi.fn() }, payment: { getEscrowDetailBatch: vi.fn(), getPayoutInfo: vi.fn() }, returns: { getReturnList: vi.fn() }, ads: { getAllCpcAdsDailyPerformance: vi.fn(), getTotalBalance: vi.fn(), getProductLevelCampaignIdList: vi.fn(), getProductCampaignDailyPerformance: vi.fn(), getProductLevelCampaignSettingInfo: vi.fn(), getGmsCampaignPerformance: vi.fn() } };
+  return { sdk, db: { shopeeShop: model(), shopeeSyncLog: model(), shopeeProduct: model(), shopeeProductVariant: model(), shopeeOrder: model(), shopeeOrderItem: model(), shopeeReturn: model(), marketplaceFinancialRecord: model(), shopeeAdsDailyPerformance: model(), shopeeAdsCampaignDailyPerformance: model(), shopeeAdsObservation: model(), shopeeAdsCoverage: model() }, storeAds: vi.fn(), getSDK: vi.fn(), capability: vi.fn() };
 });
 vi.mock("@/prisma/client", () => ({ default: m.db, prisma: m.db }));
 vi.mock("./server", () => ({ getShopeeSDK: m.getSDK }));
+vi.mock("./ads-store", () => ({ persistAdsRows: m.storeAds }));
 vi.mock("@/lib/marketplace/analytics/capabilities", () => ({ setMarketplaceCapability: m.capability }));
 vi.mock("@/lib/marketplace-attribution/feature-flags", () => ({ isSharedSkuMappingAnalyticsEnabled: () => false }));
 vi.mock("@/lib/marketplace-attribution/source-line-projector", () => ({ projectShopeeAttributionForOrderIds: vi.fn() }));
@@ -16,12 +17,19 @@ import { isShopSyncing, syncShopeeAds, syncShopeeAll, syncShopeeOrders, syncShop
 
 const sourceProduct = (id = 1) => ({ item_id: id, item_name: "Box", item_sku: "BOX", item_status: "NORMAL", has_model: false, price_info: [{ current_price: 12.5, original_price: 15 }], stock_info_v2: { summary_info: { total_available_stock: 0 } }, image: { image_url_list: ["box.jpg"] } });
 const sourceOrder = (id = "ORDER-1") => ({ order_sn: id, order_status: "SHIPPED", create_time: 1700000000, update_time: 1700000100, total_amount: 25, currency: "MYR", item_list: [{ item_id: 1, model_id: 2, item_name: "Box", model_sku: "BOX-RED", model_quantity_purchased: 2, model_original_price: 12.5, model_discounted_price: 10 }] });
+const zeroAd = { impression: 0, clicks: 0, broad_order: 0, direct_order: 0, broad_order_amount: 0, direct_order_amount: 0, broad_gmv: 0, direct_gmv: 0, expense: 0 };
+function emptyAdsDays({ start_date, end_date }: { start_date: string; end_date: string }) {
+  const parse = (date: string) => new Date(date.split("-").reverse().join("-"));
+  const rows = [];
+  for (let time = parse(start_date).getTime(); time <= parse(end_date).getTime(); time += 86_400_000) rows.push({ ...zeroAd, date: new Date(time).toISOString().slice(0, 10).split("-").reverse().join("-") });
+  return { response: rows };
+}
 beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-21T12:00:00Z"));
   m.getSDK.mockReturnValue(m.sdk);
-  m.db.shopeeShop.findFirst.mockResolvedValue({ id: "shop-db", shopId: 123 });
+  m.db.shopeeShop.findFirst.mockResolvedValue({ id: "shop-db", shopId: 123, region: "MY" });
   m.db.shopeeSyncLog.create.mockResolvedValue({ id: "log" });
   m.db.shopeeSyncLog.update.mockResolvedValue({});
   m.db.shopeeProduct.findFirst.mockResolvedValue(null);
@@ -43,10 +51,12 @@ beforeEach(() => {
   m.sdk.payment.getEscrowDetailBatch.mockResolvedValue({ response: { order_income_list: [] } });
   m.sdk.payment.getPayoutInfo.mockResolvedValue({ response: { payout_list: [], more: false } });
   m.sdk.returns.getReturnList.mockResolvedValue({ response: { return: [], more: false } });
-  m.sdk.ads.getAllCpcAdsDailyPerformance.mockResolvedValue({ response: [] });
+  m.sdk.ads.getAllCpcAdsDailyPerformance.mockImplementation(async (args) => emptyAdsDays(args));
   m.sdk.ads.getTotalBalance.mockResolvedValue({ response: {} });
   m.sdk.ads.getProductLevelCampaignIdList.mockResolvedValue({ response: { campaign_list: [], has_next_page: false } });
   m.sdk.ads.getProductCampaignDailyPerformance.mockResolvedValue({ response: { campaign_list: [] } });
+  m.sdk.ads.getProductLevelCampaignSettingInfo.mockResolvedValue({ response: { campaign_list: [] } });
+  m.sdk.ads.getGmsCampaignPerformance.mockResolvedValue({ response: { campaign_id: 999, report: zeroAd } });
 });
 afterEach(() => vi.useRealTimers());
 
@@ -218,28 +228,85 @@ describe("Shopee returns, payouts and ads", () => {
 
   it("maps daily and campaign metrics using UTC dates and snapshots the balance", async () => {
     const metric = { date: "20-10-2026", impression: "10", clicks: "2", expense: "1.25", currency: "myr" };
-    m.sdk.ads.getAllCpcAdsDailyPerformance.mockResolvedValue({ response: [metric] });
+    m.sdk.ads.getAllCpcAdsDailyPerformance.mockResolvedValue({ response: [metric, { ...zeroAd, date: "21-10-2026" }] });
     m.sdk.ads.getTotalBalance.mockResolvedValue({ response: { total_balance: 0, currency: "myr" } });
     m.sdk.ads.getProductLevelCampaignIdList.mockResolvedValue({ response: { campaign_list: [{ campaign_id: 7 }], has_next_page: false } });
-    m.sdk.ads.getProductCampaignDailyPerformance.mockResolvedValue({ response: { campaign_list: [{ campaign_id: 7, ad_name: "Boxes", daily_metrics: [metric] }] } });
-    expect(await syncShopeeAds(123, "owner", 30)).toEqual({ synced: 2, campaigns: 2, errors: [] });
-    expect(m.sdk.ads.getAllCpcAdsDailyPerformance.mock.calls.map(([args]) => args)).toEqual([{ start_date: "21-09-2026", end_date: "19-10-2026" }, { start_date: "19-10-2026", end_date: "21-10-2026" }]);
-    expect(m.db.shopeeAdsCampaignDailyPerformance.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ campaignId: "7", date: new Date("2026-10-20T00:00:00Z"), impressions: 10, clicks: 2, expense: 1.25, currency: "MYR" }) }));
+    m.sdk.ads.getProductCampaignDailyPerformance.mockResolvedValue({ response: [{ shop_id: 123, campaign_list: [{ campaign_id: 7, ad_name: "Boxes", metrics_list: [metric, { ...zeroAd, date: "21-10-2026" }] }] }] });
+    expect(await syncShopeeAds(123, "owner", { dateFrom: "2026-10-20T00:00:00+08:00", dateTo: "2026-10-21T23:59:59+08:00" })).toEqual({ synced: 2, campaigns: 4, errors: [] });
+    expect(m.sdk.ads.getAllCpcAdsDailyPerformance.mock.calls.map(([args]) => args)).toEqual([{ start_date: "20-10-2026", end_date: "21-10-2026" }]);
+    expect(m.storeAds.mock.calls.flatMap(([rows]) => rows)).toContainEqual(expect.objectContaining({ observation: expect.objectContaining({ campaignId: "7", date: new Date("2026-10-20T00:00:00Z"), metrics: expect.objectContaining({ impressions: 10, clicks: 2, expense: 1.25 }) }), legacy: expect.objectContaining({ currency: "MYR" }) }));
     expect(m.db.shopeeAdsDailyPerformance.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ totalBalance: 0 }) }));
   });
 
   it("retries throttled ads calls and reports independent balance/campaign failures", async () => {
-    m.sdk.ads.getAllCpcAdsDailyPerformance.mockRejectedValueOnce(new Error("ads.rate_limit")).mockResolvedValue({ response: [] });
+    m.sdk.ads.getAllCpcAdsDailyPerformance.mockRejectedValueOnce(new Error("ads.rate_limit")).mockImplementation(async (args) => emptyAdsDays(args));
     m.sdk.ads.getTotalBalance.mockRejectedValue(new Error("balance unavailable"));
     m.sdk.ads.getProductLevelCampaignIdList.mockRejectedValue(new Error("campaign unavailable"));
     const result = syncShopeeAds(123, "owner", 1);
     await vi.runAllTimersAsync();
-    await expect(result).resolves.toMatchObject({ errors: ["total_balance: balance unavailable", "campaign list (offset 0): campaign unavailable"] });
+    await expect(result).resolves.toMatchObject({ errors: ["campaigns:ADS_PROVIDER_REQUEST_FAILED", "balance:ADS_PROVIDER_REQUEST_FAILED"] });
     expect(m.sdk.ads.getAllCpcAdsDailyPerformance).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])("stores real campaign envelopes and nullable GMS evidence (array=%s)", async (array) => {
+    const metric = { ...zeroAd, date: "21-10-2026", clicks: 10, broad_order: 4, direct_order: 2, broad_conversions: 0.4, direct_conversions: 0.2, expense: 5, broad_gmv: 30 };
+    m.sdk.ads.getProductLevelCampaignIdList.mockResolvedValue({ response: { campaign_list: [{ campaign_id: 7 }], has_next_page: false } });
+    m.sdk.ads.getProductLevelCampaignSettingInfo.mockResolvedValue({ response: { campaign_list: [{ campaign_id: 7, common_info: { item_id_list: [1234], campaign_status: "ongoing" } }] } });
+    const body = { shop_id: 123, campaign_list: [{ campaign_id: 7, ad_name: "Boxes", metrics_list: [metric] }] };
+    m.sdk.ads.getProductCampaignDailyPerformance.mockResolvedValue({ response: array ? [body] : body });
+    m.sdk.ads.getGmsCampaignPerformance.mockResolvedValue({ response: { campaign_id: 999, report: { ...metric, direct_gmv: undefined, cpc: 125000 } } });
+    expect((await syncShopeeAds(123, "owner", 1, "actor")).errors).toEqual([]);
+    expect(m.storeAds.mock.calls.flatMap(([rows]) => rows)).toContainEqual(expect.objectContaining({ observation: expect.objectContaining({ entityKey: "product_campaign:7", userId: "owner", metrics: expect.objectContaining({ conversions: 4, directConversions: 2 }), dimensions: expect.objectContaining({ itemIds: ["1234"], campaignStatus: "ongoing" }) }) }));
+    expect(m.storeAds.mock.calls.flatMap(([rows]) => rows)).toContainEqual(expect.objectContaining({ observation: expect.objectContaining({ entityKey: "shop_gmv_max:999", metrics: expect.objectContaining({ directGmv: null }) }) }));
+    expect(m.db.shopeeAdsCoverage.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ reportType: "product_campaign", state: "observed" }) }));
+  });
+
+  it("marks omitted campaigns and missing days as partial instead of zero activity", async () => {
+    m.sdk.ads.getProductLevelCampaignIdList.mockResolvedValue({ response: { campaign_list: [{ campaign_id: 7 }], has_next_page: false } });
+    m.sdk.ads.getAllCpcAdsDailyPerformance.mockResolvedValue({ response: [] });
+    const result = await syncShopeeAds(123, "owner", 1);
+    expect(result.errors).toContain("shop:ADS_RESPONSE_INVALID");
+    expect(result.errors).toContain("campaigns:ADS_RESPONSE_INVALID");
+    expect(m.db.shopeeAdsCoverage.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ reportType: "product_campaign", state: "partial" }) }));
+    expect(m.db.shopeeShop.update).not.toHaveBeenCalled();
+  });
+
+  it("invalidates old coverage before writes and reports storage failures safely", async () => {
+    const error = new Error("private database information"); error.name = "MongoServerError";
+    m.storeAds.mockRejectedValue(error);
+    const result = await syncShopeeAds(123, "owner", 1);
+    expect(m.db.shopeeAdsCoverage.upsert.mock.calls.filter(([args]) => args.create.state === "importing")).toHaveLength(3);
+    expect(m.db.shopeeAdsCoverage.upsert.mock.invocationCallOrder[0]).toBeLessThan(m.storeAds.mock.invocationCallOrder[0]!);
+    expect(result.errors).toContain("shop:ADS_STORAGE_FAILED");
+    expect(JSON.stringify(result)).not.toContain("private database");
+  });
+
+  it("detects repeating discovery pages and redacts unsafe provider diagnostics", async () => {
+    m.sdk.ads.getProductLevelCampaignIdList.mockResolvedValue({ response: { campaign_list: [{ campaign_id: 7 }], has_next_page: true } });
+    m.sdk.ads.getProductLevelCampaignSettingInfo.mockRejectedValue(new Error("access_token=private-credential"));
+    const result = await syncShopeeAds(123, "owner", 1);
+    expect(m.sdk.ads.getProductLevelCampaignIdList).toHaveBeenCalledTimes(2);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(JSON.stringify(result)).not.toContain("private-credential");
   });
 });
 
 describe("Shopee owned-shop and full-sync lifecycle", () => {
+  it("contains a fatal ads storage error without blocking independent product/order syncs", async () => {
+    m.db.shopeeSyncLog.create.mockImplementation(async ({ data }) => {
+      if (data.syncType === "ads") {
+        const error = new Error("private database connection information"); error.name = "PrismaClientKnownRequestError"; throw error;
+      }
+      return { id: "log" };
+    });
+    const result = await syncShopeeAll(123, "owner");
+    expect(result.ads).toEqual({ synced: 0, campaigns: 0, errors: ["ADS_STORAGE_FAILED"] });
+    expect(result.products.errors).toEqual([]);
+    expect(result.orders.errors).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("private database");
+    expect(isShopSyncing(123)).toBe(false);
+  });
+
   it("rejects concurrent full syncs before starting another provider traversal", async () => {
     let release!: (value: { response: { item: [] } }) => void;
     m.sdk.product.getItemList.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));

@@ -28,7 +28,7 @@ export function supportsMarketplaceSync(platform: MarketplacePlatform, syncType:
 
 export function supportsMarketplaceSyncRange(platform: MarketplacePlatform, syncType: string) {
   return supportsMarketplaceSync(platform, syncType)
-    && (["orders", "finance", "all"].includes(syncType)
+    && (["orders", "finance", "all"].includes(syncType) || (syncType === "ads" && platform === "shopee")
       || (syncType === "returns" && platform === "shopee")
       || (syncType === "payouts" && ["shopee", "lazada"].includes(platform)));
 }

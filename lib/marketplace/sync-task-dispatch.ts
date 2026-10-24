@@ -38,6 +38,7 @@ type SyncWindow = { from: number; to: number; end: number; windowsCompleted: num
 
 function taskWindow(task: NonNullable<Awaited<ReturnType<typeof getClaimedMarketplaceSyncTask>>>, now: Date): SyncWindow | undefined {
   const windowSeconds = ["orders_and_escrow", "orders", "finance"].includes(task.stream) ? ORDER_WINDOW_SECONDS
+    : task.stream === "ads" && task.run.syncType === "ads" && marketplaceSyncDateRange(task.run.input) ? 7 * ORDER_WINDOW_SECONDS
     : task.stream === "returns" || (task.stream === "payouts" && task.platform !== "tiktok") ? FINANCIAL_WINDOW_SECONDS
       : undefined;
   if (!windowSeconds) return undefined;
@@ -102,7 +103,9 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     if (result.errors.length) throw new Error("PROVIDER_RETURNED_ERRORS");
     await Promise.all([invalidateCache(cacheKeys[platform].pattern), invalidateMarketplaceAnalytics(platform)]);
     if (window && window.to < window.end) {
-      const metrics = windowMetrics(task.metrics, window, result);
+      const metrics = task.stream === "ads"
+        ? { windowsCompleted: window.windowsCompleted + 1, recordsSynced: numberMetric(task.metrics, "recordsSynced") + result.synced + numberMetric(result, "campaigns") }
+        : windowMetrics(task.metrics, window, result);
       const checkpointed = await checkpointMarketplaceSyncTask({
         id,
         workerId,
@@ -113,8 +116,8 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
       return checkpointed.settled ? { status: "checkpointed", nextTaskId: id } : { status: "skipped" };
     }
     const metrics = window
-      ? windowMetrics(task.metrics, window, result)
-      : { recordsSynced: result.synced, recordsCreated: "created" in result ? result.created : 0, recordsUpdated: "updated" in result ? result.updated : 0 };
+      ? task.stream === "ads" ? { windowsCompleted: window.windowsCompleted + 1, recordsSynced: numberMetric(task.metrics, "recordsSynced") + result.synced + numberMetric(result, "campaigns") } : windowMetrics(task.metrics, window, result)
+      : { recordsSynced: result.synced + numberMetric(result, "campaigns"), recordsCreated: "created" in result ? result.created : 0, recordsUpdated: "updated" in result ? result.updated : 0 };
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {

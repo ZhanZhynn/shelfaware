@@ -1512,6 +1512,44 @@ model ShopeeAdsCampaignDailyPerformance {
   @@index([date])
 }
 
+// Versioned ads facts. Legacy performance columns cannot distinguish an
+// unavailable metric from a real zero, so CLI reporting uses these observations.
+model ShopeeAdsObservation {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  shopId          String   @db.ObjectId
+  userId          String   @db.ObjectId
+  entityKey       String // shop | product_campaign:<id> | shop_gmv_max:<id>
+  reportType      String
+  campaignId      String?
+  date            DateTime @db.Date // provider civil-date label, encoded at UTC midnight
+  metrics         Json
+  dimensions      Json
+  rawPayload      Json
+  sourceEndpoint  String
+  sourceRequestId String?
+  metricVersion   String
+  observedAt      DateTime @default(now()) @db.Date
+
+  @@unique([shopId, entityKey, date])
+  @@index([shopId, reportType, date])
+}
+
+model ShopeeAdsCoverage {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  shopId        String   @db.ObjectId
+  userId        String   @db.ObjectId
+  reportType    String
+  dateFrom      DateTime @db.Date
+  dateTo        DateTime @db.Date
+  state         String
+  diagnostics   Json
+  metricVersion String
+  observedAt    DateTime @default(now()) @db.Date
+
+  @@unique([shopId, reportType, dateFrom, dateTo])
+  @@index([shopId, dateFrom, dateTo])
+}
+
 model NotificationSetting {
   id               String    @id @default(auto()) @map("_id") @db.ObjectId
   userId           String    @unique @db.ObjectId // One setting per user

@@ -33,7 +33,7 @@ function aggregateRows(rows: { impressions: number; clicks: number; expense: num
     spend: rows.reduce((s, r) => s + r.expense, 0),
     revenue: rows.reduce((s, r) => s + r.directGmv, 0),
     orders: rows.reduce((s, r) => s + r.directOrder, 0),
-    conversions: rows.reduce((s, r) => s + r.directConversions, 0),
+    conversions: rows.reduce((s, r) => s + r.directOrder, 0),
   };
 }
 

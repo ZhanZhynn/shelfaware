@@ -16,13 +16,18 @@ import {
   retryMarketplaceSyncTask,
 } from "./sync-runs";
 import { marketplaceSyncDateRange } from "./sync-jobs";
+import { syncShopeeReviewPage } from "@/lib/shopee/reviews-sync";
+import { ShopeeReviewError } from "@/lib/shopee/reviews-domain";
+import { prisma } from "@/prisma/client";
 
 export type MarketplaceSyncTaskDispatchResult =
   | { status: "skipped" }
   | { status: "checkpointed"; nextTaskId: string }
   | { status: "completed"; nextTaskId?: string }
   | { status: "retrying"; nextTaskId: string; nextAttemptAt: Date | null }
-  | { status: "failed" };
+  | { status: "failed"; nextTaskId?: string };
+
+const failedResult = (nextTaskId?: string): MarketplaceSyncTaskDispatchResult => ({ status: "failed", ...(nextTaskId ? { nextTaskId } : {}) });
 
 class PermanentTaskDispatchError extends Error {
   constructor(readonly code: "SHOP_NOT_FOUND" | "TASK_STREAM_UNSUPPORTED") {
@@ -94,6 +99,19 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     // Renew immediately before and after the bounded provider call. A task
     // cannot settle after it loses its durable four-minute lease.
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
+    if (task.stream === "reviews") {
+      const shop = await prisma.shopeeShop.findUnique({ where: { id: task.shopId }, select: { shopId: true, userId: true } });
+      if (!shop) throw new PermanentTaskDispatchError("SHOP_NOT_FOUND");
+      const result = await syncShopeeReviewPage(shop.shopId, shop.userId, task.run.syncType === "reviews" ? task.run.input : undefined, task.checkpoint, task.runId);
+      if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
+      const metrics = { pagesObserved: result.checkpoint.pages, reviewsObserved: result.checkpoint.ids.length, recordsObserved: result.checkpoint.records, reviewsCreated: numberMetric(task.metrics, "reviewsCreated") + result.created, reviewsUpdated: numberMetric(task.metrics, "reviewsUpdated") + result.updated, reviewsChanged: numberMetric(task.metrics, "reviewsChanged") + result.changed, providerLimited: result.limited, historyCompleteness: "unknown", terminationReason: result.terminationReason, linksRechecked: result.linksRechecked };
+      if (!result.done) {
+        const settled = await checkpointMarketplaceSyncTask({ id, workerId, checkpoint: result.checkpoint, metrics, dedupeKey: `reviews-page-${result.checkpoint.pages}` });
+        return settled.settled ? { status: "checkpointed", nextTaskId: id } : { status: "skipped" };
+      }
+      const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
+      return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
+    }
     const window = taskWindow(task, now);
     const input = window ? { dateFrom: new Date(window.from * 1000).toISOString(), dateTo: new Date(window.to * 1000).toISOString() }
       : task.stream === "ads" ? { daysBack: 30 } : task.run.input;
@@ -121,6 +139,16 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {
+    if (error instanceof ShopeeReviewError) {
+      const provider = { code: error.providerCode ?? error.code, requestId: error.providerRequestId, fields: [] };
+      if (!error.retryable) {
+        const settled = await failMarketplaceSyncTask(id, workerId, error.code, undefined, provider);
+        return settled.settled ? failedResult(settled.nextTaskId) : { status: "skipped" };
+      }
+      const settled = await retryMarketplaceSyncTask(id, workerId, error.code, undefined, provider);
+      if (!settled.settled) return { status: "skipped" };
+      return settled.status === "retrying" ? { status: "retrying", nextTaskId: id, nextAttemptAt: settled.nextAttemptAt } : failedResult(settled.nextTaskId);
+    }
     if (error instanceof LazadaProviderError || error instanceof TikTokProviderError || error instanceof ShopifyProviderError) {
       const failure = error instanceof LazadaProviderError ? lazadaSyncFailure(error) : error instanceof ShopifyProviderError ? {
         code: `SHOPIFY_${error.code}`,
@@ -133,20 +161,20 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
       console.warn("Marketplace provider task failure", { taskId: id, platform: task.platform, providerCode: error.code, providerRequestId: error.providerRequestId, httpStatus: error.status, retryable: failure.retryable });
       if (!failure.retryable) {
         const settled = await failMarketplaceSyncTask(id, workerId, failure.code, undefined, provider);
-        return settled.settled ? { status: "failed" } : { status: "skipped" };
+        return settled.settled ? failedResult(settled.nextTaskId) : { status: "skipped" };
       }
       const settled = await retryMarketplaceSyncTask(id, workerId, failure.code, undefined, provider);
       if (!settled.settled) return { status: "skipped" };
-      return settled.status === "retrying" ? { status: "retrying", nextTaskId: settled.nextTaskId, nextAttemptAt: settled.nextAttemptAt } : { status: "failed" };
+      return settled.status === "retrying" ? { status: "retrying", nextTaskId: settled.nextTaskId, nextAttemptAt: settled.nextAttemptAt } : failedResult(settled.nextTaskId);
     }
     if (error instanceof PermanentTaskDispatchError || error instanceof PermanentDispatchError) {
       const settled = await failMarketplaceSyncTask(id, workerId, error.code === "SYNC_TYPE_UNSUPPORTED" ? "TASK_STREAM_UNSUPPORTED" : error.code);
-      return settled.settled ? { status: "failed" } : { status: "skipped" };
+      return settled.settled ? failedResult(settled.nextTaskId) : { status: "skipped" };
     }
     const settled = await retryMarketplaceSyncTask(id, workerId, "SYNC_ATTEMPT_FAILED");
     if (!settled.settled) return { status: "skipped" };
     return settled.status === "retrying"
       ? { status: "retrying", nextTaskId: settled.nextTaskId, nextAttemptAt: settled.nextAttemptAt }
-      : { status: "failed" };
+      : failedResult(settled.nextTaskId);
   }
 }

@@ -12,6 +12,7 @@ export default defineConfig({
       "lib/{shopee,lazada,tiktok,shopify}/**/*.test.ts",
       "lib/marketplace/**/*.test.ts",
       "app/api/v1/marketplaces/**/*.test.ts",
+      "app/api/marketplace/sync-jobs/worker/route.test.ts",
       "lib/api/retry.test.ts",
       "lib/sync/**/*.test.ts",
     ],
@@ -22,6 +23,7 @@ export default defineConfig({
       include: [
         "lib/{shopee,lazada,tiktok,shopify}/{sync,custom-api,graphql-client,order-line-facts,order-facts,money,time,status,provider-error,search,signing}.ts",
         "lib/shopee/ads-*.ts",
+        "lib/shopee/reviews-*.ts",
         "lib/lazada/{finance-*,financial-report}.ts",
         "lib/marketplace/{sync-*,finance-filter,json,shops}.ts",
         "lib/marketplace/{v1,analytics}/**/*.ts",

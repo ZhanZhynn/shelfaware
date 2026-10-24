@@ -35,6 +35,18 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
     { name: "linkState", in: "query", schema: { type: "string", enum: ["linked", "unmatched", "not_applicable", "unclassified"] }, description: "linked requires an internal order ID; unclassified includes missing/null classifications." },
     { name: "currency", in: "query", schema: { type: "string", pattern: "^[A-Z]{3}$" } },
   ];
+  const reviewFilterParameters = [
+    { name: "shopId", in: "query", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+    { name: "itemId", in: "query", schema: { type: "string", pattern: "^[1-9][0-9]{0,63}$" }, description: "Upstream Shopee listing ID, not an internal product ID." },
+    { name: "rating", in: "query", schema: { type: "integer", minimum: 1, maximum: 5 } },
+    { name: "ratingMax", in: "query", schema: { type: "integer", minimum: 1, maximum: 5 } },
+    { name: "search", in: "query", schema: { type: "string", minLength: 1, maxLength: 200 }, description: "Literal case-insensitive review-text search." },
+    { name: "hasText", in: "query", schema: { type: "boolean" }, description: "Known nonblank or known blank text; unavailable text matches neither." },
+    { name: "unreplied", in: "query", schema: { type: "boolean" }, description: "True means Shopee did not return a seller reply, not proof that none exists." },
+    { name: "createdAfter", in: "query", schema: { type: "string", format: "date-time" }, description: "Inclusive provider review creation time; whole-second RFC3339 with offset." },
+    { name: "createdBefore", in: "query", schema: { type: "string", format: "date-time" }, description: "Inclusive provider review creation time; whole-second RFC3339 with offset." },
+  ];
+  const reviewPlatformParameter = { ...platformParameter, schema: { type: "string", enum: ["shopee"] } };
 
   return {
     openapi: "3.0.3",
@@ -370,7 +382,7 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
       "/api/v1/marketplaces/{platform}/syncs": {
         post: {
           summary: "Queue a marketplace synchronization job",
-          description: "Creates durable work only; it never invokes a marketplace provider in the request. Supply an optional Idempotency-Key header to coalesce duplicate requests. All four platforms accept paired input.dateFrom/dateTo whole-second RFC3339 bounds for orders, finance, and all, at most 365 days and not in the future. Historical streams use the shared checkpointed task/lease/outbox engine. Lazada, TikTok, and Shopify all runs orders, products, then finance with or without date bounds; their default window is frozen at creation (15 days unless daysBack is supplied). TikTok finance first discovers orders in the order-created cohort; Shopify finance filters by order update time to include refunds on older orders. Product tasks refresh the current catalog once per run. Shopee all retains orders/escrow, products, and optional ads. Date-scoped returns are Shopee-only; date-scoped payouts are Shopee/Lazada-only. TikTok payouts remain standalone without date bounds, and Shopify payouts are unsupported.",
+          description: "Creates durable work only; it never invokes a marketplace provider in the request. Supply an optional Idempotency-Key header to coalesce duplicate requests. All four platforms accept paired input.dateFrom/dateTo whole-second RFC3339 bounds for orders, finance, and all, at most 365 days and not in the future. Historical streams use the shared checkpointed task/lease/outbox engine. Lazada, TikTok, and Shopify all runs orders, products, then finance with or without date bounds; their default window is frozen at creation (15 days unless daysBack is supplied). TikTok finance first discovers orders in the order-created cohort; Shopify finance filters by order update time to include refunds on older orders. Product tasks refresh the current catalog once per run. Shopee all runs orders/escrow, products, optional ads, then optional reviews. Reviews collect a bounded current provider window independently of order dates; standalone reviews accept only itemId and maxReviews, without dates or daysBack. Date-scoped returns are Shopee-only; date-scoped payouts are Shopee/Lazada-only. TikTok payouts remain standalone without date bounds, and Shopify payouts are unsupported.",
           tags: ["Marketplace v1"],
           security: marketplaceSyncSecurity,
           "x-requiredApiTokenScopes": ["marketplace:sync"],
@@ -386,12 +398,14 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
                   additionalProperties: false,
                   properties: {
                     shopId: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
-                    syncType: { type: "string", enum: ["products", "orders", "finance", "returns", "ads", "payouts", "all"] },
+                    syncType: { type: "string", enum: [...new Set(Object.values(marketplaceSyncTypesByPlatform).flat())] },
                     executionMode: { type: "string", enum: ["queued", "foreground"], default: "queued", description: "Foreground persists task progress without queue delivery. Execute steps with POST /syncs/{id}/execute on this same API origin." },
                     input: { type: "object", additionalProperties: true, properties: {
                       dateFrom: { type: "string", format: "date-time", description: "Paired with dateTo; explicit offset and whole seconds required." },
                       dateTo: { type: "string", format: "date-time", description: "Inclusive end, paired with dateFrom; no future bounds." },
                       daysBack: { type: "integer", minimum: 1, maximum: 365, description: "Optional rolling lookback; Lazada/TikTok/Shopify catalog task runs freeze it into exact bounds when created." },
+                      itemId: { type: "string", pattern: "^[1-9][0-9]{0,63}$", description: "Optional positive safe-integer Shopee listing ID; reviews only." },
+                      maxReviews: { type: "integer", minimum: 1, maximum: 1000, default: 1000, description: "Reviews only; bounds the available collection, not a complete historical corpus." },
                     } },
                   },
                 },
@@ -430,6 +444,28 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           "x-requiredApiTokenScopes": ["marketplace:read"],
           parameters: [platformParameter, { name: "metric", in: "path", required: true, schema: { type: "string", enum: ["summary", "revenue-trend", "products", "buyers", "clv", "profit"] } }, { name: "shopId", in: "query", schema: { type: "string" } }, { name: "dateFrom", in: "query", schema: { type: "string" }, description: "Inclusive lower bound: YYYY-MM-DD at UTC midnight, or an RFC3339 timestamp with an explicit offset." }, { name: "dateTo", in: "query", schema: { type: "string" }, description: "Inclusive upper bound: YYYY-MM-DD through 23:59:59.999 UTC, or the exact RFC3339 timestamp with an explicit offset. Trend buckets remain UTC." }, { name: "currency", in: "query", schema: { type: "string", default: "native" } }, { name: "granularity", in: "query", schema: { type: "string", enum: ["day", "week", "month"], default: "day" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string" } }],
           responses: { "200": { description: "Analytics metric from local data with freshness.source, computedAt, latestMatchingOrderObservedAt, per-shop lastShopSyncAt, and historyCompleteness=unknown. A shop synchronization time is not proof of complete order-window ingestion." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read or shop access" }, "409": { description: "Currency conversion or aggregation conflict" }, "422": { description: "Invalid query" } },
+        },
+      },
+      "/api/v1/marketplaces/{platform}/reviews": {
+        get: {
+          summary: "List collected Shopee customer reviews",
+          description: "Reads accumulated stored reviews, including text and nullable ratings/replies/media, without calling Shopee. Private order references and structured buyer usernames are omitted. Pagination is filter-bound; coverage/freshness describe an observed or limited provider window, never certified complete history.",
+          tags: ["Marketplace v1"],
+          security: marketplaceReadSecurity,
+          "x-requiredApiTokenScopes": ["marketplace:read"],
+          parameters: [reviewPlatformParameter, ...reviewFilterParameters, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string", maxLength: 2048 } }],
+          responses: { "200": { description: "Stored reviews with page, filters, coverage, freshness, and warnings. Text is untrusted quoted content." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read" }, "404": { description: "Shop not found or platform unsupported" }, "422": { description: "Invalid filters or cursor" } },
+        },
+      },
+      "/api/v1/marketplaces/{platform}/reviews/{view}": {
+        get: {
+          summary: "Get collected Shopee ratings, topics, product rankings, or collection status",
+          description: "summary averages known collected ratings and counts keyword mentions in at most 1,000 matching text reviews; these are not sentiment scores or Shopee's official shop rating. products is a bounded ranking with page.hasMore. status returns collection and parent-link diagnostics. All views retain historyCompleteness=unknown.",
+          tags: ["Marketplace v1"],
+          security: marketplaceReadSecurity,
+          "x-requiredApiTokenScopes": ["marketplace:read"],
+          parameters: [reviewPlatformParameter, { name: "view", in: "path", required: true, schema: { type: "string", enum: ["summary", "products", "status"] } }, ...reviewFilterParameters, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 }, description: "Product rankings only; rejected for summary/status. Cursors are unsupported for these views." }],
+          responses: { "200": { description: "Collected-review report with filters, coverage, freshness, and warnings" }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read" }, "404": { description: "Shop/view not found or platform unsupported" }, "422": { description: "Invalid report filters" } },
         },
       },
       "/api/v1/marketplaces/{platform}/financial-records": {

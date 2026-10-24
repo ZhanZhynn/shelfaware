@@ -26,6 +26,8 @@ describe("getOpenApiSpec", () => {
       "/api/v1/marketplaces/{platform}/financial-records": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:finance"] } },
       "/api/v1/marketplaces/{platform}/reconciliation-status": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:finance"] } },
       "/api/v1/marketplaces/{platform}/profit": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:finance"] } },
+      "/api/v1/marketplaces/{platform}/reviews": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:read"] } },
+      "/api/v1/marketplaces/{platform}/reviews/{view}": { get: { security: [{ bearerAuth: [] }, { sessionCookie: [] }], "x-requiredApiTokenScopes": ["marketplace:read"] } },
     });
   });
 
@@ -44,5 +46,7 @@ describe("getOpenApiSpec", () => {
       shopify: ["products", "orders", "finance", "all"],
     });
     expect(post.description).toContain("checkpointed task/lease/outbox");
+    expect(post.requestBody.content["application/json"].schema.properties.syncType.enum).toContain("reviews");
+    expect(post.requestBody.content["application/json"].schema.properties.input.properties.maxReviews).toMatchObject({ minimum: 1, maximum: 1000 });
   });
 });

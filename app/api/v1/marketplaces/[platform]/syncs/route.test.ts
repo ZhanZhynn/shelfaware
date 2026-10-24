@@ -12,7 +12,7 @@ vi.mock("@/lib/marketplace/sync-jobs", () => ({
   assertMarketplaceSyncShop: mocks.assertMarketplaceSyncShop,
   createMarketplaceSyncJob: mocks.createMarketplaceSyncJob,
   marketplaceSyncJobResponse: mocks.marketplaceSyncJobResponse,
-  marketplaceSyncTypes: ["products", "orders", "finance", "returns", "ads", "payouts", "all"],
+  marketplaceSyncTypes: ["products", "orders", "finance", "returns", "ads", "payouts", "reviews", "all"],
   MarketplaceSyncJobNotFoundError: class MarketplaceSyncJobNotFoundError extends Error {},
 }));
 vi.mock("@/lib/marketplace/sync-enqueue", () => ({ enqueueMarketplaceSyncJob: mocks.enqueueMarketplaceSyncJob }));
@@ -38,6 +38,33 @@ beforeEach(() => {
 });
 
 describe("v1 marketplace sync creation", () => {
+  it("uses checkpointed task delivery for standalone review collections", async () => {
+    const input = { itemId: "456", maxReviews: 100 };
+    const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/shopee/syncs", {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "reviews", input }),
+    }), { params: Promise.resolve({ platform: "shopee" }) });
+    expect(response.status).toBe(202);
+    expect(mocks.requireApiActor).toHaveBeenCalledWith(expect.any(NextRequest), ["marketplace:sync"]);
+    expect(mocks.createMarketplaceSyncRun).toHaveBeenCalledWith(expect.objectContaining({ platform: "shopee", syncType: "reviews", input }));
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("e".repeat(24));
+    expect(mocks.createMarketplaceSyncJob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["reviews", { maxReviews: 1001 }], ["reviews", { maxReviews: 0 }],
+    ["reviews", { itemId: "invalid" }], ["reviews", { itemId: "12345678901234567890" }],
+    ["reviews", { daysBack: 30 }], ["reviews", { arbitrary: true }],
+    ["orders", { maxReviews: 10 }], ["all", { itemId: "456" }],
+  ])("rejects invalid or misplaced review options for %s", async (syncType, input) => {
+    const response = await POST(new NextRequest("http://localhost/api/v1/marketplaces/shopee/syncs", {
+      method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType, input }),
+    }), { params: Promise.resolve({ platform: "shopee" }) });
+    expect(response.status).toBe(422);
+    expect((await response.json()).error.code).toBe("INVALID_REVIEW_OPTIONS");
+    expect(mocks.assertMarketplaceSyncShop).not.toHaveBeenCalled();
+    expect(mocks.createMarketplaceSyncRun).not.toHaveBeenCalled();
+  });
+
   it.each(["shopee", "lazada", "tiktok", "shopify"])("persists %s foreground work without delivering any queue message", async (platform) => {
     const response = await POST(new NextRequest(`http://localhost:3000/api/v1/marketplaces/${platform}/syncs`, {
       method: "POST", body: JSON.stringify({ shopId: "b".repeat(24), syncType: "orders", executionMode: "foreground" }),
@@ -194,6 +221,7 @@ describe("v1 marketplace sync creation", () => {
     [{ dateFrom: "2024-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "orders"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "lazada", "returns"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "products"],
+    [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "shopee", "reviews"],
     [{ dateFrom: "2025-01-01T00:00:00Z", dateTo: "2025-01-02T00:00:00Z" }, "tiktok", "payouts"],
     [{ dateFrom: "2025-01-01T00:00:00Z" }, "shopify", "orders"],
     [{ daysBack: 0 }, "tiktok", "orders"],

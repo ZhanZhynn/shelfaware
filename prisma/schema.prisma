@@ -1550,6 +1550,64 @@ model ShopeeAdsCoverage {
   @@index([shopId, dateFrom, dateTo])
 }
 
+// Provider review identity is independent of order/product import availability.
+model ShopeeReview {
+  id                   String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId               String    @db.ObjectId
+  userId               String    @db.ObjectId
+  externalId           String
+  itemExternalId       String?
+  variantExternalIds   Json?
+  orderExternalId      String?
+  productId            String?   @db.ObjectId
+  orderId              String?   @db.ObjectId
+  rating               Int?
+  text                 String?
+  hasText              Boolean?
+  textTruncated        Boolean   @default(false)
+  hidden               Boolean?
+  sellerReply          Json?
+  replyState           String
+  media                Json?
+  sourceCreatedAt      DateTime? @db.Date
+  sourceUpdatedAt      DateTime? @db.Date
+  sourceRequestId      String?
+  providerMetadata     Json
+  contentHash          String
+  firstObservedAt      DateTime  @default(now()) @db.Date
+  observedAt           DateTime  @default(now()) @db.Date
+  lastChangedAt        DateTime  @default(now()) @db.Date
+  linkCheckedAt        DateTime? @db.Date
+
+  @@unique([shopId, externalId])
+  @@index([shopId, sourceCreatedAt, id])
+  @@index([shopId, itemExternalId, sourceCreatedAt])
+  @@index([shopId, linkCheckedAt])
+}
+
+model ShopeeReviewCollection {
+  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId                String    @db.ObjectId
+  userId                String    @db.ObjectId
+  scopeKey              String
+  itemExternalId        String?
+  sourceRunId           String
+  state                 String
+  pagesObserved         Int       @default(0)
+  recordsObserved       Int       @default(0)
+  uniqueReviewsObserved Int       @default(0)
+  providerMore          Boolean?
+  providerLimited       Boolean   @default(false)
+  terminationReason     String?
+  lastError             String?
+  diagnostics           Json
+  startedAt             DateTime  @default(now()) @db.Date
+  observedAt            DateTime  @default(now()) @db.Date
+  completedAt           DateTime? @db.Date
+
+  @@unique([shopId, scopeKey])
+}
+
 model NotificationSetting {
   id               String    @id @default(auto()) @map("_id") @db.ObjectId
   userId           String    @unique @db.ObjectId // One setting per user

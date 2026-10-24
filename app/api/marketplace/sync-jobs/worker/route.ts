@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
       const deliveryTaskId = result.status === "completed" ? result.nextTaskId
         : result.status === "checkpointed" ? result.nextTaskId
         : result.status === "retrying" ? result.nextTaskId
+          : result.status === "failed" ? result.nextTaskId
           : result.status === "skipped" ? await getMarketplaceSyncTaskRecoveryDelivery(taskId)
             : undefined;
       const queued = deliveryTaskId ? await deliverMarketplaceSyncTaskOutbox(deliveryTaskId) : { scheduled: true };

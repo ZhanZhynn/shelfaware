@@ -105,12 +105,32 @@ describe("task settlement cannot outlive a worker lease", () => {
   });
 
   it.each([true, false])("exhausts retries without publishing another retry (required=%s)", async (required) => {
-    m.task.findFirst.mockResolvedValue({ ...task(), required, attempts: MAX_MARKETPLACE_SYNC_ATTEMPTS });
+    m.task.findFirst.mockResolvedValueOnce({ ...task(), required, attempts: MAX_MARKETPLACE_SYNC_ATTEMPTS }).mockResolvedValueOnce(null);
     m.task.findMany.mockResolvedValue([{ required, status: "failed" }]);
     const result = await retryMarketplaceSyncTask("task", "worker", "SYNC_ATTEMPT_FAILED", now);
     expect(result).toMatchObject({ settled: true, status: "failed", runStatus: required ? "failed" : "completed_with_warnings" });
     expect(m.outbox.upsert).not.toHaveBeenCalled();
     expect(m.task.updateMany.mock.calls.some(([args]) => args.data.lastError === "BLOCKED_BY_REQUIRED_TASK")).toBe(required);
+  });
+
+  it.each(["fail", "retry"])("hands off queued work after an optional %s", async (operation) => {
+    m.task.findFirst.mockResolvedValueOnce({ ...task(), required: false, attempts: MAX_MARKETPLACE_SYNC_ATTEMPTS }).mockResolvedValueOnce({ id: "reviews" });
+    m.task.findMany.mockResolvedValue([{ status: "failed", required: false }, { status: "pending", required: false }]);
+    const result = operation === "fail" ? await failMarketplaceSyncTask("task", "worker", "FAILED", now) : await retryMarketplaceSyncTask("task", "worker", "FAILED", now);
+    expect(result).toMatchObject({ settled: true, nextTaskId: "reviews" });
+    expect(m.outbox.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: { taskId: "reviews", dedupeKey: "initial" } }));
+    expect(m.task.updateMany.mock.calls.some(([args]) => args.data.status === "cancelled")).toBe(false);
+  });
+
+  it("recovers an optional-failure handoff and never queues foreground successors", async () => {
+    m.task.findUnique.mockResolvedValue({ ...task(), required: false, status: "failed" });
+    m.task.findFirst.mockResolvedValue({ id: "reviews" });
+    expect(await getMarketplaceSyncTaskRecoveryDelivery("task", now)).toBe("reviews");
+    expect(m.outbox.upsert).toHaveBeenCalled();
+    m.outbox.upsert.mockClear();
+    m.task.findUnique.mockResolvedValue({ ...task(), required: false, status: "failed", run: { executionMode: "foreground" } });
+    expect(await getMarketplaceSyncTaskRecoveryDelivery("task", now)).toBeNull();
+    expect(m.outbox.upsert).not.toHaveBeenCalled();
   });
 
   it("keeps only bounded safe provider diagnostics when retrying", async () => {

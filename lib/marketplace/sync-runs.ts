@@ -6,6 +6,7 @@ import { enqueueMarketplaceSyncTask } from "./sync-enqueue";
 import { marketplaceSyncDateRange, marketplaceSyncErrorCode, marketplaceSyncRetryAt, MAX_MARKETPLACE_SYNC_ATTEMPTS, type MarketplaceSyncInput, type MarketplaceSyncType } from "./sync-jobs";
 import { marketplaceSyncTaskGraph } from "./sync-plan";
 import { matchesMarketplaceSyncExecution, MarketplaceSyncExecutionConflictError, type MarketplaceSyncExecution } from "./sync-execution";
+import { publicReviewCheckpoint } from "@/lib/shopee/reviews-domain";
 export { shopeeAllTaskGraph } from "./sync-plan";
 
 const taskStatuses = ["pending", "running", "retrying", "completed", "failed", "cancelled"] as const;
@@ -157,19 +158,30 @@ export async function deliverMarketplaceSyncTaskOutbox(taskId: string, now = new
  * acknowledged its queue delivery. It republishes only a still-undelivered
  * outbox row, so ordinary duplicate queue messages are harmless. */
 export async function getMarketplaceSyncTaskRecoveryDelivery(taskId: string, now = new Date()) {
-  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id: taskId }, select: { id: true, runId: true, sequence: true, status: true } });
+  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id: taskId }, select: { id: true, runId: true, sequence: true, status: true, required: true, run: { select: { executionMode: true, executionTarget: true } } } });
   if (!task) return null;
+  if (!matchesMarketplaceSyncExecution(task.run ?? {})) return null;
   let candidateId: string | undefined;
   if (task.status === "retrying") candidateId = task.id;
   if (task.status === "completed") {
     candidateId = (await prisma.marketplaceSyncTask.findFirst({ where: { runId: task.runId, sequence: task.sequence + 1 }, select: { id: true } }))?.id;
   }
+  if (task.status === "failed" && !task.required) candidateId = await enqueueOptionalSuccessor(prisma, task);
   if (!candidateId) return null;
   const pending = await prisma.marketplaceSyncDeliveryOutbox.findFirst({
     where: { taskId: candidateId, OR: [{ status: { in: ["pending", "retrying"] } }, { status: "publishing", leaseExpiresAt: { lte: now } }] },
     select: { id: true },
   });
   return pending ? candidateId : null;
+}
+
+/** An optional failure must hand off to later streams just like completion. */
+async function enqueueOptionalSuccessor(db: Pick<Prisma.TransactionClient, "marketplaceSyncTask" | "marketplaceSyncDeliveryOutbox">, task: { runId: string; sequence: number; required: boolean; run?: { executionMode?: string | null } }) {
+  if (task.required || task.run?.executionMode === "foreground") return undefined;
+  const next = await db.marketplaceSyncTask.findFirst({ where: { runId: task.runId, sequence: task.sequence + 1, status: { in: ["pending", "retrying"] } }, select: { id: true } });
+  if (!next) return undefined;
+  await db.marketplaceSyncDeliveryOutbox.upsert({ where: { taskId_dedupeKey: { taskId: next.id, dedupeKey: "initial" } }, create: { taskId: next.id, dedupeKey: "initial" }, update: {} });
+  return next.id;
 }
 
 async function acquireShopLease(task: { id: string; platform: string; shopId: string }, now: Date) {
@@ -265,13 +277,14 @@ async function finalizeMarketplaceSyncRun(runId: string, now: Date) {
 /** A worker can discover an expired final attempt; settle its graph without
  * pretending the new worker owned the old lease. */
 async function settleExpiredMarketplaceSyncTask(id: string, now: Date) {
-  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id }, select: { id: true, runId: true, sequence: true, required: true, platform: true, shopId: true } });
+  const task = await prisma.marketplaceSyncTask.findUnique({ where: { id }, select: { id: true, runId: true, sequence: true, required: true, platform: true, shopId: true, run: { select: { executionMode: true } } } });
   if (!task) return;
   await releaseShopLease(task);
   if (task.required) await prisma.marketplaceSyncTask.updateMany({
     where: { runId: task.runId, sequence: { gt: task.sequence }, status: { in: ["pending", "retrying"] } },
     data: { status: "cancelled", completedAt: now, lastError: "BLOCKED_BY_REQUIRED_TASK" },
   });
+  else await enqueueOptionalSuccessor(prisma, task);
   await finalizeMarketplaceSyncRun(task.runId, now);
 }
 
@@ -368,10 +381,11 @@ export async function retryMarketplaceSyncTask(id: string, workerId: string, err
       return { settled: true as const, status: "retrying" as const, nextTaskId: id, nextAttemptAt: nextAttempt?.nextAttemptAt ?? null };
     }
     if (task.required) await tx.marketplaceSyncTask.updateMany({ where: { runId: task.runId, sequence: { gt: task.sequence }, status: { in: ["pending", "retrying"] } }, data: { status: "cancelled", completedAt: now, lastError: "BLOCKED_BY_REQUIRED_TASK" } });
+    const nextTaskId = await enqueueOptionalSuccessor(tx, task);
     const tasks = await tx.marketplaceSyncTask.findMany({ where: { runId: task.runId }, orderBy: { sequence: "asc" } });
     const runStatus = marketplaceSyncRunStatus(tasks);
     if (runStatus) await tx.marketplaceSyncRun.updateMany({ where: { id: task.runId, status: { in: ["pending", "running"] } }, data: { status: runStatus, lastError: code, completedAt: now } });
-    return { settled: true as const, status: "failed" as const, runStatus };
+    return { settled: true as const, status: "failed" as const, runStatus, nextTaskId };
   });
   if (!settled.settled) return settled;
   await releaseShopLease(task);
@@ -386,10 +400,11 @@ export async function failMarketplaceSyncTask(id: string, workerId: string, erro
     const result = await tx.marketplaceSyncTask.updateMany({ where: { id, status: "running", leaseOwner: workerId, leaseExpiresAt: { gt: now } }, data: { status: "failed", completedAt: now, nextAttemptAt: null, lastError: code, errors: [{ at: now.toISOString(), code, ...safeProviderDiagnostic(provider) }] as Prisma.InputJsonArray, leaseOwner: null, leaseExpiresAt: null } });
     if (result.count !== 1) return { settled: false as const };
     if (task.required) await tx.marketplaceSyncTask.updateMany({ where: { runId: task.runId, sequence: { gt: task.sequence }, status: { in: ["pending", "retrying"] } }, data: { status: "cancelled", completedAt: now, lastError: "BLOCKED_BY_REQUIRED_TASK" } });
+    const nextTaskId = await enqueueOptionalSuccessor(tx, task);
     const tasks = await tx.marketplaceSyncTask.findMany({ where: { runId: task.runId }, orderBy: { sequence: "asc" } });
     const runStatus = marketplaceSyncRunStatus(tasks);
     if (runStatus) await tx.marketplaceSyncRun.updateMany({ where: { id: task.runId, status: { in: ["pending", "running"] } }, data: { status: runStatus, lastError: code, completedAt: now } });
-    return { settled: true as const, status: "failed" as const, runStatus };
+    return { settled: true as const, status: "failed" as const, runStatus, nextTaskId };
   });
   if (!settled.settled) return settled;
   await releaseShopLease(task);
@@ -430,7 +445,7 @@ export function marketplaceSyncRunResponse(run: Awaited<ReturnType<typeof getMar
     completedAt: iso(run.completedAt),
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),
-    tasks: run.tasks.map((task) => ({ id: task.id, stream: task.stream, status: task.status, attempts: task.attempts, checkpoint: task.checkpoint, metrics: task.metrics, lastError: task.lastError, errors: task.errors, nextAttemptAt: iso(task.nextAttemptAt), startedAt: iso(task.startedAt), completedAt: iso(task.completedAt) })),
+    tasks: run.tasks.map((task) => ({ id: task.id, stream: task.stream, status: task.status, attempts: task.attempts, checkpoint: task.stream === "reviews" ? publicReviewCheckpoint(task.checkpoint) : task.checkpoint, metrics: task.metrics, lastError: task.lastError, errors: task.errors, nextAttemptAt: iso(task.nextAttemptAt), startedAt: iso(task.startedAt), completedAt: iso(task.completedAt) })),
   };
 }
 

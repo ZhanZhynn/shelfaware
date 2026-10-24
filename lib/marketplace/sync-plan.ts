@@ -7,6 +7,7 @@ export const shopeeAllTaskGraph = [
   { stream: "orders_and_escrow", required: true },
   { stream: "products", required: true },
   { stream: "ads", required: false },
+  { stream: "reviews", required: false },
 ] as const;
 
 const catalogTaskGraph = [
@@ -16,7 +17,7 @@ const catalogTaskGraph = [
 ] as const;
 
 export const marketplaceSyncTypesByPlatform: Record<MarketplacePlatform, readonly MarketplaceSyncType[]> = {
-  shopee: ["products", "orders", "finance", "returns", "ads", "payouts", "all"],
+  shopee: ["products", "orders", "finance", "returns", "ads", "payouts", "reviews", "all"],
   lazada: ["products", "orders", "finance", "payouts", "all"],
   tiktok: ["products", "orders", "finance", "payouts", "all"],
   shopify: ["products", "orders", "finance", "all"],

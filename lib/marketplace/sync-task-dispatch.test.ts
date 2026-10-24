@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(), syncShopeeReturns: vi.fn(), syncShopeePayoutStatements: vi.fn(),
   syncTikTokOrders: vi.fn(), syncTikTokFinance: vi.fn(), syncTikTokProducts: vi.fn(),
   syncShopifyOrders: vi.fn(), syncShopifyFinance: vi.fn(), syncShopifyProducts: vi.fn(),
+  reviewPage: vi.fn(),
 }));
 
 vi.mock("./sync-runs", () => ({
@@ -31,11 +32,13 @@ vi.mock("@/lib/shopee", () => ({ syncShopeeOrders: mocks.syncShopeeOrders, syncS
 vi.mock("@/lib/lazada", () => ({ syncLazadaOrders: mocks.syncLazadaOrders, syncLazadaFinance: mocks.syncLazadaFinance, syncLazadaPayoutStatements: mocks.syncLazadaPayoutStatements, syncLazadaProducts: mocks.syncLazadaProducts }));
 vi.mock("@/lib/tiktok", () => ({ syncTikTokOrders: mocks.syncTikTokOrders, syncTikTokFinance: mocks.syncTikTokFinance, syncTikTokProducts: mocks.syncTikTokProducts, syncTikTokAll: vi.fn(), syncTikTokPayoutStatements: vi.fn() }));
 vi.mock("@/lib/shopify", () => ({ syncShopifyOrders: mocks.syncShopifyOrders, syncShopifyFinance: mocks.syncShopifyFinance, syncShopifyProducts: mocks.syncShopifyProducts, syncShopifyAll: vi.fn() }));
+vi.mock("@/lib/shopee/reviews-sync", () => ({ syncShopeeReviewPage: mocks.reviewPage }));
 
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
 import { LazadaProviderError } from "@/lib/lazada/provider-error";
 import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 import { ShopifyProviderError } from "@/lib/shopify/provider-error";
+import { ShopeeReviewError } from "@/lib/shopee/reviews-domain";
 
 const task = (overrides: Record<string, unknown> = {}) => ({
   id: "a".repeat(24), platform: "shopee", shopId: "b".repeat(24), stream: "orders_and_escrow", sequence: 0,
@@ -59,6 +62,45 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it("checkpoints one review page and ignores order date bounds in all-runs", async () => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "reviews", run: { syncType: "all", requestedByUserId: "actor", input: { dateFrom: "2026-09-01T00:00:00Z", dateTo: "2026-09-07T23:59:59Z" } } }));
+    const checkpoint = { v: 1, cursor: "next", pages: 1, records: 2, ids: ["1", "2"], cursors: [""], requestIds: [] };
+    mocks.reviewPage.mockResolvedValue({ checkpoint, done: false, limited: false, terminationReason: null, created: 2, updated: 0, changed: 0, linksRechecked: 0 });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toEqual({ status: "checkpointed", nextTaskId: "task" });
+    expect(mocks.reviewPage).toHaveBeenCalledWith(123, "shop-owner", undefined, undefined, "run");
+    expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ checkpoint, dedupeKey: "reviews-page-1", metrics: expect.objectContaining({ reviewsObserved: 2, pagesObserved: 1, historyCompleteness: "unknown" }) }));
+    expect(mocks.syncShopeeOrders).not.toHaveBeenCalled();
+  });
+  it("completes a provider-limited review window without claiming full history", async () => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "reviews", run: { syncType: "reviews", requestedByUserId: "actor", input: { maxReviews: 1000 } } }));
+    mocks.reviewPage.mockResolvedValue({ checkpoint: { pages: 10, records: 1000, ids: Array(1000).fill("id") }, done: true, limited: true, terminationReason: "documented_cap_boundary", created: 100, updated: 0, changed: 0, linksRechecked: 20 });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "completed" });
+    expect(mocks.complete).toHaveBeenCalledWith("task", "worker", undefined, expect.objectContaining({ providerLimited: true, reviewsObserved: 1000, historyCompleteness: "unknown" }));
+    expect(mocks.checkpoint).not.toHaveBeenCalled();
+  });
+  it("fails permanent review errors safely and preserves optional-task handoff", async () => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "reviews" }));
+    mocks.reviewPage.mockRejectedValue(new ShopeeReviewError("REVIEW_PROVIDER_AUTH_REQUIRED", false, "error_auth", "request"));
+    mocks.fail.mockResolvedValue({ settled: true, nextTaskId: "next" });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toEqual({ status: "failed", nextTaskId: "next" });
+    expect(mocks.fail).toHaveBeenCalledWith("task", "worker", "REVIEW_PROVIDER_AUTH_REQUIRED", undefined, { code: "error_auth", requestId: "request", fields: [] });
+  });
+  it("does not advance reviews after losing the page lease", async () => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "reviews" }));
+    mocks.reviewPage.mockResolvedValue({ checkpoint: { pages: 1, ids: [] }, done: true });
+    mocks.renew.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toEqual({ status: "skipped" });
+    expect(mocks.complete).not.toHaveBeenCalled(); expect(mocks.checkpoint).not.toHaveBeenCalled();
+  });
+  it.each(["retrying", "failed", "lost_lease"])("settles transient review failures as %s without advancing the page", async (status) => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "reviews" }));
+    mocks.reviewPage.mockRejectedValue(new ShopeeReviewError("REVIEW_PROVIDER_RATE_LIMIT", true, "rate_limit", "review-request"));
+    mocks.retry.mockResolvedValue({ settled: status !== "lost_lease", status, nextTaskId: "task", nextAttemptAt: null });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: status === "lost_lease" ? "skipped" : status });
+    expect(mocks.retry).toHaveBeenCalledWith("task", "worker", "REVIEW_PROVIDER_RATE_LIMIT", undefined, { code: "rate_limit", requestId: "review-request", fields: [] });
+    expect(mocks.checkpoint).not.toHaveBeenCalled(); expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
   it("checkpoints historical ads in seven-day inclusive windows and counts campaign facts", async () => {
     const run = { syncType: "ads", requestedByUserId: "requester", input: { dateFrom: "2026-09-01T00:00:00+08:00", dateTo: "2026-09-30T23:59:59+08:00" } };
     mocks.claimed.mockResolvedValue(task({ stream: "ads", run }));

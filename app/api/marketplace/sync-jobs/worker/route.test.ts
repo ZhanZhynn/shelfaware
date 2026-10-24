@@ -101,4 +101,13 @@ describe("marketplace sync worker route", () => {
     expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith("b".repeat(24));
     expect(mocks.dispatchMarketplaceSyncJob).not.toHaveBeenCalled();
   });
+
+  it("delivers reviews after an optional ads failure instead of stranding the run", async () => {
+    const nextTaskId = "d".repeat(24);
+    mocks.dispatchMarketplaceSyncTask.mockResolvedValue({ status: "failed", nextTaskId });
+    const response = await POST(request({ authorization: "Bearer worker-secret" }, JSON.stringify({ taskId: "c".repeat(24) })));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "failed" });
+    expect(mocks.deliverMarketplaceSyncTaskOutbox).toHaveBeenCalledWith(nextTaskId);
+  });
 });

@@ -105,11 +105,19 @@ the minimum of unrelated automatic-cancellation timestamps.
 
 ## Scheduling
 
-`GET /api/marketplace/sla/cron` uses the independent `CRON_SECRET` and is disabled
-unless `MARKETPLACE_SLA_CRON_ENABLED=true`. Enable it after storage/index deployment
-and queue verification. `vercel.json` schedules it every 15 minutes at UTC 00–11,
-which is 08:00–19:45 Malaysia time. Use a scheduler capable of that cadence;
-the NAS can alternatively drive scoped foreground SLA runs.
+Vercel Hobby supports only daily cron jobs. `vercel.json` therefore registers only
+the existing `/api/cron/daily` job; it does not register a recurring SLA job.
+
+For 15-minute SLA freshness, configure the NAS scheduler to run the updated CLI's
+`sync start --type sla --foreground` for each shop during operating hours, for
+example 08:00–19:45 Malaysia time. It uses the existing scoped CLI credential and
+does not require QStash or `MARKETPLACE_SLA_CRON_ENABLED`. The daily NAS sync alone
+does not keep the backlog fresh throughout the day.
+
+`GET /api/marketplace/sla/cron` remains available for an external authenticated
+scheduler. It uses the independent `CRON_SECRET` and is disabled unless
+`MARKETPLACE_SLA_CRON_ENABLED=true`. Enable it only after storage/index deployment
+and queue verification. This flag enables the endpoint, not a Vercel cron schedule.
 
 The endpoint only creates/redelivers durable work. `accepted` and `scheduled`
 are not execution completion. Existing active queued SLA runs are reused to avoid

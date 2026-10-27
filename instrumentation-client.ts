@@ -6,6 +6,7 @@
 import * as Sentry from "@sentry/nextjs";
 import {
   getClientSentryInitOptions,
+  getReplayPrivacyOptions,
   isSentryEnabled,
 } from "@/lib/monitoring/sentry-config";
 
@@ -13,10 +14,7 @@ if (isSentryEnabled()) {
   Sentry.init({
     ...getClientSentryInitOptions(),
     integrations: [
-      Sentry.replayIntegration({
-        maskAllText: true,
-        blockAllMedia: true,
-      }),
+      Sentry.replayIntegration(getReplayPrivacyOptions()),
       Sentry.browserTracingIntegration(),
       Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] }),
     ],

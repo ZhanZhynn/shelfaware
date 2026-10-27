@@ -244,6 +244,18 @@ JWT_SECRET="your-super-secret-jwt-key-min-32-chars"
 NEXT_PUBLIC_API_URL="http://localhost:3000"
 ```
 
+**Production credentials:** give `JWT_SECRET`, `CRON_SECRET`,
+`MARKETPLACE_SYNC_WORKER_SECRET`, and `INTERNAL_API_KEY` independent random
+values when configured. Production runtime rejects placeholders, values shorter
+than 32 characters, and reuse between these credentials. Before deploying that
+validation, coordinate configuration changes and scheduler/worker rotation using
+the [Phase 1 rollout runbook](docs/plans/security-remediation-phase-1.md).
+
+**Demo scripts:** fixture tooling accepts only a dedicated `DEMO_DATABASE_URL`
+pointing to a local `shelfaware_demo` / `shelfaware_test` database, with
+`NODE_ENV=development` or `test`. It never falls back to the application's
+`DATABASE_URL`. Set fixture passwords privately; see the Phase 1 runbook.
+
 ### Marketplace sync workers
 
 `POST /api/v1/marketplaces/{platform}/syncs` always creates a durable job and

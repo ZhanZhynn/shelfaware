@@ -3,8 +3,16 @@
  */
 
 import * as Sentry from "@sentry/nextjs";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import { assertSecureRuntimeSecrets } from "@/lib/security/runtime-secrets";
 
 export async function register() {
+  // Fail before Sentry or optional services can capture unsafe configuration.
+  // Next's build workers may use Docker's build-only signing placeholder.
+  if (process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+    assertSecureRuntimeSecrets();
+  }
+
   if (process.env.NEXT_RUNTIME === "nodejs") {
     try {
       await import("./sentry.server.config");

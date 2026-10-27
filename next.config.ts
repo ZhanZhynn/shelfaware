@@ -2,6 +2,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 import { SENTRY_TUNNEL_PATH } from "./lib/monitoring/sentry-config";
 import { buildNextProductionHeaderRules } from "./lib/vercel/production-headers";
+import { buildImageOptimizationConfig } from "./lib/image-optimization";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -9,23 +10,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   serverExternalPackages: ["lazada-api-client"],
 
-  images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "robohash.org",
-      },
-      {
-        protocol: "https",
-        hostname: "ik.imagekit.io",
-      },
-      {
-        protocol: "https",
-        hostname: "lh3.googleusercontent.com",
-      },
-    ],
-    formats: ["image/avif", "image/webp"],
-  },
+  images: buildImageOptimizationConfig(
+    process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT || process.env.IMAGEKIT_URL_ENDPOINT,
+  ),
 
   compiler: {
     removeConsole: process.env.NODE_ENV === "production",

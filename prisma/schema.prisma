@@ -1317,6 +1317,61 @@ model ShopeeProductVariant {
   @@index([productId])
 }
 
+// Operational fulfillment facts, intentionally separate from financial evidence.
+model MarketplaceSlaUnit {
+  id                       String   @id @default(auto()) @map("_id") @db.ObjectId
+  platform                 String
+  shopId                   String   @db.ObjectId
+  userId                   String   @db.ObjectId
+  orderExternalId          String
+  unitKey                  String
+  unitType                 String
+  packageExternalId        String?
+  itemExternalId           String?
+  providerStatus           String
+  stage                    String
+  fulfillmentType          String
+  blockedReason            String?
+  deadlines                Json
+  deadlineAt               DateTime?
+  deadlineKind             String?
+  deadlineSource           String?
+  deadlineState            String
+  cancellationAt           DateTime?
+  lastKnownDeadlineAt      DateTime?
+  lastKnownDeadlineObservedAt DateTime?
+  providerUpdatedAt        DateTime?
+  sourceVersion            String
+  sourceRunId              String
+  observedAt               DateTime
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([platform, shopId, unitKey])
+  @@index([platform, shopId, stage, deadlineAt])
+  @@index([platform, shopId, sourceRunId])
+  @@index([platform, shopId, orderExternalId])
+}
+
+model MarketplaceSlaCollection {
+  id                       String   @id @default(auto()) @map("_id") @db.ObjectId
+  platform                 String
+  shopId                   String   @db.ObjectId
+  userId                   String   @db.ObjectId
+  sourceRunId              String
+  state                    String
+  pagesObserved            Int      @default(0)
+  unitsObserved            Int      @default(0)
+  unresolvedUnits          Int      @default(0)
+  lastError                String?
+  startedAt                DateTime
+  observedAt               DateTime
+  completedAt              DateTime?
+  scope                    Json
+
+  @@unique([platform, shopId])
+}
+
 model ShopeeOrder {
   id                   String            @id @default(auto()) @map("_id") @db.ObjectId
   shopId               String            @db.ObjectId // FK to ShopeeShop

@@ -11,6 +11,7 @@
 import { prisma } from "@/prisma/client";
 import { getCache, setCache } from "@/lib/cache/cache-utils";
 import type { ChatTool, ToolSession } from "./types";
+import { legacyShopeeOutstandingStatuses } from "@/lib/marketplace/sla/domain";
 
 async function cached<T>(
   key: string,
@@ -139,7 +140,7 @@ const getShopeeNearSlaOrders: ChatTool = {
     function: {
       name: "getShopeeNearSlaOrders",
       description:
-        "List Shopee orders that are approaching their ship-by (SLA) deadline within the next N hours (default 24). Each order is tagged with an urgency bucket: critical (<6h), high (<12h), medium. Only includes confirmed/processing orders.",
+        "List known stored Shopee ship-by deadlines within the next N hours (default 24), including overdue orders. This legacy order-level view has unverified coverage; a zero result is not a confirmed all-clear. Use the canonical marketplace SLA report for fresh package-level coverage.",
       parameters: {
         type: "object",
         properties: {
@@ -157,16 +158,16 @@ const getShopeeNearSlaOrders: ChatTool = {
         : typeof args.shopId === "string" && args.shopId.trim()
           ? Number(args.shopId)
           : undefined;
-    const cacheKey = `chat:shopeeNearSla:${session.id}:${shopeeShopId ?? "all"}:${hours}`;
+    const cacheKey = `chat:shopeeNearSla:v2:${session.id}:${shopeeShopId ?? "all"}:${hours}`;
     const data = await cached(cacheKey, 60, async () => {
       const shopIds = await resolveShopIds(session, shopeeShopId);
-      if (shopIds.length === 0) return { total: 0, thresholdHours: hours, orders: [] };
+      if (shopIds.length === 0) return { total: 0, thresholdHours: hours, orders: [], coverage: { state: "unverified", countsAreConfirmed: false } };
       const now = new Date();
       const deadline = new Date(now.getTime() + hours * 60 * 60 * 1000);
       const orders = await prisma.shopeeOrder.findMany({
         where: {
           shopId: { in: shopIds },
-          orderStatus: { in: ["confirmed", "processing"] },
+          orderStatus: { in: legacyShopeeOutstandingStatuses },
           shipByDate: { not: null, lte: deadline },
         },
         orderBy: { shipByDate: "asc" },
@@ -185,6 +186,8 @@ const getShopeeNearSlaOrders: ChatTool = {
       return {
         total: orders.length,
         thresholdHours: hours,
+        coverage: { state: "unverified", countsAreConfirmed: false },
+        warnings: ["Known stored deadlines only. Missing/stale observations cannot establish zero due orders."],
         orders: orders.map((o) => {
           const msRemaining = (o.shipByDate?.getTime() ?? 0) - now.getTime();
           const hoursRemaining =

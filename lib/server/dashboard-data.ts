@@ -350,7 +350,7 @@ export async function getDashboardForAdmin(
         prisma.shopeeOrder.count({
           where: {
             shopId: { in: shopeeShopIds },
-            orderStatus: { in: ["confirmed", "processing"] },
+            orderStatus: { in: ["READY_TO_SHIP", "PROCESSED", "RETRY_SHIP", "confirmed", "processing"] },
             shipByDate: { not: null, lte: deadline },
           },
         }),

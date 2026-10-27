@@ -19,6 +19,8 @@ import { marketplaceSyncDateRange } from "./sync-jobs";
 import { syncShopeeReviewPage } from "@/lib/shopee/reviews-sync";
 import { ShopeeReviewError } from "@/lib/shopee/reviews-domain";
 import { prisma } from "@/prisma/client";
+import { syncMarketplaceSlaPage } from "./sla/sync";
+import { SlaError, type SlaPlatform } from "./sla/domain";
 
 export type MarketplaceSyncTaskDispatchResult =
   | { status: "skipped" }
@@ -99,6 +101,17 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     // Renew immediately before and after the bounded provider call. A task
     // cannot settle after it loses its durable four-minute lease.
     if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
+    if (task.stream === "sla") {
+      const result = await syncMarketplaceSlaPage(platform as SlaPlatform, task.shopId, task.run.requestedByUserId, task.run.syncType === "sla" ? task.run.input : undefined, task.checkpoint, task.runId, { taskId: id, workerId });
+      if (!(await renewMarketplaceSyncTaskLease(id, workerId))) return { status: "skipped" };
+      if (!result.done) {
+        const settled = await checkpointMarketplaceSyncTask({ id, workerId, checkpoint: result.checkpoint, metrics: result.metrics, dedupeKey: `sla-page-${result.checkpoint.pages}` });
+        return settled.settled ? { status: "checkpointed", nextTaskId: id } : { status: "skipped" };
+      }
+      if (result.checkpoint.limited) throw new SlaError("SLA_PROVIDER_LIMIT", "Provider pagination prevented a complete fulfillment scan", 422);
+      const settled = await completeMarketplaceSyncTask(id, workerId, undefined, result.metrics);
+      return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
+    }
     if (task.stream === "reviews") {
       const shop = await prisma.shopeeShop.findUnique({ where: { id: task.shopId }, select: { shopId: true, userId: true } });
       if (!shop) throw new PermanentTaskDispatchError("SHOP_NOT_FOUND");
@@ -139,6 +152,15 @@ export async function dispatchMarketplaceSyncTask(id: string, workerId: string, 
     const settled = await completeMarketplaceSyncTask(id, workerId, undefined, metrics);
     return settled.settled ? { status: "completed", nextTaskId: settled.nextTaskId } : { status: "skipped" };
   } catch (error) {
+    if (error instanceof SlaError) {
+      if (!error.retryable) {
+        const settled = await failMarketplaceSyncTask(id, workerId, error.code);
+        return settled.settled ? failedResult(settled.nextTaskId) : { status: "skipped" };
+      }
+      const settled = await retryMarketplaceSyncTask(id, workerId, error.code);
+      if (!settled.settled) return { status: "skipped" };
+      return settled.status === "retrying" ? { status: "retrying", nextTaskId: id, nextAttemptAt: settled.nextAttemptAt } : failedResult(settled.nextTaskId);
+    }
     if (error instanceof ShopeeReviewError) {
       const provider = { code: error.providerCode ?? error.code, requestId: error.providerRequestId, fields: [] };
       if (!error.retryable) {

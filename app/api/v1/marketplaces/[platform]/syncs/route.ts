@@ -87,6 +87,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const rangeError = dateRangeError(selectedPlatform, body.syncType, body.input);
     if (rangeError) return failure(requestId, "INVALID_DATE_RANGE", rangeError, 422);
     if (!supportsMarketplaceSync(selectedPlatform, body.syncType)) return failure(requestId, "SYNC_TYPE_UNSUPPORTED", "Sync type is not supported for this platform", 422);
+    if (body.syncType === "sla" && body.input && Object.keys(body.input).length) return failure(requestId, "INVALID_SLA_OPTIONS", "SLA refresh scans open fulfillment queues and accepts no creation-date or daysBack filters", 422);
     if (body.syncType === "reviews") {
       if (body.input && Object.keys(body.input).some((key) => !["itemId", "maxReviews"].includes(key))) return failure(requestId, "INVALID_REVIEW_OPTIONS", "Reviews support itemId and maxReviews, not date ranges or daysBack", 422);
       try { reviewOptions(body.input); } catch { return failure(requestId, "INVALID_REVIEW_OPTIONS", "Use a valid product ID and maxReviews between 1 and 1000", 422); }
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await assertMarketplaceSyncShop(platform as MarketplacePlatform, body.shopId, actor.user);
     // Every all-sync uses a task graph, regardless of whether dates were given.
     // Historical and TikTok/Shopify stream requests share the same engine.
-    if (body.executionMode === "foreground" || body.syncType === "all" || body.syncType === "reviews" || ["tiktok", "shopify"].includes(platform) || (body.input && Object.hasOwn(body.input, "dateFrom"))) {
+    if (body.executionMode === "foreground" || body.syncType === "all" || body.syncType === "reviews" || body.syncType === "sla" || ["tiktok", "shopify"].includes(platform) || (body.input && Object.hasOwn(body.input, "dateFrom"))) {
       const result = await createMarketplaceSyncRun({
         platform: selectedPlatform,
         shopId: body.shopId,

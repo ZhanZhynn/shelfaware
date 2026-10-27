@@ -218,6 +218,7 @@ export async function searchOrders(
   pageToken?: string,
   sortField?: "create_time" | "update_time",
   sortOrder?: "ASC" | "DESC",
+  requireData = false,
 ): Promise<TikTokSearchOrdersData> {
   const params: Record<string, string> = {
     page_size: String(pageSize),
@@ -241,6 +242,7 @@ export async function searchOrders(
     body,
   });
 
+  if (requireData && (!resp.data || !Array.isArray(resp.data.orders) || typeof resp.data.next_page_token !== "string")) throw new TikTokProviderError("INVALID_RESPONSE", 502, resp.request_id);
   return resp.data ?? { orders: [], total_count: 0, next_page_token: "" };
 }
 

@@ -15,6 +15,7 @@ import { TikTokProviderError } from "@/lib/tiktok/provider-error";
 import { shopifyGraphQL } from "@/lib/shopify/server";
 import { shopifyDateQuery } from "@/lib/shopify/search";
 import type { MarketplacePlatform } from "@/lib/marketplace/analytics/types";
+import { slaTimestamp } from "@/lib/marketplace/sla/domain";
 
 const objectId = /^[a-f\d]{24}$/i;
 const platformSet = new Set<MarketplacePlatform>(["shopee", "lazada", "tiktok", "shopify"]);
@@ -213,6 +214,10 @@ function normalizeShopeeOrder(value: Record<string, unknown>, shopId: string, in
     totalAmount, discountAmount: discount, shippingAmount: buyerPaidShipping, currency,
     ...liveRevenue(orderStatus, totalAmount),
     carrier, packages,
+    shipByDate: slaTimestamp(value.ship_by_date, "seconds"),
+    daysToShip: typeof value.days_to_ship === "number" && Number.isInteger(value.days_to_ship) && value.days_to_ship >= 0 ? value.days_to_ship : null,
+    fulfillmentType: typeof value.fulfillment_flag === "string" ? value.fulfillment_flag : null,
+    pickupDoneAt: slaTimestamp(value.pickup_done_time, "seconds"),
     ...(includeItems ? shopeeLineItems(value, currency) : {}),
     // Order amounts and item sales are not a seller settlement.
     settlement: { state: "pending_or_unavailable", sellerPayout: null, commissionFee: null, serviceFee: null, transactionFee: null, reason: "Unavailable because this endpoint does not request Shopee escrow details." },
@@ -238,7 +243,7 @@ async function shopeeOrders(query: LiveQuery, ownerIds: string[]): Promise<LiveL
   const detailsResponse = orderSns.length
     ? (await sdk.order.getOrdersDetail({
       order_sn_list: orderSns,
-      response_optional_fields: `total_amount,shipping_carrier,package_list${query.includeItems ? ",item_list" : ""}`,
+      response_optional_fields: `total_amount,shipping_carrier,package_list,fulfillment_flag,pickup_done_time${query.includeItems ? ",item_list" : ""}`,
     }) as unknown as { response?: { order_list?: unknown[] } }).response
     : undefined;
   const details = new Map(
@@ -370,7 +375,7 @@ export async function getMarketplaceLiveOrder(platform: MarketplacePlatform, use
   parseLiveOrderId(id);
   const ownerIds = await marketplaceOwnerIds(user);
   const sdk = await liveShopeeSDK(shopId, ownerIds);
-  const result = await sdk.order.getOrdersDetail({ order_sn_list: [id], response_optional_fields: "total_amount,shipping_carrier,package_list,item_list" }) as unknown as { response?: { order_list?: unknown[] } };
+  const result = await sdk.order.getOrdersDetail({ order_sn_list: [id], response_optional_fields: "total_amount,shipping_carrier,package_list,fulfillment_flag,pickup_done_time,item_list" }) as unknown as { response?: { order_list?: unknown[] } };
   if (!Array.isArray(result.response?.order_list)) throw new MarketplaceLiveProviderError("LIVE_PROVIDER_TEMPORARY", true, 30);
   const order = result.response.order_list.map(record).find((value) => value.order_sn === id);
   if (!order) throw new MarketplaceLiveNotFoundError("Order not found");

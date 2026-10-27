@@ -10,6 +10,7 @@ import crypto from "crypto";
 import prisma from "@/prisma/client";
 import { sendTelegramMessage, escapeMarkdownV2 } from "@/lib/notifications/telegram";
 import { logger } from "@/lib/logger";
+import { legacyShopeeOutstandingStatuses } from "@/lib/marketplace/sla/domain";
 
 export const runtime = "nodejs";
 
@@ -43,8 +44,9 @@ export async function POST(request: NextRequest) {
 
     const nearSlaOrders = await prisma.shopeeOrder.findMany({
       where: {
-        orderStatus: { in: ["confirmed", "processing"] },
+        orderStatus: { in: legacyShopeeOutstandingStatuses },
         shipByDate: { not: null, lte: threshold24h },
+        lastSyncedAt: { gte: new Date(now.getTime() - 15 * 60 * 1000) },
       },
       orderBy: { shipByDate: "asc" },
       select: {
@@ -58,8 +60,8 @@ export async function POST(request: NextRequest) {
     });
 
     if (nearSlaOrders.length === 0) {
-      logger.info("[SLA Alert] No near-SLA orders found");
-      return NextResponse.json({ sent: false, reason: "no_orders" });
+      logger.info("[SLA Alert] No recently observed known near-SLA orders found");
+      return NextResponse.json({ sent: false, reason: "no_recent_known_orders", coverage: "unverified" });
     }
 
     // Build Telegram message
@@ -136,6 +138,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       sent,
+      coverage: "unverified",
       total: nearSlaOrders.length,
       critical: critical.length,
       high: high.length,

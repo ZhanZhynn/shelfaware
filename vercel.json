@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/daily",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/marketplace/sla/cron",
+      "schedule": "*/15 0-11 * * *"
     }
   ]
 }

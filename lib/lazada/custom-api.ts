@@ -272,6 +272,16 @@ export interface OrderItem {
   shipment_provider: string;
   tracking_number: string;
   tracking_code?: string;
+  package_id?: string;
+  sla_time_stamp?: string;
+  promised_shipping_time?: string;
+  fulfillment_sla?: string;
+  is_fbl?: string | number | boolean;
+  is_digital?: string | number | boolean;
+  shipping_type?: string;
+  need_cancel_confirm?: string | boolean;
+  is_cancel_pending?: string | boolean;
+  stage_pay_status?: string;
   [key: string]: unknown;
 }
 

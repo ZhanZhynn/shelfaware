@@ -221,6 +221,17 @@ export interface TikTokOrderSummary {
   payment: TikTokOrderPayment;
   line_items: TikTokOrderLineItem[];
   recipient_address: TikTokRecipientAddress;
+  rts_sla_time?: number;
+  tts_sla_time?: number;
+  cancel_order_sla_time?: number;
+  shipping_due_time?: number;
+  collection_due_time?: number;
+  pick_up_cut_off_time?: number;
+  collection_time?: number;
+  rts_time?: number;
+  fulfillment_priority_level?: number;
+  is_buyer_request_cancel?: boolean;
+  packages?: Array<{ id: string }>;
 }
 
 export type TikTokOrderStatus =

@@ -52,7 +52,7 @@ function configureOrderSync() {
     },
   });
   sdk.order.searchPackageList.mockResolvedValue({
-    response: { package_list: [], more: false, next_cursor: "" },
+    response: { packages_list: [], pagination: { more: false, next_cursor: "" } },
   });
 }
 

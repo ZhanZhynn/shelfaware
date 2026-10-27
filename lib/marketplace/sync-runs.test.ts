@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { marketplaceSyncRunResponse, marketplaceSyncRunStatus, shopeeAllTaskGraph } from "./sync-runs";
 
 describe("Shopee all sync run graph", () => {
-  it("defines orders-and-escrow, products, ads, then reviews", () => {
-    expect(shopeeAllTaskGraph.map((task) => task.stream)).toEqual(["orders_and_escrow", "products", "ads", "reviews"]);
+  it("refreshes fulfillment after orders before products, ads and reviews", () => {
+    expect(shopeeAllTaskGraph.map((task) => task.stream)).toEqual(["orders_and_escrow", "sla", "products", "ads", "reviews"]);
   });
 
   it("returns review counters without exposing provider cursors or collected review IDs", () => {

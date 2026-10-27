@@ -147,6 +147,11 @@ describe("live revenue eligibility", () => {
 });
 
 describe("live Shopee orders", () => {
+  it("exposes default provider shipping deadlines without calculating them from order age", async () => {
+    mocks.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1", ship_by_date: 1793095200, days_to_ship: 0, fulfillment_flag: "fulfilled_by_local_seller", pickup_done_time: 0 }] } });
+    const order = await getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "ORDER-1");
+    expect(order).toMatchObject({ shipByDate: "2026-10-27T10:00:00.000Z", daysToShip: 0, fulfillmentType: "fulfilled_by_local_seller", pickupDoneAt: null });
+  });
   const line = { item_id: 123, model_id: 1, item_name: "Paper Bag", item_sku: "PARENT", model_sku: "RED", model_name: "Red", model_quantity_purchased: 2, model_original_price: 15, model_discounted_price: 10, order_item_id: 123, image_info: { image_url: "bag.jpg" }, private_field: "not-returned" };
 
   it("optionally returns normalized listing/variant lines using the discounted sales price", async () => {
@@ -154,7 +159,7 @@ describe("live Shopee orders", () => {
     mocks.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1", order_status: "SHIPPED", total_amount: 20, currency: "MYR", buyer_username: "not-returned", item_list: [line, { ...line, model_id: 2, model_sku: "BLUE", model_discounted_price: 0 }] }] } });
     const query = parseLiveQuery(new URLSearchParams({ shopId: "a".repeat(24), includeItems: "true" }), "orders");
     const result = await listMarketplaceLive("shopee", { id: "owner", role: null }, "orders", query);
-    expect(mocks.getOrdersDetail).toHaveBeenCalledWith({ order_sn_list: ["ORDER-1"], response_optional_fields: "total_amount,shipping_carrier,package_list,item_list" });
+    expect(mocks.getOrdersDetail).toHaveBeenCalledWith({ order_sn_list: ["ORDER-1"], response_optional_fields: "total_amount,shipping_carrier,package_list,fulfillment_flag,pickup_done_time,item_list" });
     expect(result.data[0]).toMatchObject({ lineItemsCoverage: { state: "ready" }, lineItems: [
       { productExternalId: "123", variantExternalId: "1", title: "Paper Bag", sku: "RED", quantity: 2, unitPrice: 10, originalUnitPrice: 15, subtotal: 20, unitPriceBasis: "discounted_unit_price", currency: "MYR" },
       { productExternalId: "123", variantExternalId: "2", quantity: 2, unitPrice: 0, subtotal: 0 },
@@ -163,7 +168,7 @@ describe("live Shopee orders", () => {
     expect(mocks.getOrdersDetail).toHaveBeenCalledTimes(1);
     const without = await listMarketplaceLive("shopee", { id: "owner", role: null }, "orders", { ...query, includeItems: false });
     expect(without.data[0]).not.toHaveProperty("lineItems");
-    expect(mocks.getOrdersDetail).toHaveBeenLastCalledWith({ order_sn_list: ["ORDER-1"], response_optional_fields: "total_amount,shipping_carrier,package_list" });
+    expect(mocks.getOrdersDetail).toHaveBeenLastCalledWith({ order_sn_list: ["ORDER-1"], response_optional_fields: "total_amount,shipping_carrier,package_list,fulfillment_flag,pickup_done_time" });
   });
 
   it.each([
@@ -185,7 +190,7 @@ describe("live Shopee orders", () => {
     const result = await getMarketplaceLiveOrder("shopee", { id: "owner", role: null }, "a".repeat(24), "261022ORDER");
     expect(result).toMatchObject({ externalId: "261022ORDER", lineItems: [{ productExternalId: "123", variantExternalId: null, sku: "PARENT", unitPrice: 15, subtotal: 30, unitPriceBasis: "original_unit_price" }] });
     expect(mocks.shopeeShopFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a".repeat(24), userId: { in: ["owner-1"] } } }));
-    expect(mocks.getOrdersDetail).toHaveBeenCalledWith({ order_sn_list: ["261022ORDER"], response_optional_fields: "total_amount,shipping_carrier,package_list,item_list" });
+    expect(mocks.getOrdersDetail).toHaveBeenCalledWith({ order_sn_list: ["261022ORDER"], response_optional_fields: "total_amount,shipping_carrier,package_list,fulfillment_flag,pickup_done_time,item_list" });
     expect(mocks.getOrderList).not.toHaveBeenCalled();
   });
 
@@ -241,7 +246,7 @@ describe("live Shopee orders", () => {
 
     const result = await listMarketplaceLive("shopee", { id: "actor-1", role: "admin" }, "orders", query);
 
-    expect(mocks.getOrdersDetail).toHaveBeenCalledWith(expect.objectContaining({ response_optional_fields: "total_amount,shipping_carrier,package_list" }));
+    expect(mocks.getOrdersDetail).toHaveBeenCalledWith(expect.objectContaining({ response_optional_fields: "total_amount,shipping_carrier,package_list,fulfillment_flag,pickup_done_time" }));
     expect(JSON.stringify(mocks.getOrdersDetail.mock.calls)).not.toMatch(/escrow/i);
     expect(result.data).toEqual(expect.arrayContaining([
       expect.objectContaining({ externalId: "ORDER-READY", totalAmount: 18.5, carrier: "Shopee Xpress", packages: [{ packageNumber: "PACKAGE-1", fulfillmentStatus: "LOGISTICS_READY", logisticsStatus: "IN_TRANSIT", trackingNumber: "TRACK-1", carrier: null }], revenueEligible: true }),

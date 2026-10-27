@@ -3,7 +3,7 @@ import { marketplaceOwnerIds } from "@/lib/marketplace/access";
 import { prisma } from "@/prisma/client";
 import type { MarketplacePlatform } from "./analytics/types";
 
-export const marketplaceSyncTypes = ["products", "orders", "finance", "returns", "ads", "payouts", "reviews", "all"] as const;
+export const marketplaceSyncTypes = ["products", "orders", "finance", "returns", "ads", "payouts", "reviews", "sla", "all"] as const;
 export const marketplaceSyncJobStatuses = ["pending", "running", "retrying", "completed", "failed", "cancelled"] as const;
 export const MAX_MARKETPLACE_SYNC_ATTEMPTS = 5;
 

@@ -3,7 +3,7 @@ import { knownGap } from "@/tests/helpers/known-gap";
 
 const m = vi.hoisted(() => {
   const model = () => ({ findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn(), upsert: vi.fn() });
-  const sdk = { product: { getItemList: vi.fn(), getItemBaseInfo: vi.fn(), getModelList: vi.fn() }, order: { getOrderList: vi.fn(), getOrdersDetail: vi.fn(), searchPackageList: vi.fn() }, payment: { getEscrowDetailBatch: vi.fn(), getPayoutInfo: vi.fn() }, returns: { getReturnList: vi.fn() }, ads: { getAllCpcAdsDailyPerformance: vi.fn(), getTotalBalance: vi.fn(), getProductLevelCampaignIdList: vi.fn(), getProductCampaignDailyPerformance: vi.fn(), getProductLevelCampaignSettingInfo: vi.fn(), getGmsCampaignPerformance: vi.fn() } };
+  const sdk = { product: { getItemList: vi.fn(), getItemBaseInfo: vi.fn(), getModelList: vi.fn() }, order: { getOrderList: vi.fn(), getOrdersDetail: vi.fn(), searchPackageList: vi.fn(), getPackageDetail: vi.fn() }, payment: { getEscrowDetailBatch: vi.fn(), getPayoutInfo: vi.fn() }, returns: { getReturnList: vi.fn() }, ads: { getAllCpcAdsDailyPerformance: vi.fn(), getTotalBalance: vi.fn(), getProductLevelCampaignIdList: vi.fn(), getProductCampaignDailyPerformance: vi.fn(), getProductLevelCampaignSettingInfo: vi.fn(), getGmsCampaignPerformance: vi.fn() } };
   return { sdk, db: { shopeeShop: model(), shopeeSyncLog: model(), shopeeProduct: model(), shopeeProductVariant: model(), shopeeOrder: model(), shopeeOrderItem: model(), shopeeReturn: model(), marketplaceFinancialRecord: model(), shopeeAdsDailyPerformance: model(), shopeeAdsCampaignDailyPerformance: model(), shopeeAdsObservation: model(), shopeeAdsCoverage: model() }, storeAds: vi.fn(), getSDK: vi.fn(), capability: vi.fn() };
 });
 vi.mock("@/prisma/client", () => ({ default: m.db, prisma: m.db }));
@@ -47,7 +47,7 @@ beforeEach(() => {
   m.sdk.product.getModelList.mockResolvedValue({ response: { model: [] } });
   m.sdk.order.getOrderList.mockResolvedValue({ response: { order_list: [], more: false } });
   m.sdk.order.getOrdersDetail.mockResolvedValue({ response: { order_list: [] } });
-  m.sdk.order.searchPackageList.mockResolvedValue({ response: { package_list: [], more: false } });
+  m.sdk.order.searchPackageList.mockResolvedValue({ response: { packages_list: [], pagination: { more: false } } });
   m.sdk.payment.getEscrowDetailBatch.mockResolvedValue({ response: { order_income_list: [] } });
   m.sdk.payment.getPayoutInfo.mockResolvedValue({ response: { payout_list: [], more: false } });
   m.sdk.returns.getReturnList.mockResolvedValue({ response: { return: [], more: false } });
@@ -122,12 +122,25 @@ describe("Shopee complete order persistence", () => {
   it.each([false, true])("writes source dates, correct variant attribution and operational facts (existing=%s)", async (existing) => {
     m.sdk.order.getOrderList.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1" }] } });
     m.sdk.order.getOrdersDetail.mockResolvedValue({ response: { order_list: [sourceOrder()] } });
-    m.sdk.order.searchPackageList.mockResolvedValue({ response: { package_list: [{ order_sn: "ORDER-1", package_number: "pkg", ship_by_date: 1700100000, days_to_ship: 2, fulfillment_status: "READY" }] } });
+    m.sdk.order.searchPackageList.mockResolvedValue({ response: { packages_list: [{ order_sn: "ORDER-1", package_number: "pkg" }], pagination: { more: false } } });
+    m.sdk.order.getPackageDetail.mockResolvedValue({ response: { package_list: [{ order_sn: "ORDER-1", package_number: "pkg", ship_by_date: 1700100000, days_to_ship: 2, fulfillment_status: "READY" }] } });
     if (!existing) m.db.shopeeOrder.findFirst.mockResolvedValue(null);
     expect(await syncShopeeOrders(123, "owner", 100, 200, "actor")).toEqual({ synced: 1, created: existing ? 0 : 1, updated: existing ? 1 : 0, errors: [] });
     const write = existing ? m.db.shopeeOrder.update : m.db.shopeeOrder.create;
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ shopId: "shop-db", userId: "owner", shopeeOrderId: "ORDER-1", shopeeCreatedAt: new Date(1700000000000), totalAmount: 25, currency: "MYR", packageNumber: "pkg", daysToShip: 2, updatedBy: "actor" }) }));
     expect(m.db.shopeeOrderItem.create).toHaveBeenCalledWith({ data: expect.objectContaining({ orderId: "order-db", variantId: "variant-db", shopeeItemId: 1, shopeeModelId: 2, sku: "BOX-RED", quantity: 2, price: 10, subtotal: 20 }) });
+  });
+
+  it("retains a prior deadline when package enrichment fails and maps base detail deadlines", async () => {
+    m.sdk.order.getOrderList.mockResolvedValue({ response: { order_list: [{ order_sn: "ORDER-1" }] } });
+    m.sdk.order.getOrdersDetail.mockResolvedValue({ response: { order_list: [sourceOrder()] } });
+    m.sdk.order.searchPackageList.mockRejectedValue(new Error("provider secret must not be logged"));
+    m.db.shopeeOrder.findFirst.mockResolvedValue({ id: "order-db", shipByDate: new Date("2026-10-28T15:59:59Z"), daysToShip: 0, packageNumber: "prior-pkg" });
+    await syncShopeeOrders(123, "owner");
+    expect(m.db.shopeeOrder.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ shipByDate: new Date("2026-10-28T15:59:59Z"), daysToShip: 0, packageNumber: "prior-pkg" }) }));
+    m.sdk.order.getOrdersDetail.mockResolvedValue({ response: { order_list: [{ ...sourceOrder(), ship_by_date: 1700100000, days_to_ship: 3 }] } });
+    await syncShopeeOrders(123, "owner");
+    expect(m.db.shopeeOrder.update).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ shipByDate: new Date(1700100000000), daysToShip: 3 }) }));
   });
 
   it.each([

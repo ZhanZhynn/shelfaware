@@ -112,11 +112,11 @@ export default function ShopeeSlaAlertWidget() {
           </div>
         ) : total === 0 ? (
           <div className="flex items-center gap-3 py-6">
-            <CheckCircle className="h-8 w-8 text-green-500" />
+            {data?.coverage?.countsAreConfirmed ? <CheckCircle className="h-8 w-8 text-green-500" /> : <AlertTriangle className="h-8 w-8 text-yellow-500" />}
             <div>
-              <p className="font-medium text-green-500">All Clear</p>
+              <p className="font-medium">{data?.coverage?.countsAreConfirmed ? "All Clear" : "Deadline coverage unverified"}</p>
               <p className="text-sm text-muted-foreground">
-                No orders approaching their ship-by deadline
+                {data?.coverage?.countsAreConfirmed ? "No orders approaching their ship-by deadline" : "No known deadlines found. Refresh the SLA backlog before relying on this count."}
               </p>
             </div>
           </div>

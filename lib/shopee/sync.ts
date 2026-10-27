@@ -18,6 +18,8 @@ import { sanitizeMarketplaceRawPayload, toInputJson } from "@/lib/marketplace/js
 import { setMarketplaceCapability } from "@/lib/marketplace/analytics/capabilities";
 import { projectShopeeAttributionForOrderIds } from "@/lib/marketplace-attribution/source-line-projector";
 import { isSharedSkuMappingAnalyticsEnabled } from "@/lib/marketplace-attribution/feature-flags";
+import { getShopeeSlaPackages, searchShopeeSlaPackages } from "@/lib/marketplace/sla/shopee-contract";
+import { slaTimestamp } from "@/lib/marketplace/sla/domain";
 
 // Shopee order status mapping to our internal status
 const ORDER_STATUS_MAP: Record<string, string> = {
@@ -621,8 +623,8 @@ async function storeEscrowFinancialRecords(input: {
 
 /**
  * Fetch package details for SLA tracking.
- * Uses searchPackageList (status=2 = ToProcess/unshipped) to get packages with ship_by_date.
- * SearchPackageListPackage already includes ship_by_date, days_to_ship, fulfillment_status.
+ * Discover ToProcess packages, then enrich them through getPackageDetail.
+ * Full operational backlog collection is handled by the dedicated SLA stream.
  * Returns a Map of order_sn → { shipByDate, packageNumber, fulfillmentStatus, daysToShip }.
  */
 async function fetchPackageDetails(
@@ -632,27 +634,20 @@ async function fetchPackageDetails(
 
   try {
     let cursor = "";
-    let hasMore = true;
-
-    while (hasMore) {
-      const searchResult = await sdk.order.searchPackageList({
-        filter: { package_status: 2 }, // 2 = ToProcess (unshipped)
-        pagination: { page_size: 100, cursor },
-        sort: { sort_field: "ship_by_date", sort_direction: "ASC" },
-      });
-
-      const resp = (searchResult as unknown as { response?: { more?: boolean; next_cursor?: string; package_list?: Array<Record<string, unknown>> } }).response;
-      const packages = resp?.package_list || [];
-      hasMore = resp?.more === true;
-      cursor = resp?.next_cursor || "";
-
+    const seen = new Set<string>();
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page = await searchShopeeSlaPackages(sdk, 1, cursor);
+      const packages = await getShopeeSlaPackages(sdk, [...new Set(page.packages.map((pkg) => pkg.package_number))]);
       for (const pkg of packages) {
         const orderSn = String(pkg.order_sn || "");
         if (!orderSn) continue;
 
-        const shipByDateUnix = Number(pkg.ship_by_date || 0);
-        const shipByDate = shipByDateUnix > 0 ? new Date(shipByDateUnix * 1000) : null;
-
+        const timestamp = slaTimestamp(pkg.ship_by_date, "seconds");
+        const shipByDate = timestamp ? new Date(timestamp) : null;
+        const previous = result.get(orderSn);
+        // The compatibility order field represents the earliest known package;
+        // the SLA projection retains every package independently.
+        if (previous?.shipByDate && (!shipByDate || previous.shipByDate <= shipByDate)) continue;
         result.set(orderSn, {
           shipByDate,
           packageNumber: String(pkg.package_number || ""),
@@ -660,9 +655,12 @@ async function fetchPackageDetails(
           daysToShip: pkg.days_to_ship != null ? Number(pkg.days_to_ship) : null,
         });
       }
+      if (!page.more || seen.has(page.next)) break;
+      seen.add(page.next);
+      cursor = page.next;
     }
   } catch (err) {
-    logger.warn(`[Shopee Sync] Failed to fetch package details: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn("[Shopee Sync] Package SLA enrichment unavailable; prior observations are retained", { code: err && typeof err === "object" && "code" in err ? String(err.code).replace(/[^A-Z_]/g, "").slice(0, 64) : "SLA_PROVIDER_REQUEST_FAILED" });
   }
 
   return result;
@@ -890,10 +888,10 @@ export async function syncShopeeOrders(
           rawFinancialPayload: sanitizeMarketplaceRawPayload({ order_income: orderIncome, buyer_payment_info: buyerPaymentInfo }),
           buyerPaymentMethod: String(buyerPaymentInfo.buyer_payment_method || detail?.payment_method || ""),
           // SLA fields from package detail
-          shipByDate: pkgInfo?.shipByDate || null,
-          packageNumber: pkgInfo?.packageNumber || null,
-          fulfillmentStatus: pkgInfo?.fulfillmentStatus || null,
-          daysToShip: pkgInfo?.daysToShip || null,
+          shipByDate: pkgInfo?.shipByDate ?? (slaTimestamp(detail?.ship_by_date, "seconds") ? new Date(slaTimestamp(detail?.ship_by_date, "seconds")!) : existing?.shipByDate ?? null),
+          packageNumber: pkgInfo?.packageNumber || existing?.packageNumber || null,
+          fulfillmentStatus: pkgInfo?.fulfillmentStatus || existing?.fulfillmentStatus || null,
+          daysToShip: typeof detail?.days_to_ship === "number" && Number.isInteger(detail.days_to_ship) && detail.days_to_ship >= 0 ? detail.days_to_ship : pkgInfo?.daysToShip ?? existing?.daysToShip ?? null,
         };
 
         let orderRecord;

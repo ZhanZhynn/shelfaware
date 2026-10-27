@@ -18,8 +18,9 @@ describe("shared marketplace task graph creation", () => {
     const input = { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-31T23:59:59+08:00" };
     const result = await createMarketplaceSyncRun({ platform, shopId: "shop", requestedByUserId: "actor", syncType: "all", input });
     expect(mocks.createRun).toHaveBeenCalledWith({ data: { platform, shopId: "shop", requestedByUserId: "actor", syncType: "all", input, idempotencyKey: null } });
-    expect(result.run.tasks.map(({ stream }) => stream)).toEqual(["orders", "products", "finance"]);
-    expect(result.run.tasks.every(({ required }) => required)).toBe(true);
+    expect(result.run.tasks.map(({ stream }) => stream)).toEqual(platform === "shopify" ? ["orders", "products", "finance"] : ["orders", "sla", "products", "finance"]);
+    expect(result.run.tasks.filter(({ stream }) => stream !== "sla").every(({ required }) => required)).toBe(true);
+    if (platform !== "shopify") expect(result.run.tasks.find(({ stream }) => stream === "sla")?.required).toBe(false);
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(mocks.outbox).toHaveBeenCalledWith({ data: { taskId: "task-0", dedupeKey: "initial" } });
   });
@@ -34,7 +35,7 @@ describe("shared marketplace task graph creation", () => {
     vi.setSystemTime(new Date("2026-10-21T11:00:00Z"));
     const result = await createMarketplaceSyncRun({ platform, shopId: "shop", requestedByUserId: "actor", syncType: "all" });
     expect(mocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ input: { dateFrom: "2026-10-06T11:00:00.000Z", dateTo: "2026-10-21T11:00:00.000Z" } }) }));
-    expect(result.run.tasks.map(({ stream }) => stream)).toEqual(["orders", "products", "finance"]);
+    expect(result.run.tasks.map(({ stream }) => stream)).toEqual(platform === "shopify" ? ["orders", "products", "finance"] : ["orders", "sla", "products", "finance"]);
   });
 
   it.each(["lazada", "tiktok", "shopify"] as const)("coalesces owned idempotent %s requests without recreating tasks", async (platform) => {
@@ -42,6 +43,12 @@ describe("shared marketplace task graph creation", () => {
     expect(await createMarketplaceSyncRun({ platform, shopId: "shop", requestedByUserId: "actor", syncType: "all", idempotencyKey: "request" })).toMatchObject({ coalesced: true, firstTaskId: "first" });
     expect(mocks.findRun).toHaveBeenCalledWith(expect.objectContaining({ where: { platform, shopId: "shop", requestedByUserId: "actor", idempotencyKey: "request" } }));
     expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
+  it.each(["lazada", "tiktok"] as const)("does not impose a creation-date window on standalone %s SLA refresh", async (platform) => {
+    const result = await createMarketplaceSyncRun({ platform, shopId: "shop", requestedByUserId: "actor", syncType: "sla" });
+    expect(result.run.tasks.map(({ stream }) => stream)).toEqual(["sla"]);
+    expect(mocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ input: null }) }));
   });
 
   it.each(["lazada", "tiktok", "shopify"] as const)("scopes %s polling to both requester and current shop ownership", async (platform) => {
@@ -59,7 +66,7 @@ describe("Lazada historical run creation", () => {
     const input = { dateFrom: "2026-08-01T00:00:00+08:00", dateTo: "2026-08-31T23:59:59+08:00" };
     const result = await createLazadaBoundedSyncRun({ shopId: "shop", requestedByUserId: "owner", syncType: "all", input });
     expect(mocks.createRun).toHaveBeenCalledWith({ data: { platform: "lazada", shopId: "shop", requestedByUserId: "owner", syncType: "all", input, idempotencyKey: null } });
-    expect(result.run.tasks.map((task) => task.stream)).toEqual(["orders", "products", "finance"]);
+    expect(result.run.tasks.map((task) => task.stream)).toEqual(["orders", "sla", "products", "finance"]);
     expect(mocks.outbox).toHaveBeenCalledWith({ data: { taskId: "task-0", dedupeKey: "initial" } });
   });
   it("reuses the same owned idempotent run without duplicating tasks", async () => {

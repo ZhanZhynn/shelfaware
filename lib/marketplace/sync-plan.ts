@@ -5,6 +5,7 @@ type SyncTask = { stream: string; required: boolean };
 
 export const shopeeAllTaskGraph = [
   { stream: "orders_and_escrow", required: true },
+  { stream: "sla", required: false },
   { stream: "products", required: true },
   { stream: "ads", required: false },
   { stream: "reviews", required: false },
@@ -16,10 +17,12 @@ const catalogTaskGraph = [
   { stream: "finance", required: true },
 ] as const;
 
+const fulfillmentTaskGraph = [catalogTaskGraph[0], { stream: "sla", required: false }, ...catalogTaskGraph.slice(1)] as const;
+
 export const marketplaceSyncTypesByPlatform: Record<MarketplacePlatform, readonly MarketplaceSyncType[]> = {
-  shopee: ["products", "orders", "finance", "returns", "ads", "payouts", "reviews", "all"],
-  lazada: ["products", "orders", "finance", "payouts", "all"],
-  tiktok: ["products", "orders", "finance", "payouts", "all"],
+  shopee: ["products", "orders", "finance", "returns", "ads", "payouts", "reviews", "sla", "all"],
+  lazada: ["products", "orders", "finance", "payouts", "sla", "all"],
+  tiktok: ["products", "orders", "finance", "payouts", "sla", "all"],
   shopify: ["products", "orders", "finance", "all"],
 };
 
@@ -39,7 +42,7 @@ export function marketplaceSyncTaskGraph(platform: MarketplacePlatform, syncType
   if (!supportsMarketplaceSync(platform, syncType)) return [];
   if (syncType === "all") {
     if (platform === "shopee") return shopeeAllTaskGraph;
-    return catalogTaskGraph;
+    return platform === "shopify" ? catalogTaskGraph : fulfillmentTaskGraph;
   }
   // TikTok finance is per-order: discover the requested order cohort first,
   // rather than treating an incomplete local order history as complete finance.

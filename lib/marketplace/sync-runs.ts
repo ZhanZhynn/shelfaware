@@ -7,6 +7,7 @@ import { marketplaceSyncDateRange, marketplaceSyncErrorCode, marketplaceSyncRetr
 import { marketplaceSyncTaskGraph } from "./sync-plan";
 import { matchesMarketplaceSyncExecution, MarketplaceSyncExecutionConflictError, type MarketplaceSyncExecution } from "./sync-execution";
 import { publicReviewCheckpoint } from "@/lib/shopee/reviews-domain";
+import { publicSlaCheckpoint } from "./sla/checkpoint";
 export { shopeeAllTaskGraph } from "./sync-plan";
 
 const taskStatuses = ["pending", "running", "retrying", "completed", "failed", "cancelled"] as const;
@@ -445,7 +446,7 @@ export function marketplaceSyncRunResponse(run: Awaited<ReturnType<typeof getMar
     completedAt: iso(run.completedAt),
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),
-    tasks: run.tasks.map((task) => ({ id: task.id, stream: task.stream, status: task.status, attempts: task.attempts, checkpoint: task.stream === "reviews" ? publicReviewCheckpoint(task.checkpoint) : task.checkpoint, metrics: task.metrics, lastError: task.lastError, errors: task.errors, nextAttemptAt: iso(task.nextAttemptAt), startedAt: iso(task.startedAt), completedAt: iso(task.completedAt) })),
+    tasks: run.tasks.map((task) => ({ id: task.id, stream: task.stream, status: task.status, attempts: task.attempts, checkpoint: task.stream === "reviews" ? publicReviewCheckpoint(task.checkpoint) : task.stream === "sla" ? publicSlaCheckpoint(task.checkpoint) : task.checkpoint, metrics: task.metrics, lastError: task.lastError, errors: task.errors, nextAttemptAt: iso(task.nextAttemptAt), startedAt: iso(task.startedAt), completedAt: iso(task.completedAt) })),
   };
 }
 

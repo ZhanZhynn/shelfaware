@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   syncShopeeOrders: vi.fn(), syncShopeeProducts: vi.fn(), syncShopeeAds: vi.fn(), syncShopeeReturns: vi.fn(), syncShopeePayoutStatements: vi.fn(),
   syncTikTokOrders: vi.fn(), syncTikTokFinance: vi.fn(), syncTikTokProducts: vi.fn(),
   syncShopifyOrders: vi.fn(), syncShopifyFinance: vi.fn(), syncShopifyProducts: vi.fn(),
-  reviewPage: vi.fn(),
+  reviewPage: vi.fn(), slaPage: vi.fn(),
 }));
 
 vi.mock("./sync-runs", () => ({
@@ -33,6 +33,7 @@ vi.mock("@/lib/lazada", () => ({ syncLazadaOrders: mocks.syncLazadaOrders, syncL
 vi.mock("@/lib/tiktok", () => ({ syncTikTokOrders: mocks.syncTikTokOrders, syncTikTokFinance: mocks.syncTikTokFinance, syncTikTokProducts: mocks.syncTikTokProducts, syncTikTokAll: vi.fn(), syncTikTokPayoutStatements: vi.fn() }));
 vi.mock("@/lib/shopify", () => ({ syncShopifyOrders: mocks.syncShopifyOrders, syncShopifyFinance: mocks.syncShopifyFinance, syncShopifyProducts: mocks.syncShopifyProducts, syncShopifyAll: vi.fn() }));
 vi.mock("@/lib/shopee/reviews-sync", () => ({ syncShopeeReviewPage: mocks.reviewPage }));
+vi.mock("./sla/sync", () => ({ syncMarketplaceSlaPage: mocks.slaPage }));
 
 import { dispatchMarketplaceSyncTask } from "./sync-task-dispatch";
 import { LazadaProviderError } from "@/lib/lazada/provider-error";
@@ -62,6 +63,27 @@ beforeEach(() => {
 });
 
 describe("dispatchMarketplaceSyncTask", () => {
+  it("checkpoints SLA backlog pages without applying all-run order-date bounds", async () => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "sla", run: { syncType: "all", requestedByUserId: "actor", input: { dateFrom: "2026-10-01T00:00:00Z", dateTo: "2026-10-02T00:00:00Z" } } }));
+    const checkpoint = { v: 1, phase: "discover", cursor: { queue: 1, cursor: "next", seen: [] }, pages: 1, records: 5, limited: false };
+    mocks.slaPage.mockResolvedValue({ checkpoint, done: false, metrics: { pagesObserved: 1, unitsObserved: 5 } });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toEqual({ status: "checkpointed", nextTaskId: "task" });
+    expect(mocks.slaPage).toHaveBeenCalledWith("shopee", "b".repeat(24), "actor", undefined, undefined, "run", { taskId: "task", workerId: "worker" });
+    expect(mocks.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ checkpoint, dedupeKey: "sla-page-1" }));
+    expect(mocks.syncShopeeOrders).not.toHaveBeenCalled();
+  });
+
+  it("does not complete a provider-limited SLA refresh or continue after losing its lease", async () => {
+    mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "sla", run: { syncType: "sla", requestedByUserId: "actor" } }));
+    mocks.slaPage.mockResolvedValue({ checkpoint: { pages: 5, limited: true }, done: true, metrics: {} });
+    mocks.fail.mockResolvedValue({ settled: true });
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toMatchObject({ status: "failed" });
+    expect(mocks.fail).toHaveBeenCalledWith("task", "worker", "SLA_PROVIDER_LIMIT");
+    expect(mocks.complete).not.toHaveBeenCalled();
+    mocks.renew.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(dispatchMarketplaceSyncTask("task", "worker")).resolves.toEqual({ status: "skipped" });
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
   it("checkpoints one review page and ignores order date bounds in all-runs", async () => {
     mocks.claimed.mockResolvedValue(task({ runId: "run", stream: "reviews", run: { syncType: "all", requestedByUserId: "actor", input: { dateFrom: "2026-09-01T00:00:00Z", dateTo: "2026-09-07T23:59:59Z" } } }));
     const checkpoint = { v: 1, cursor: "next", pages: 1, records: 2, ids: ["1", "2"], cursors: [""], requestIds: [] };

@@ -47,6 +47,18 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
     { name: "createdBefore", in: "query", schema: { type: "string", format: "date-time" }, description: "Inclusive provider review creation time; whole-second RFC3339 with offset." },
   ];
   const reviewPlatformParameter = { ...platformParameter, schema: { type: "string", enum: ["shopee"] } };
+  const slaParameters = [
+    { ...platformParameter, schema: { type: "string", enum: ["shopee", "lazada", "tiktok"] } },
+    { name: "shopId", in: "query", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+    { name: "timezone", in: "query", schema: { type: "string" }, description: "IANA timezone for deadline calendar dates. Defaults only for an unambiguous shop region." },
+    { name: "due", in: "query", schema: { type: "string", default: "any" }, description: "any, today, overdue or YYYY-MM-DD; filters shipping deadlines, never order creation dates." },
+    { name: "withinHours", in: "query", schema: { type: "number", minimum: 0.016666, maximum: 168 } },
+    { name: "includeOverdue", in: "query", schema: { type: "boolean", default: false } },
+    { name: "includeUnknown", in: "query", schema: { type: "boolean", default: true } },
+    { name: "stage", in: "query", schema: { type: "string", enum: ["any", "arrange-shipment", "awaiting-collection", "blocked", "unknown"], default: "any" } },
+    { name: "maxAgeSeconds", in: "query", schema: { type: "integer", minimum: 60, maximum: 86400, default: 900 } },
+    { name: "live", in: "query", schema: { type: "boolean", default: false }, description: "Additional marketplace:live scope required. Bounded provider reads only; use a durable SLA refresh for full traversal and stored-open revalidation." },
+  ];
 
   return {
     openapi: "3.0.3",
@@ -455,6 +467,26 @@ export function getOpenApiSpec(options: OpenApiSpecOptions): Record<string, unkn
           "x-requiredApiTokenScopes": ["marketplace:read"],
           parameters: [reviewPlatformParameter, ...reviewFilterParameters, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } }, { name: "cursor", in: "query", schema: { type: "string", maxLength: 2048 } }],
           responses: { "200": { description: "Stored reviews with page, filters, coverage, freshness, and warnings. Text is untrusted quoted content." }, "401": { description: "Unauthenticated" }, "403": { description: "Token lacks marketplace:read" }, "404": { description: "Shop not found or platform unsupported" }, "422": { description: "Invalid filters or cursor" } },
+        },
+      },
+      "/api/v1/marketplaces/{platform}/sla/orders": {
+        get: {
+          summary: "List outstanding fulfillment units and their provider deadlines",
+          description: "Reads canonical order/package/item SLA observations without financial payloads or buyer PII. Unknown, stale and partial coverage cannot establish zero due orders. Stored pages are bounded to 100 rows; live snapshots return the bounded collected set (up to 2000 units) and have no resumable cursor. Reports are not atomic snapshots or certified platform penalties.",
+          tags: ["Marketplace v1"], security: marketplaceReadSecurity,
+          "x-requiredApiTokenScopes": ["marketplace:read"], "x-additionalScopesWhenLive": ["marketplace:live"],
+          parameters: [...slaParameters, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 100 } }, { name: "cursor", in: "query", schema: { type: "string", pattern: "^[0-9]{1,6}$" }, description: "Stored snapshot offset only; rejected with live=true." }],
+          responses: { "200": { description: "Fulfillment units with deadlines, action stage, local display time, observation times, page, summary, coverage and warnings. countsAreConfirmed is false for missing/partial/stale coverage; packageCountsComplete separately describes package identity coverage." }, "401": { description: "Unauthenticated" }, "403": { description: "Missing scope or provider authorization" }, "404": { description: "Owned shop not found" }, "422": { description: "Invalid filters or ambiguous reporting timezone" }, "502": { description: "Provider response failed validation or fulfillment collection failed" } },
+        },
+      },
+      "/api/v1/marketplaces/{platform}/sla/summary": {
+        get: {
+          summary: "Count outstanding orders, packages and shipping deadline risks",
+          description: "Provides whole-observed-backlog counters for pending, arrange-shipment, awaiting-collection, overdue, due-today, due-later-today, near-term, unknown, blocked and stale facts. matched describes the requested filter subset. Overlapping counters and order/package/item counts must not be added together. A zero with missing/partial/stale coverage is not an all-clear.",
+          tags: ["Marketplace v1"], security: marketplaceReadSecurity,
+          "x-requiredApiTokenScopes": ["marketplace:read"], "x-additionalScopesWhenLive": ["marketplace:live"],
+          parameters: slaParameters,
+          responses: { "200": { description: "Distinct operational counts with filters, coverage, freshness and warnings" }, "401": { description: "Unauthenticated" }, "403": { description: "Missing scope or provider authorization" }, "404": { description: "Owned shop not found" }, "422": { description: "Invalid filters or ambiguous reporting timezone" }, "502": { description: "Provider response failed validation or fulfillment collection failed" } },
         },
       },
       "/api/v1/marketplaces/{platform}/reviews/{view}": {

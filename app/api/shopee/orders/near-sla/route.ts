@@ -11,6 +11,7 @@ import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { z } from "zod";
 import { marketplaceCacheScope, marketplaceOwnerIds } from "@/lib/marketplace/access";
+import { legacyShopeeOutstandingStatuses } from "@/lib/marketplace/sla/domain";
 
 const querySchema = z.object({
   hours: z
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
         total: 0,
         orders: [],
         thresholdHours: hours,
+        coverage: { state: "unverified", countsAreConfirmed: false },
       });
     }
 
@@ -81,7 +83,7 @@ export async function GET(request: NextRequest) {
     const orders = await prisma.shopeeOrder.findMany({
       where: {
         shopId: { in: shopIds },
-        orderStatus: { in: ["confirmed", "processing"] },
+        orderStatus: { in: legacyShopeeOutstandingStatuses },
         shipByDate: { not: null, lte: deadline },
       },
       orderBy: { shipByDate: "asc" },
@@ -101,6 +103,8 @@ export async function GET(request: NextRequest) {
     const result = {
       total: orders.length,
       thresholdHours: hours,
+      coverage: { state: "unverified", countsAreConfirmed: false },
+      warnings: ["Legacy order-level deadline observations do not establish a complete fresh backlog. Use marketplace sla reporting and refresh for verified coverage."],
       orders: orders.map((o) => {
         const msRemaining = (o.shipByDate?.getTime() ?? 0) - now.getTime();
         const hoursRemaining =
@@ -116,6 +120,7 @@ export async function GET(request: NextRequest) {
           orderStatus: o.orderStatus,
           shipByDate: o.shipByDate?.toISOString() ?? null,
           hoursRemaining,
+          overdue: hoursRemaining < 0,
           urgency,
           buyerUsername: o.buyerUsername,
           totalAmount: o.totalAmount,

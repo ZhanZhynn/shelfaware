@@ -3567,6 +3567,8 @@ class ApiClient {
       ApiResponse<{
         total: number;
         thresholdHours: number;
+        coverage?: { state: string; countsAreConfirmed: boolean };
+        warnings?: string[];
         orders: {
           id: string;
           orderId: string;

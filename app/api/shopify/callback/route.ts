@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/utils/auth";
 import {
-  verifyState,
   validateShopifyHmac,
   isTimestampFresh,
   exchangeCodeForToken,
@@ -15,8 +14,8 @@ import {
 } from "@/lib/shopify";
 import { shopifyCallbackQuerySchema } from "@/lib/validations/shopify";
 import { logger } from "@/lib/logger";
-import { getRequestBaseUrl } from "@/lib/api/response-helpers";
 import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
+import { assertShopOperator, consumeMarketplaceOAuth, marketplaceCallbackUri, MarketplaceOAuthError } from "@/lib/auth/marketplace-oauth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,6 +23,7 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    assertShopOperator(session);
 
     const { searchParams } = new URL(request.url);
 
@@ -43,34 +43,24 @@ export async function GET(request: NextRequest) {
 
     const { code, hmac, shop, state, timestamp } = validationResult.data;
 
-    // 1. Verify state (CSRF protection)
-    const stateData = verifyState(state);
-    if (!stateData) {
-      const baseUrl = getRequestBaseUrl(request);
-      return NextResponse.redirect(new URL("/admin/shopify?error=invalid_state", baseUrl));
-    }
-    if (stateData.userId !== session.id) {
-      const baseUrl = getRequestBaseUrl(request);
-      return NextResponse.redirect(new URL("/admin/shopify?error=state_mismatch", baseUrl));
-    }
-
     // 2. Validate timestamp freshness
     if (timestamp && !isTimestampFresh(timestamp)) {
-      const baseUrl = getRequestBaseUrl(request);
+      const baseUrl = marketplaceCallbackUri("shopify").origin;
       return NextResponse.redirect(new URL("/admin/shopify?error=expired_timestamp", baseUrl));
     }
 
     // 3. Validate HMAC signature
     if (!validateShopifyHmac(params, hmac)) {
-      const baseUrl = getRequestBaseUrl(request);
+      const baseUrl = marketplaceCallbackUri("shopify").origin;
       return NextResponse.redirect(new URL("/admin/shopify?error=invalid_hmac", baseUrl));
     }
+    const attempt = await consumeMarketplaceOAuth(request, session, "shopify", state, shop);
 
     // 4. Exchange code for access token
     const tokenData = await exchangeCodeForToken(shop, code);
     if (!tokenData?.access_token) {
-      const baseUrl = getRequestBaseUrl(request);
-      return NextResponse.redirect(new URL("/admin/shopify?error=token_exchange_failed", baseUrl));
+      const baseUrl = marketplaceCallbackUri("shopify").origin;
+      return attempt.finish(NextResponse.redirect(new URL("/admin/shopify?error=token_exchange_failed", baseUrl)));
     }
 
     // 5. Fetch shop info
@@ -89,11 +79,11 @@ export async function GET(request: NextRequest) {
 
     logger.info(`[Shopify Callback] Shop ${shop} connected for user ${session.id}`);
 
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(new URL("/admin/shopify", baseUrl));
+    const baseUrl = marketplaceCallbackUri("shopify").origin;
+    return attempt.finish(NextResponse.redirect(new URL("/admin/shopify", baseUrl)));
   } catch (error) {
+    if (error instanceof MarketplaceOAuthError) return NextResponse.json({ error: error.message }, { status: error.statusCode, headers: { "cache-control": "no-store" } });
     logger.error("[Shopify Callback] Error:", error);
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(new URL("/admin/shopify?error=callback_failed", baseUrl));
+    return NextResponse.json({ error: "Marketplace callback failed" }, { status: 500, headers: { "cache-control": "no-store" } });
   }
 }

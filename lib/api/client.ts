@@ -2030,8 +2030,8 @@ class ApiClient {
   shopify = {
     getAuthUrl: async (
       shop: string,
-    ): Promise<ApiResponse<{ url: string; state: string }>> => {
-      const response = await this.client.get<{ url: string; state: string }>(
+    ): Promise<ApiResponse<{ url: string }>> => {
+      const response = await this.client.get<{ url: string }>(
         `${API_ENDPOINTS.shopify.auth}?shop=${encodeURIComponent(shop)}`,
       );
       return {

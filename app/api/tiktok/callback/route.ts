@@ -4,15 +4,18 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { exchangeCodeForToken, getAuthorizedShops, getTikTokOAuthStateUserId } from "@/lib/tiktok";
+import { exchangeCodeForToken, getAuthorizedShops } from "@/lib/tiktok";
+import { getSessionFromRequest } from "@/utils/auth";
 import prisma from "@/prisma/client";
 import { tiktokCallbackQuerySchema } from "@/lib/validations/tiktok";
 import { logger } from "@/lib/logger";
-import { getRequestBaseUrl } from "@/lib/api/response-helpers";
 import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
+import { assertShopOperator, consumeMarketplaceOAuth, marketplaceCallbackUri, MarketplaceOAuthError } from "@/lib/auth/marketplace-oauth";
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await getSessionFromRequest(request);
+    assertShopOperator(session);
     const { searchParams } = new URL(request.url);
 
     const params = {
@@ -29,10 +32,8 @@ export async function GET(request: NextRequest) {
     }
 
     const { code, state } = validationResult.data;
-    const userId = getTikTokOAuthStateUserId(state);
-    if (!userId) {
-      return NextResponse.json({ error: "Invalid or expired authorization state" }, { status: 401 });
-    }
+    const attempt = await consumeMarketplaceOAuth(request, session, "tiktok", state);
+    const userId = attempt.userId;
 
     // Exchange code for token
     const tokenData = await exchangeCodeForToken(code);
@@ -110,13 +111,11 @@ export async function GET(request: NextRequest) {
     logger.info(`[TikTok Auth] Shop ${shopInfo.name} (${shopInfo.id}) connected for user ${userId}`);
 
     // Redirect to admin TikTok page
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(new URL("/admin/tiktok", baseUrl));
+    const baseUrl = marketplaceCallbackUri("tiktok").origin;
+    return attempt.finish(NextResponse.redirect(new URL("/admin/tiktok", baseUrl)));
   } catch (error) {
+    if (error instanceof MarketplaceOAuthError) return NextResponse.json({ error: error.message }, { status: error.statusCode, headers: { "cache-control": "no-store" } });
     logger.error("[TikTok Callback] Error:", error);
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(
-      new URL("/admin/tiktok?error=callback_failed", baseUrl),
-    );
+    return NextResponse.json({ error: "Marketplace callback failed" }, { status: 500, headers: { "cache-control": "no-store" } });
   }
 }

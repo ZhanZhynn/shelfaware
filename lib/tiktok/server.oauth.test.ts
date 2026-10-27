@@ -10,25 +10,10 @@ vi.mock("@/lib/env", () => ({
 }));
 
 import {
-  createTikTokOAuthState,
   getTikTokAuthUrl,
-  getTikTokOAuthStateUserId,
 } from "./server";
 
 describe("TikTok OAuth state", () => {
-  it("binds the callback to the initiating user", () => {
-    const state = createTikTokOAuthState("user-1");
-
-    expect(getTikTokOAuthStateUserId(state)).toBe("user-1");
-  });
-
-  it("rejects a tampered state", () => {
-    const state = createTikTokOAuthState("user-1");
-    const tamperedState = `${state.slice(0, -1)}x`;
-
-    expect(getTikTokOAuthStateUserId(tamperedState)).toBeNull();
-  });
-
   it("includes state in the authorization URL", () => {
     const authUrl = getTikTokAuthUrl("https://console.shelfaware.my/api/tiktok/callback", "state-value");
 

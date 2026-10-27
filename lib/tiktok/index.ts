@@ -5,8 +5,6 @@
 export {
   isTikTokConfigured,
   getTikTokAuthUrl,
-  createTikTokOAuthState,
-  getTikTokOAuthStateUserId,
   exchangeCodeForToken,
   refreshTikTokToken,
   persistTokens,

@@ -40,10 +40,10 @@ export type ShopifyOrderListQuery = z.infer<typeof shopifyOrderListQuerySchema>;
 export const shopifyCallbackQuerySchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
   hmac: z.string().min(1, "HMAC signature is required"),
-  shop: z.string().min(1, "Shop domain is required"),
-  state: z.string().min(1, "State nonce is required"),
+  shop: z.string().regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/),
+  state: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   host: z.string().optional(),
-  timestamp: z.string().optional(),
+  timestamp: z.string().regex(/^\d{1,16}$/),
 });
 
 export type ShopifyCallbackQuery = z.infer<typeof shopifyCallbackQuerySchema>;

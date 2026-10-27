@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
+import { safeMarketplaceConnectPath } from "@/lib/auth/marketplace-connect";
 
 /**
  * Login page client component (production-ready, no test accounts or OAuth).
@@ -28,6 +29,8 @@ export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) 
   // Redirect if already logged in (e.g. landed on /login with cookie).
   useEffect(() => {
     if (isLoggedIn && !navigatingFromSubmitRef.current) {
+      const connect = user?.role === "admin" ? safeMarketplaceConnectPath(searchParams.get("redirect")) : null;
+      if (connect) { window.location.assign(connect); return; }
       const dest = sourcing ? "/sourcing" :
         user?.role === "admin"
           ? "/admin"
@@ -184,6 +187,7 @@ export default function LoginPage({ sourcing = false }: { sourcing?: boolean }) 
             : "/";
 
       // Sourcers without admin role go to the sourcing portal
+      if (userData.role === "admin") dest = safeMarketplaceConnectPath(searchParams.get("redirect")) ?? dest;
       if (dest === "/" && userData.role !== "admin") {
         try {
           const access = await fetch("/api/sourcing/access", { credentials: "include" }).then((r) => r.json());

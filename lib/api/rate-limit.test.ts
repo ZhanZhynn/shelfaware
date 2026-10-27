@@ -19,6 +19,13 @@ describe("withRateLimit", () => {
 
     expect(response?.status).toBe(429);
     expect(response?.headers.get("X-RateLimit-Limit")).toBe("30");
+    expect(response?.headers.get("Retry-After")).toBe("42");
     await expect(response?.json()).resolves.toMatchObject({ error: "Rate limit exceeded", retryAfter: 42 });
+  });
+
+  it("fails closed if strict limiting itself throws", async () => {
+    mocks.checkRateLimit.mockRejectedValue(new Error("limiter failed"));
+    const response = await withRateLimit(new NextRequest("http://localhost/api/auth/login"), defaultRateLimits.auth);
+    expect(response?.status).toBe(503);
   });
 });

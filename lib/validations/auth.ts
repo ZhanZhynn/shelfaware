@@ -31,7 +31,7 @@ export type RegisterFormData = z.infer<typeof registerSchema>;
  * Used for both client-side form validation and server-side API validation
  */
 export const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
+  email: z.string().email("Invalid email address").max(254),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -45,4 +45,3 @@ export type LoginFormData = z.infer<typeof loginSchema>;
 
 /** API body alias for POST /api/auth/register */
 export const registerBodySchema = registerSchema;
-

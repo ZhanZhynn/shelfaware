@@ -8,6 +8,7 @@ import { User as PrismaUser } from "@prisma/client";
 import { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/prisma/client";
 import { assertSecureRuntimeSecrets } from "@/lib/security/runtime-secrets";
+import { isBrowserWrite, trustedRequestOrigin } from "@/lib/security/browser-request";
 
 /** Resolve the validated runtime value, rather than capturing a build-time key. */
 function sessionSigningSecret(): string {
@@ -86,6 +87,8 @@ export const getSessionServer = async (
  */
 export const getSessionFromRequest = async (request: {
   cookies: { get: (name: string) => { value: string } | undefined };
+  headers?: Headers;
+  method?: string;
 }): Promise<User | null> => {
   const cookie = request.cookies.get("session_id");
   const token = cookie?.value;
@@ -93,6 +96,10 @@ export const getSessionFromRequest = async (request: {
   if (!token) {
     return null;
   }
+
+  // Session-authenticated API writes share a CSRF boundary, not just page checks.
+  // Bearer actors are verified separately by requireApiActor before reaching here.
+  if (isBrowserWrite(request.method) && (!request.headers || !trustedRequestOrigin({ headers: request.headers }))) return null;
 
   const decoded = verifyToken(token);
   if (!decoded) {

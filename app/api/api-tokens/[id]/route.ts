@@ -3,8 +3,11 @@ import { getSessionFromRequest } from "@/utils/auth";
 import { createAuditLog } from "@/prisma/audit-log";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { prisma } from "@/prisma/client";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const blocked = guardBrowserWrite(request);
+  if (blocked) return blocked;
   const user = await getSessionFromRequest(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const limited = await withRateLimit(request, defaultRateLimits.strict, `api-tokens:revoke:${user.id}`);

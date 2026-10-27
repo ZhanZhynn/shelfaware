@@ -59,6 +59,7 @@ describe("API token routes", () => {
   it("returns the generated secret once after a validated create", async () => {
     const response = await POST(new NextRequest("http://localhost/api/api-tokens", {
       method: "POST",
+      headers: { origin: "http://localhost:3000", "content-type": "application/json" },
       body: JSON.stringify({ name: "Agent", scopes: ["marketplace:read"] }),
     }));
     const body = await response.json();
@@ -73,6 +74,7 @@ describe("API token routes", () => {
     mocks.withRateLimit.mockResolvedValue(NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 }));
     const response = await POST(new NextRequest("http://localhost/api/api-tokens", {
       method: "POST",
+      headers: { origin: "http://localhost:3000", "content-type": "application/json" },
       body: JSON.stringify({ name: "Agent", scopes: ["marketplace:read"] }),
     }));
 

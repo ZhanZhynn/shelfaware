@@ -5,6 +5,7 @@
  */
 
 import type { NextRequest } from "next/server";
+import { trustedBrowserOrigins } from "@/lib/security/browser-request";
 
 /**
  * Production URL
@@ -23,13 +24,6 @@ const configuredOrigin =
   toOrigin(process.env.AUTH_URL) ||
   toOrigin(process.env.NEXTAUTH_URL);
 const PRODUCTION_URL = configuredOrigin || "https://console-web.shelfaware.my";
-const PRODUCTION_ORIGINS = new Set([
-  PRODUCTION_URL,
-  toOrigin(process.env.NEXT_PUBLIC_APP_URL),
-  toOrigin(process.env.AUTH_URL),
-  toOrigin(process.env.NEXTAUTH_URL),
-  "https://console.shelfaware.my",
-].filter((origin): origin is string => !!origin));
 
 /**
  * Check if an origin is allowed for CORS
@@ -39,22 +33,7 @@ const PRODUCTION_ORIGINS = new Set([
  */
 export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
-
-  // Allow production URL
-  if (PRODUCTION_ORIGINS.has(origin)) {
-    return true;
-  }
-
-  // Allow localhost and Tailscale origins for development
-  if (process.env.NODE_ENV === "development") {
-    const devOriginRegex =
-      /^https?:\/\/(localhost|100\.72\.140\.36|100\.78\.46\.77)(:\d+)?$/;
-    if (devOriginRegex.test(origin)) {
-      return true;
-    }
-  }
-
-  return false;
+  try { return trustedBrowserOrigins().has(origin); } catch { return false; }
 }
 
 /**
@@ -86,6 +65,7 @@ export function createCorsHeaders(request: NextRequest): Headers {
   );
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   headers.set("Access-Control-Allow-Credentials", "true");
+  headers.set("Vary", "Origin");
 
   return headers;
 }

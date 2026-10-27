@@ -572,6 +572,22 @@ model User {
   apiTokens                ApiToken[]
 }
 
+model MarketplaceOAuthAttempt {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  stateHash    String    @unique
+  browserHash  String
+  userId       String    @db.ObjectId
+  provider     String
+  callbackUri  String
+  shopDomain   String?
+  createdAt    DateTime  @default(now()) @db.Date
+  expiresAt    DateTime  @db.Date
+  consumedAt   DateTime? @db.Date
+
+  @@index([expiresAt])
+  @@index([userId, provider, createdAt])
+}
+
 model ApiToken {
   id          String    @id @default(auto()) @map("_id") @db.ObjectId
   userId      String    @db.ObjectId

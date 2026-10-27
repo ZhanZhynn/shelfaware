@@ -1,4 +1,4 @@
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 import { SENTRY_TUNNEL_PATH } from "./lib/monitoring/sentry-config";
 import { buildNextProductionHeaderRules } from "./lib/vercel/production-headers";

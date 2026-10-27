@@ -6,6 +6,11 @@
 
 import { isAxiosError, isExpectedClientError } from "@/lib/api/errors";
 import { captureException, captureMessage } from "@/lib/monitoring/sentry";
+import { redactError, redactTelemetry } from "@/lib/security/redaction";
+
+function safeArguments(args: unknown[]): unknown[] {
+  return args.map((arg) => arg instanceof Error ? redactError(arg) : redactTelemetry(arg));
+}
 
 /**
  * Log levels
@@ -75,11 +80,12 @@ const createLogger = (level: LogLevel): (...args: unknown[]) => void => {
   if (process.env.NODE_ENV === "production") {
     // In production, send errors to Sentry and suppress console logs
     if (level === "error") {
-      return (...args: unknown[]) => {
-        const primary = resolvePrimaryError(args);
+      return (...rawArgs: unknown[]) => {
+        const primary = resolvePrimaryError(rawArgs);
         if (isExpectedClientError(primary)) {
           return;
         }
+        const args = safeArguments(rawArgs);
 
         // Pattern: logger.error("label:", realError) — use the Error instance as primary exception
         // so Sentry shows the real error message, not the label string
@@ -111,7 +117,8 @@ const createLogger = (level: LogLevel): (...args: unknown[]) => void => {
       };
     }
     if (level === "warn") {
-      return (...args: unknown[]) => {
+      return (...rawArgs: unknown[]) => {
+        const args = safeArguments(rawArgs);
         if (args.length > 0) {
           const message = String(args[0]);
           const context =
@@ -128,7 +135,7 @@ const createLogger = (level: LogLevel): (...args: unknown[]) => void => {
 
   // Development mode: log to console
   return (...args: unknown[]) => {
-    console[level](...args);
+    console[level](...safeArguments(args));
   };
 };
 

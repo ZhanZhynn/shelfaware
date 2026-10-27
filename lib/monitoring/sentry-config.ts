@@ -4,6 +4,23 @@
  */
 
 import type { ErrorEvent, EventHint } from "@sentry/nextjs";
+import type * as Sentry from "@sentry/nextjs";
+import { redactTelemetry } from "../security/redaction";
+
+type SentryOptions = Parameters<typeof Sentry.init>[0];
+
+// Prevent SDK auto-instrumentation from collecting raw provider requests at all.
+const dataCollection: NonNullable<SentryOptions["dataCollection"]> = {
+  userInfo: false,
+  cookies: false,
+  httpHeaders: { allow: ["content-type", "x-request-id"] },
+  httpBodies: [],
+  urlQueryParams: false,
+  graphQL: { document: false, variables: false },
+  genAI: { inputs: false, outputs: false },
+  databaseQueryData: false,
+  stackFrameVariables: false,
+};
 
 /** First-party tunnel; browser sends events here instead of ingest.de.sentry.io */
 export const SENTRY_TUNNEL_PATH = "/api/monitoring" as const;
@@ -68,21 +85,11 @@ export function scrubSentryEvent(
   event: ErrorEvent,
   _hint?: EventHint,
 ): ErrorEvent | null {
-  if (isBrowserTranslationRemoveChildError(event)) {
+  const safe = redactTelemetry(event);
+  if (isBrowserTranslationRemoveChildError(safe)) {
     return null;
   }
-
-  if (event.request) {
-    delete event.request.headers?.authorization;
-    delete event.request.headers?.cookie;
-    delete event.request.cookies;
-  }
-  if (event.contexts?.request?.headers) {
-    const headers = event.contexts.request.headers as Record<string, unknown>;
-    delete headers.authorization;
-    delete headers.cookie;
-  }
-  return event;
+  return safe;
 }
 
 /** Shared ignore list (extensions, benign browser noise) */
@@ -114,10 +121,31 @@ export function getServerSentryInitOptions() {
     tracesSampleRate: getTracesSampleRate(),
     enableLogs: true,
     sendDefaultPii: false,
+    dataCollection,
+    streamGenAiSpans: false,
+    traceLifecycle: "static",
     release: process.env.NEXT_PUBLIC_SENTRY_RELEASE || undefined,
     beforeSend: scrubSentryEvent,
+    beforeBreadcrumb: redactTelemetry,
+    beforeSendTransaction: redactTelemetry,
+    beforeSendSpan: redactTelemetry,
+    beforeSendLog: redactTelemetry,
+    beforeSendMetric: redactTelemetry,
     ignoreErrors: SENTRY_IGNORE_ERRORS,
   } as const;
+}
+
+/** Replay recordings travel in separate envelopes, outside beforeSend hooks. */
+export function getReplayPrivacyOptions() {
+  return {
+    maskAllText: true,
+    maskAllInputs: true,
+    blockAllMedia: true,
+    maskAttributes: ["title", "placeholder", "aria-label", "href", "src", "value", "action"],
+    networkDetailAllowUrls: [],
+    networkCaptureBodies: false,
+    beforeAddRecordingEvent: redactTelemetry,
+  };
 }
 
 /** Client-only options (tunnel, replay, browser tracing) */
@@ -129,12 +157,20 @@ export function getClientSentryInitOptions() {
     tracesSampleRate: getTracesSampleRate(),
     enableLogs: true,
     sendDefaultPii: false,
+    dataCollection,
+    streamGenAiSpans: false,
+    traceLifecycle: "static",
     release: process.env.NEXT_PUBLIC_SENTRY_RELEASE || undefined,
     // Routes browser envelopes through our domain (see SENTRY_TUNNEL_PATH + next.config tunnelRoute)
     tunnel: SENTRY_TUNNEL_PATH,
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1,
     beforeSend: scrubSentryEvent,
+    beforeBreadcrumb: redactTelemetry,
+    beforeSendTransaction: redactTelemetry,
+    beforeSendSpan: redactTelemetry,
+    beforeSendLog: redactTelemetry,
+    beforeSendMetric: redactTelemetry,
     ignoreErrors: SENTRY_IGNORE_ERRORS,
   } as const;
 }

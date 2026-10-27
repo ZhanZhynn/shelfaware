@@ -7,11 +7,14 @@ import jwt from "jsonwebtoken";
 import { User as PrismaUser } from "@prisma/client";
 import { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/prisma/client";
+import { assertSecureRuntimeSecrets } from "@/lib/security/runtime-secrets";
 
-/** Secret for signing/verifying JWT; must be set in environment. */
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  throw new Error("JWT_SECRET environment variable is required");
+/** Resolve the validated runtime value, rather than capturing a build-time key. */
+function sessionSigningSecret(): string {
+  assertSecureRuntimeSecrets();
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET environment variable is required");
+  return secret;
 }
 
 type User = PrismaUser;
@@ -21,7 +24,7 @@ const isServer = typeof window === "undefined";
 
 /** Creates a signed JWT containing userId; used after login to set session cookie. */
 export const generateToken = (userId: string): string => {
-  const token = jwt.sign({ userId }, JWT_SECRET, { expiresIn: "1h" });
+  const token = jwt.sign({ userId }, sessionSigningSecret(), { expiresIn: "1h" });
   return token;
 };
 
@@ -37,13 +40,15 @@ export const verifyToken = (token: string): { userId: string } | null => {
     return null;
   }
 
+  // Signing/verification never accepts a build-phase bypass at request time.
+  const secret = sessionSigningSecret();
   try {
     // Check if jwt is properly imported
     if (typeof jwt === "undefined" || !jwt.verify) {
       return null;
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    const decoded = jwt.verify(token, secret) as { userId: string };
     return decoded;
   } catch (error) {
     return null;

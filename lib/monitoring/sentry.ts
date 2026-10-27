@@ -5,6 +5,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { getSentryDsn, isSentryEnabled } from "./sentry-config";
+import { redactError, redactTelemetry, redactText } from "@/lib/security/redaction";
 
 export {
   getSentryDsn,
@@ -21,12 +22,13 @@ export function captureException(
   }
 
   try {
+    const safeError = redactError(error);
     if (context) {
-      Sentry.captureException(error, {
-        contexts: { custom: context },
+      Sentry.captureException(safeError, {
+        contexts: { custom: redactTelemetry(context) },
       });
     } else {
-      Sentry.captureException(error);
+      Sentry.captureException(safeError);
     }
   } catch {
     // SDK not initialized
@@ -44,12 +46,12 @@ export function captureMessage(
 
   try {
     if (context) {
-      Sentry.captureMessage(message, {
+      Sentry.captureMessage(redactText(message), {
         level,
-        contexts: { custom: context },
+        contexts: { custom: redactTelemetry(context) },
       });
     } else {
-      Sentry.captureMessage(message, { level });
+      Sentry.captureMessage(redactText(message), { level });
     }
   } catch {
     // SDK not initialized
@@ -123,12 +125,12 @@ export function addBreadcrumb(
   }
 
   try {
-    Sentry.addBreadcrumb({
+    Sentry.addBreadcrumb(redactTelemetry({
       message,
       category,
       level,
       data,
-    });
+    }));
   } catch {
     // SDK not initialized
   }

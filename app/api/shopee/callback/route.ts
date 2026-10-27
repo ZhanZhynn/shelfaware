@@ -9,8 +9,8 @@ import { exchangeCodeForToken, getShopeeShopInfo } from "@/lib/shopee";
 import { prisma } from "@/prisma/client";
 import { shopeeCallbackQuerySchema } from "@/lib/validations/shopee";
 import { logger } from "@/lib/logger";
-import { getRequestBaseUrl } from "@/lib/api/response-helpers";
 import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
+import { assertShopOperator, consumeMarketplaceOAuth, marketplaceCallbackUri, MarketplaceOAuthError } from "@/lib/auth/marketplace-oauth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    assertShopOperator(session);
     const userId = session.id;
     const { searchParams } = new URL(request.url);
 
@@ -36,7 +37,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { code, shop_id } = validationResult.data;
+    const { code, shop_id, state } = validationResult.data;
+    const attempt = await consumeMarketplaceOAuth(request, session, "shopee", state!);
 
     // Exchange code for token
     const token = await exchangeCodeForToken(code, shop_id);
@@ -98,15 +100,13 @@ export async function GET(request: NextRequest) {
     logger.info(`[Shopee Auth] Shop ${shop_id} connected for user ${userId}`);
 
     // Redirect to admin Shopee page
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(
+    const baseUrl = marketplaceCallbackUri("shopee").origin;
+    return attempt.finish(NextResponse.redirect(
       new URL("/admin/shopee", baseUrl),
-    );
+    ));
   } catch (error) {
+    if (error instanceof MarketplaceOAuthError) return NextResponse.json({ error: error.message }, { status: error.statusCode, headers: { "cache-control": "no-store" } });
     logger.error("[Shopee Callback] Error:", error);
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(
-      new URL("/admin/shopee?error=callback_failed", baseUrl),
-    );
+    return NextResponse.json({ error: "Marketplace callback failed" }, { status: 500, headers: { "cache-control": "no-store" } });
   }
 }

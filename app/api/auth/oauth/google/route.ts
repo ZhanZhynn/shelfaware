@@ -9,6 +9,8 @@ import { logger } from "@/lib/logger";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
 import { safeSourcingDestination } from "@/lib/sourcing/routing";
+import { safeMarketplaceConnectPath } from "@/lib/auth/marketplace-connect";
+import { marketplaceConnectOrigin } from "@/lib/security/browser-request";
 
 /**
  * GET /api/auth/oauth/google
@@ -41,8 +43,8 @@ export async function GET(request: NextRequest) {
     const requestedCallback = searchParams.get("callback");
     const callbackUrl = requestedCallback?.startsWith("/sourcing") || requestedCallback?.startsWith("/admin/sourcing")
       ? safeSourcingDestination(requestedCallback)
-      : "/";
-    const baseUrl = getRequestBaseUrl(request);
+      : safeMarketplaceConnectPath(requestedCallback) ?? "/";
+    const baseUrl = marketplaceConnectOrigin(callbackUrl) ?? getRequestBaseUrl(request);
     const redirectUri = new URL(
       "/api/auth/oauth/google/callback",
       baseUrl

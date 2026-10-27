@@ -5,6 +5,7 @@ import { createAuditLog } from "@/prisma/audit-log";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { apiTokenScopes, createApiToken, isApiTokenScope, publicApiToken } from "@/lib/auth/api-token";
 import { prisma } from "@/prisma/client";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 
 const createTokenSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -26,6 +27,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const blocked = guardBrowserWrite(request, true);
+  if (blocked) return blocked;
   const user = await getSessionFromRequest(request);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const limited = await withRateLimit(request, defaultRateLimits.strict, `api-tokens:create:${user.id}`);

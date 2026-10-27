@@ -9,8 +9,8 @@ import { createLazadaShopContext, exchangeLazadaCodeForToken, persistTokens } fr
 import prisma from "@/prisma/client";
 import { lazadaCallbackQuerySchema } from "@/lib/validations/lazada";
 import { logger } from "@/lib/logger";
-import { getRequestBaseUrl } from "@/lib/api/response-helpers";
 import { invalidateMarketplaceAnalytics } from "@/lib/cache/cache-utils";
+import { assertShopOperator, consumeMarketplaceOAuth, marketplaceCallbackUri, MarketplaceOAuthError } from "@/lib/auth/marketplace-oauth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    assertShopOperator(session);
     const userId = session.id;
     const { searchParams } = new URL(request.url);
 
@@ -35,7 +36,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { code } = validationResult.data;
+    const { code, state } = validationResult.data;
+    const attempt = await consumeMarketplaceOAuth(request, session, "lazada", state!);
 
     // Exchange code for token
     const token = await exchangeLazadaCodeForToken(code);
@@ -104,15 +106,13 @@ export async function GET(request: NextRequest) {
     logger.info(`[Lazada Auth] Seller ${sellerId} connected for user ${userId}`);
 
     // Redirect to admin Lazada page
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(
+    const baseUrl = marketplaceCallbackUri("lazada").origin;
+    return attempt.finish(NextResponse.redirect(
       new URL("/admin/lazada", baseUrl),
-    );
+    ));
   } catch (error) {
+    if (error instanceof MarketplaceOAuthError) return NextResponse.json({ error: error.message }, { status: error.statusCode, headers: { "cache-control": "no-store" } });
     logger.error("[Lazada Callback] Error:", error);
-    const baseUrl = getRequestBaseUrl(request);
-    return NextResponse.redirect(
-      new URL("/admin/lazada?error=callback_failed", baseUrl),
-    );
+    return NextResponse.json({ error: "Marketplace callback failed" }, { status: 500, headers: { "cache-control": "no-store" } });
   }
 }

@@ -9,6 +9,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
+import { safeMarketplaceConnectPath } from "@/lib/auth/marketplace-connect";
+import { marketplaceConnectOrigin } from "@/lib/security/browser-request";
 
 const PUBLIC = new Set(["/login", "/register"]);
 
@@ -21,8 +23,10 @@ export function proxy(request: NextRequest) {
 
   const session = request.cookies.get("session_id")?.value;
   if (!session || session === "null" || session === "undefined") {
-    const baseUrl = getRequestBaseUrl(request);
+    const connect = safeMarketplaceConnectPath(pathname + request.nextUrl.search);
+    const baseUrl = marketplaceConnectOrigin(connect) ?? getRequestBaseUrl(request);
     const url = new URL("/login", baseUrl);
+    if (connect) url.searchParams.set("redirect", connect);
     return NextResponse.redirect(url);
   }
 

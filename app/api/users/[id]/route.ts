@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 import { getSessionFromRequest } from "@/utils/auth";
 import { logger } from "@/lib/logger";
 import {
@@ -183,6 +184,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const blocked = guardBrowserWrite(request, true);
+  if (blocked) return blocked;
   try {
     const rateLimitResponse = await withRateLimit(
       request,
@@ -291,6 +294,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const blocked = guardBrowserWrite(request);
+  if (blocked) return blocked;
   try {
     const rateLimitResponse = await withRateLimit(
       request,

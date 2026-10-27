@@ -176,10 +176,10 @@ export const LAZADA_URLS = {
   tokenRefresh: "https://auth.lazada.com/rest/auth/token/refresh",
 } as const;
 
-export function getLazadaAuthUrl(redirectUri: string): string | null {
+export function getLazadaAuthUrl(redirectUri: string, state: string): string | null {
   if (!isLazadaConfigured()) return null;
   const { appKey, appSecret } = getLazadaCredentials();
-  return new LazadaModule({ appKey, appSecret }).generateAuthLink(redirectUri).url;
+  return new LazadaModule({ appKey, appSecret }).generateAuthLink(redirectUri, appKey, state).url;
 }
 
 export async function exchangeLazadaCodeForToken(code: string): Promise<LazadaResponseAccessToken | null> {

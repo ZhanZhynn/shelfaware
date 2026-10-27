@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 import { getSessionFromRequest } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
 import { logger } from "@/lib/logger";
@@ -57,11 +58,15 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const blocked = guardBrowserWrite(request);
+  if (blocked) return blocked;
   try {
     const session = await getSessionFromRequest(request);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    if (session.role !== "admin" || (session.status ?? "approved") !== "approved") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const { id } = await params;
     const ownerIds = await marketplaceOwnerIds(session);

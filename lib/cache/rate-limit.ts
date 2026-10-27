@@ -1,213 +1,77 @@
-/**
- * Rate Limiting Utilities
- * Redis-based rate limiting with sliding window algorithm
- */
-
+import { createHash, randomUUID } from "node:crypto";
 import { getRedis } from "./redis";
 import { logger } from "@/lib/logger";
 
-/**
- * Rate limit configuration
- */
-interface RateLimitConfig {
-  /**
-   * Maximum number of requests allowed
-   */
-  limit: number;
-  /**
-   * Time window in seconds
-   */
-  window: number;
-  /**
-   * Identifier for the rate limit (e.g., user ID, IP address)
-   */
-  identifier: string;
-  /** Use the bounded local limiter when Redis is unavailable or errors. */
-  strict?: boolean;
+interface RateLimitConfig { limit: number; window: number; identifier: string; strict?: boolean }
+export interface RateLimitResult { allowed: boolean; current: number; limit: number; reset: number }
+
+/** Server time, prune/count/add/expire in one atomic operation. */
+export const RATE_LIMIT_SCRIPT = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local window = tonumber(ARGV[2]) * 1000
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - window)
+local count = redis.call('ZCARD', KEYS[1])
+local allowed = 0
+if count < tonumber(ARGV[1]) then
+  allowed = 1
+  if ARGV[4] == '1' then
+    redis.call('ZADD', KEYS[1], now, ARGV[3])
+    redis.call('PEXPIRE', KEYS[1], window)
+    count = count + 1
+  end
+end
+local first = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+local reset = window
+if #first > 0 then reset = math.max(1, tonumber(first[2]) + window - now) end
+return {allowed, count, math.ceil(reset / 1000)}
+`;
+
+const MAX_IDENTIFIERS = 10_000;
+const fallbackRequests = new Map<string, { events: number[]; expires: number }>();
+
+function keyFor(config: RateLimitConfig) {
+  if (!Number.isInteger(config.limit) || config.limit < 1 || config.limit > 1_000 || !Number.isInteger(config.window) || config.window < 1 || config.window > 86_400 || config.identifier.length > 1_024) throw new Error("Invalid rate limit configuration");
+  return `rate-limit:v2:${config.limit}:${config.window}:${createHash("sha256").update(config.identifier).digest("hex")}`;
 }
 
-const MAX_FALLBACK_IDENTIFIERS = 10_000;
-const strictFallbackRequests = new Map<string, number[]>();
-
-function checkStrictFallback(config: RateLimitConfig): RateLimitResult {
+function fallback(config: RateLimitConfig, key: string, consume: boolean): RateLimitResult {
   const now = Date.now();
-  const windowStart = now - config.window * 1000;
-  const requests = (strictFallbackRequests.get(config.identifier) ?? []).filter((time) => time > windowStart);
-
-  if (!strictFallbackRequests.has(config.identifier) && strictFallbackRequests.size >= MAX_FALLBACK_IDENTIFIERS) {
-    for (const [identifier, entries] of strictFallbackRequests) {
-      if (!entries.some((time) => time > windowStart)) strictFallbackRequests.delete(identifier);
-    }
-    if (strictFallbackRequests.size >= MAX_FALLBACK_IDENTIFIERS) {
-      strictFallbackRequests.delete(strictFallbackRequests.keys().next().value!);
-    }
+  const windowMs = config.window * 1000;
+  const events = (fallbackRequests.get(key)?.events ?? []).filter((time) => time > now - windowMs);
+  if (!fallbackRequests.has(key) && fallbackRequests.size >= MAX_IDENTIFIERS) {
+    for (const [id, entry] of fallbackRequests) if (entry.expires <= now) fallbackRequests.delete(id);
+    // Never evict an active blocked identity to make room for attacker-chosen IDs.
+    if (fallbackRequests.size >= MAX_IDENTIFIERS) return { allowed: false, current: config.limit, limit: config.limit, reset: config.window };
   }
-
-  if (requests.length >= config.limit) {
-    strictFallbackRequests.set(config.identifier, requests);
-    return { allowed: false, current: requests.length, limit: config.limit, reset: Math.max(1, Math.ceil(((requests[0] ?? now) + config.window * 1000 - now) / 1000)) };
-  }
-
-  requests.push(now);
-  strictFallbackRequests.set(config.identifier, requests);
-  return { allowed: true, current: requests.length, limit: config.limit, reset: config.window };
+  const allowed = events.length < config.limit;
+  if (allowed && consume) events.push(now);
+  if (consume || fallbackRequests.has(key)) fallbackRequests.set(key, { events, expires: (events[events.length - 1] ?? now) + windowMs });
+  return { allowed, current: events.length, limit: config.limit, reset: Math.max(1, Math.ceil(((events[0] ?? now) + windowMs - now) / 1000)) };
 }
 
-export function resetStrictRateLimitFallbackForTests() {
-  strictFallbackRequests.clear();
-}
+export function resetStrictRateLimitFallbackForTests() { fallbackRequests.clear(); }
 
-/**
- * Rate limit result
- */
-export interface RateLimitResult {
-  /**
-   * Whether the request is allowed
-   */
-  allowed: boolean;
-  /**
-   * Current request count in the window
-   */
-  current: number;
-  /**
-   * Maximum allowed requests
-   */
-  limit: number;
-  /**
-   * Time remaining until the window resets (in seconds)
-   */
-  reset: number;
-}
-
-/**
- * Check rate limit using sliding window algorithm
- *
- * @param config - Rate limit configuration
- * @returns Promise<RateLimitResult> - Rate limit result
- */
-export async function checkRateLimit(
-  config: RateLimitConfig
-): Promise<RateLimitResult> {
-  const redis = getRedis();
-  if (!redis) {
-    if (config.strict) return checkStrictFallback(config);
-    // Non-sensitive endpoints retain graceful degradation when Redis is unavailable.
-    logger.warn("Redis not available, rate limiting disabled");
-    return {
-      allowed: true,
-      current: 0,
-      limit: config.limit,
-      reset: config.window,
-    };
-  }
-
+async function evaluate(config: RateLimitConfig, consume: boolean): Promise<RateLimitResult> {
+  const key = keyFor(config);
+  // Mirror strict requests locally so an outage does not start a fresh budget.
+  const local = config.strict ? fallback(config, key, consume) : null;
+  const open = { allowed: true, current: 0, limit: config.limit, reset: config.window };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const key = `rate-limit:${config.identifier}`;
-    const now = Date.now();
-    const windowStart = now - config.window * 1000;
-
-    // Use sorted set for sliding window
-    // Remove old entries outside the window
-    await redis.zremrangebyscore(key, 0, windowStart);
-
-    // Count current entries in the window
-    const current = await redis.zcard(key);
-
-    if (current >= config.limit) {
-      // Rate limit exceeded
-      const oldestEntry = await redis.zrange(key, 0, 0, {
-        withScores: true,
-      }) as Array<{ member: string; score: number }>;
-      const resetTime = oldestEntry.length > 0 && oldestEntry[0]
-        ? Math.ceil((oldestEntry[0].score + config.window * 1000 - now) / 1000)
-        : config.window;
-
-      return {
-        allowed: false,
-        current,
-        limit: config.limit,
-        reset: Math.max(0, resetTime),
-      };
-    }
-
-    // Add current request to the window
-    await redis.zadd(key, { score: now, member: `${now}-${Math.random()}` });
-    // Set expiration for the key (cleanup after window expires)
-    await redis.expire(key, config.window);
-
-    return {
-      allowed: true,
-      current: current + 1,
-      limit: config.limit,
-      reset: config.window,
-    };
-  } catch (error) {
-    logger.error("Rate limit check failed:", error);
-    if (config.strict) return checkStrictFallback(config);
-    // Graceful degradation: allow request on error
-    return {
-      allowed: true,
-      current: 0,
-      limit: config.limit,
-      reset: config.window,
-    };
-  }
+    const redis = getRedis();
+    if (!redis) return local ?? open;
+    const result = await Promise.race([
+      redis.eval<[number, number, string, string], number[]>(RATE_LIMIT_SCRIPT, [key], [config.limit, config.window, randomUUID(), consume ? "1" : "0"]),
+      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Rate limiter timed out")), 1_000); }),
+    ]);
+    if (!Array.isArray(result) || result.length !== 3 || result.some((value) => !Number.isInteger(value)) || ![0, 1].includes(result[0]!) || result[1]! < 0 || result[1]! > config.limit || result[2]! < 0 || result[2]! > config.window) throw new Error("Invalid rate limiter result");
+    return { allowed: result[0] === 1, current: result[1]!, limit: config.limit, reset: Math.max(1, result[2]!) };
+  } catch {
+    logger.warn("Distributed rate limiter unavailable; applying configured fallback");
+    return local ?? open;
+  } finally { if (timer) clearTimeout(timer); }
 }
 
-/**
- * Get rate limit status without incrementing the counter
- *
- * @param identifier - Rate limit identifier
- * @param limit - Maximum allowed requests
- * @param window - Time window in seconds
- * @returns Promise<RateLimitResult> - Rate limit status
- */
-export async function getRateLimitStatus(
-  identifier: string,
-  limit: number,
-  window: number
-): Promise<RateLimitResult> {
-  const redis = getRedis();
-  if (!redis) {
-    return {
-      allowed: true,
-      current: 0,
-      limit,
-      reset: window,
-    };
-  }
-
-  try {
-    const key = `rate-limit:${identifier}`;
-    const now = Date.now();
-    const windowStart = now - window * 1000;
-
-    // Remove old entries
-    await redis.zremrangebyscore(key, 0, windowStart);
-
-    // Count current entries
-    const current = await redis.zcard(key);
-
-    const oldestEntry = (await redis.zrange(key, 0, 0, {
-      withScores: true,
-    })) as Array<{ member: string; score: number }>;
-    const resetTime = oldestEntry.length > 0 && oldestEntry[0]
-      ? Math.ceil((oldestEntry[0].score + window * 1000 - now) / 1000)
-      : window;
-
-    return {
-      allowed: current < limit,
-      current,
-      limit,
-      reset: Math.max(0, resetTime),
-    };
-  } catch (error) {
-    logger.error("Rate limit status check failed:", error);
-    return {
-      allowed: true,
-      current: 0,
-      limit,
-      reset: window,
-    };
-  }
-}
+export const checkRateLimit = (config: RateLimitConfig) => evaluate(config, true);
+export const getRateLimitStatus = (identifier: string, limit: number, window: number) => evaluate({ identifier, limit, window }, false);

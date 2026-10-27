@@ -12,12 +12,15 @@ import { createCorsHeaders, handleCorsPreflight } from "@/lib/api/cors";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/prisma/client";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 
 /**
  * POST /api/auth/login
  * Authenticate user and create session
  */
 export async function POST(request: NextRequest) {
+  const blocked = guardBrowserWrite(request, true);
+  if (blocked) return blocked;
   try {
     const rateLimitResponse = await withRateLimit(
       request,
@@ -53,6 +56,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, password } = validationResult.data;
+
+    const accountLimited = await withRateLimit(request, defaultRateLimits.authAccount, `login-account:${email.trim().toLowerCase()}`);
+    if (accountLimited) return accountLimited;
 
     // Find user
     const user = await prisma.user.findUnique({ where: { email } });

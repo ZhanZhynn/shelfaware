@@ -14,6 +14,7 @@ import { prisma } from "@/prisma/client";
 import { notifyAdminsOfPendingRegistration } from "@/lib/notifications/in-app";
 import { sendPendingRegistrationAdminEmail } from "@/lib/email/notifications";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 
 /**
  * Attempt to insert a user document. If a non-sparse unique index on
@@ -57,6 +58,8 @@ async function insertUserWithRetry(
  * Register a new user (pending admin approval)
  */
 export async function POST(request: NextRequest) {
+  const blocked = guardBrowserWrite(request, true);
+  if (blocked) return blocked;
   let mongoClient: MongoClient | null = null;
   try {
     const rateLimitResponse = await withRateLimit(

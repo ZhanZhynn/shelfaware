@@ -11,7 +11,7 @@ import { logger } from "@/lib/logger";
  * Generate the Shopee authorization URL for OAuth flow.
  * Redirect the user to this URL to authorize the app.
  */
-export function getShopeeAuthUrl(): string | null {
+export function getShopeeAuthUrl(state: string): string | null {
   if (!isShopeeConfigured()) return null;
 
   const sdk = getPublicShopeeSDK();
@@ -22,7 +22,7 @@ export function getShopeeAuthUrl(): string | null {
     return null;
   }
 
-  return sdk.getAuthorizationUrl(redirectUri);
+  return sdk.getAuthorizationUrl(redirectUri, { state });
 }
 
 /**

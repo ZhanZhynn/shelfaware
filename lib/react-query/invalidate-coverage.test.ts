@@ -36,6 +36,8 @@ const COMPONENT_FETCH_CRUD_ALLOWLIST = new Set([
   // API token lifecycle is self-contained client state and does not back an
   // inventory query key.
   "components/admin/ApiTokenSettings.tsx",
+  // OAuth attempts are authentication metadata, not cached inventory resources.
+  "components/marketplace/MarketplaceConnect.tsx",
 ]);
 
 /** Domains with query sub-keys beyond list/detail — invalidate-all must use *.all */
@@ -134,6 +136,11 @@ const API_WRITE_EXEMPT = new Set([
   // inventory or marketplace response derives from these records.
   "app/api/api-tokens/route.ts",
   "app/api/api-tokens/[id]/route.ts",
+  // Authorization initiation only creates single-use OAuth attempt records.
+  "app/api/shopee/auth/route.ts",
+  "app/api/lazada/auth/route.ts",
+  "app/api/tiktok/auth/route.ts",
+  "app/api/shopify/auth/route.ts",
   // Sync creation only persists durable queue state. The authenticated worker
   // invalidates marketplace caches after the provider operation completes.
   "app/api/v1/marketplaces/[platform]/syncs/route.ts",

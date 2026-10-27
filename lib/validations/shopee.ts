@@ -48,7 +48,7 @@ export type ShopeeShopDisconnect = z.infer<typeof shopeeShopDisconnectSchema>;
 export const shopeeCallbackQuerySchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
   shop_id: z.coerce.number().int().positive("Shop ID is required"),
-  state: z.string().optional(),
+  state: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 
 export type ShopeeCallbackQuery = z.infer<typeof shopeeCallbackQuerySchema>;

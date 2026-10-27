@@ -70,34 +70,6 @@ export function getShopifyAuthUrl(shopDomain: string, state: string): string {
   return `https://${shopDomain}/admin/oauth/authorize?${params.toString()}`;
 }
 
-// ─── State Nonce (CSRF protection) ────────────────────────────────────────
-
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-const stateStore = new Map<string, { userId: string; shopDomain: string; expiresAt: number }>();
-
-export function generateState(userId: string, shopDomain: string): string {
-  const nonce = crypto.randomBytes(16).toString("hex");
-  stateStore.set(nonce, {
-    userId,
-    shopDomain,
-    expiresAt: Date.now() + STATE_TTL_MS,
-  });
-  // Garbage-collect expired entries
-  for (const [k, v] of stateStore.entries()) {
-    if (v.expiresAt < Date.now()) stateStore.delete(k);
-  }
-  return nonce;
-}
-
-export function verifyState(state: string): { userId: string; shopDomain: string } | null {
-  const entry = stateStore.get(state);
-  if (!entry) return null;
-  stateStore.delete(state); // one-time use
-  if (entry.expiresAt < Date.now()) return null;
-  return { userId: entry.userId, shopDomain: entry.shopDomain };
-}
-
 // ─── HMAC Validation ──────────────────────────────────────────────────────
 
 /**

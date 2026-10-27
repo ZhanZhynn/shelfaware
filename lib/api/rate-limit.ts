@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkRateLimit, type RateLimitResult } from "@/lib/cache";
 import { logger } from "@/lib/logger";
+import { trustedClientIdentifier } from "@/lib/security/client-ip";
 
 /**
  * Rate limit configuration for API routes
@@ -39,10 +40,7 @@ export const defaultRateLimits = {
     limit: 600,
     window: 60,
     getIdentifier: (request: NextRequest) => {
-      // Try to get user ID from session, fallback to IP
-      const userId = request.headers.get("x-user-id");
-      if (userId) return `user:${userId}`;
-      return `ip:${request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "unknown"}`;
+      return trustedClientIdentifier(request.headers);
     },
   },
   /**
@@ -53,9 +51,7 @@ export const defaultRateLimits = {
     window: 60,
     strictFallback: true,
     getIdentifier: (request: NextRequest) => {
-      const userId = request.headers.get("x-user-id");
-      if (userId) return `user:${userId}`;
-      return `ip:${request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "unknown"}`;
+      return trustedClientIdentifier(request.headers);
     },
   },
   /**
@@ -64,10 +60,14 @@ export const defaultRateLimits = {
   auth: {
     limit: 20,
     window: 60,
+    strictFallback: true,
     getIdentifier: (request: NextRequest) => {
-      // Use IP for auth endpoints to prevent brute force
-      return `ip:${request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "unknown"}`;
+      return trustedClientIdentifier(request.headers);
     },
+  },
+  authAccount: {
+    limit: 10, window: 900, strictFallback: true,
+    getIdentifier: (request: NextRequest) => trustedClientIdentifier(request.headers),
   },
 } as const;
 
@@ -104,7 +104,9 @@ export async function withRateLimit(
     headers.set("X-RateLimit-Reset", (Date.now() / 1000 + result.reset).toString());
 
     if (!result.allowed) {
-      logger.warn(`Rate limit exceeded for ${identifier}: ${result.current}/${config.limit}`);
+      headers.set("Retry-After", String(Math.max(1, Math.ceil(result.reset))));
+      headers.set("Cache-Control", "no-store");
+      logger.warn("Rate limit exceeded", { current: result.current, limit: config.limit, window: config.window });
       return NextResponse.json(
         {
           success: false,
@@ -124,7 +126,7 @@ export async function withRateLimit(
     return null;
   } catch (error) {
     logger.error("Rate limit check failed:", error);
-    // Graceful degradation: allow request on error
+    if (config.strictFallback) return NextResponse.json({ error: "Authentication rate limiter unavailable" }, { status: 503, headers: { "retry-after": "60" } });
     return null;
   }
 }

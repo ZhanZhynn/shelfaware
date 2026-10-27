@@ -21,13 +21,16 @@ import { sendPendingRegistrationAdminEmail } from "@/lib/email/notifications";
 import { withRateLimit, defaultRateLimits } from "@/lib/api/rate-limit";
 import { getRequestBaseUrl } from "@/lib/api/response-helpers";
 import { hasSourcingAccess, safeSourcingDestination, sourcingDestination } from "@/lib/sourcing/portal";
+import { safeMarketplaceConnectPath } from "@/lib/auth/marketplace-connect";
+import { marketplaceConnectOrigin } from "@/lib/security/browser-request";
 
 /**
  * Helper to redirect to login with error/pending message and clear OAuth cookies.
  * Ensures oauth_state and oauth_callback cookies are always cleaned up.
  */
 function redirectToLogin(request: NextRequest, path: string): NextResponse {
-  const baseUrl = getRequestBaseUrl(request);
+  const connect = safeMarketplaceConnectPath(request.cookies.get("oauth_callback")?.value);
+  const baseUrl = marketplaceConnectOrigin(connect) ?? getRequestBaseUrl(request);
   const response = NextResponse.redirect(new URL(path, baseUrl));
   response.cookies.delete("oauth_state");
   response.cookies.delete("oauth_callback");
@@ -168,7 +171,8 @@ export async function GET(request: NextRequest) {
     // Exchange authorization code for access token
     const clientId = getGoogleClientId()!;
     const clientSecret = getGoogleClientSecret()!;
-    const baseUrl = getRequestBaseUrl(request);
+    const connectPath = safeMarketplaceConnectPath(request.cookies.get("oauth_callback")?.value);
+    const baseUrl = marketplaceConnectOrigin(connectPath) ?? getRequestBaseUrl(request);
     const redirectUri = new URL(
       "/api/auth/oauth/google/callback",
       baseUrl
@@ -290,7 +294,8 @@ export async function GET(request: NextRequest) {
             ? "/supplier"
             : "/";
 
-      const redirectUrl = new URL(roleDest, baseUrl);
+      const connect = user.role === "admin" ? safeMarketplaceConnectPath(callback) : null;
+      const redirectUrl = new URL(connect ?? roleDest, baseUrl);
       redirectUrl.searchParams.set("oauth_success", "true");
 
       // Create response and set cookies

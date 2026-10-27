@@ -7,12 +7,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createCorsHeaders, handleCorsPreflight } from "@/lib/api/cors";
 import { logger } from "@/lib/logger";
+import { guardBrowserWrite } from "@/lib/security/browser-request";
 
 /**
  * POST /api/auth/logout
  * Clear session cookie and logout user
  */
 export async function POST(request: NextRequest) {
+  const blocked = guardBrowserWrite(request);
+  if (blocked) return blocked;
   try {
     // Handle CORS
     const responseHeaders = createCorsHeaders(request);

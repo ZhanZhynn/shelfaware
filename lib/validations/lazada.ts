@@ -38,7 +38,7 @@ export type LazadaOrderListQuery = z.infer<typeof lazadaOrderListQuerySchema>;
 // --- Callback Query ---
 export const lazadaCallbackQuerySchema = z.object({
   code: z.string().min(1, "Authorization code is required"),
-  state: z.string().optional(),
+  state: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 });
 
 export type LazadaCallbackQuery = z.infer<typeof lazadaCallbackQuerySchema>;

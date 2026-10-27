@@ -228,6 +228,14 @@ Uncomment and set in `.env` only if you need the feature:
 | **App URL**       | `NEXT_PUBLIC_APP_URL` — Metadata and some redirects (defaults to Vercel URL if unset)                                                                                                                                                      |
 | **Internal API**  | `INTERNAL_API_KEY` — Bearer token for server-to-server calls (e.g. cron hitting `/api/invoices/reminders`)                                                                                                                                 |
 
+**Image optimization:** set `NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT` to your exact HTTPS
+ImageKit account endpoint **before building**, for example
+`https://ik.imagekit.io/your_account`. `IMAGEKIT_URL_ENDPOINT` is the fallback when
+the public variable is unset. The Next.js optimizer only accepts that delivery
+host/path, without query parameters or redirects; an unset endpoint permits no
+remote optimization. Rebuild after changing it. See the
+[Phase 0 rollout notes](docs/plans/security-remediation-phase-0.md) for verification.
+
 ### Minimal `.env` to run on localhost
 
 ```env

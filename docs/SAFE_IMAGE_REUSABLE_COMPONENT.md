@@ -18,6 +18,12 @@ Use this pattern in **any Next.js App Router project** where you show **remote i
 
 ## Setup checklist (new project)
 
+**ShelfAware configuration:** this repository uses `buildImageOptimizationConfig`
+in `lib/image-optimization.ts` to allow only its configured ImageKit account.
+Set `NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT` at build time; do not replace that policy
+with a hostname-wide allowlist from the generic example below. Native/unoptimized
+avatar images do not need permission to use the server-side optimizer.
+
 1. **`next.config.ts`** — allow remote hostnames (same as for `next/image`):
 
    ```ts
